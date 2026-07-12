@@ -3,6 +3,7 @@ set -Eeuo pipefail
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/stackstead-delivery-test.XXXXXX")"
+tmp="$(CDPATH= cd -- "$tmp" && pwd -P)"
 trap 'rm -rf "$tmp"' EXIT
 
 for file in LICENSE SECURITY.md CONTRIBUTING.md docs/quickstart.md docs/agent-setup-v1.md; do

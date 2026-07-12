@@ -53,7 +53,7 @@ jobs:
       - run: scripts/docker-integration.sh
 
   macos:
-    if: github.event_name == 'pull_request' || inputs.revision != ''
+    if: github.event_name == 'pull_request' || inputs.revision != '' || github.ref == 'refs/heads/main'
     runs-on: macos-15
     timeout-minutes: 30
     steps:
