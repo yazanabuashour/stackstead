@@ -1,0 +1,193 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    name: Resolve release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      revision: ${{ steps.release.outputs.revision }}
+      tag: ${{ steps.release.outputs.tag }}
+      version: ${{ steps.release.outputs.version }}
+    env:
+      RELEASE_TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Resolve tag, revision, and package version
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]
+          git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"
+          revision="$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")"
+          git merge-base --is-ancestor "$revision" refs/remotes/origin/main
+          package_version="$(git show "$revision:Cargo.toml" | sed -n 's/^version = "\([^"]*\)"/\1/p' | head -n 1)"
+          test -n "$package_version"
+          test "${RELEASE_TAG#v}" = "$package_version"
+          {
+            echo "revision=$revision"
+            echo "tag=$RELEASE_TAG"
+            echo "version=$package_version"
+          } >> "$GITHUB_OUTPUT"
+
+  validate:
+    name: Validate exact release revision
+    needs: preflight
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+    with:
+      revision: ${{ needs.preflight.outputs.revision }}
+
+  build:
+    name: Build ${{ matrix.target }}
+    needs:
+      - preflight
+      - validate
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            suffix: ""
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            suffix: ""
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+            suffix: ""
+          - runner: macos-15
+            target: aarch64-apple-darwin
+            suffix: ""
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ needs.preflight.outputs.revision }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # 2026-07-09
+        with:
+          toolchain: 1.91.1
+          targets: ${{ matrix.target }}
+      - name: Build and smoke-test locked release binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --locked --release --target "${{ matrix.target }}"
+          scripts/test-release-install.sh \
+            "target/${{ matrix.target }}/release/stackstead${{ matrix.suffix }}"
+          mkdir dist
+          cp "target/${{ matrix.target }}/release/stackstead${{ matrix.suffix }}" \
+            "dist/stackstead-${{ matrix.target }}${{ matrix.suffix }}"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-${{ matrix.target }}-${{ needs.preflight.outputs.revision }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 1
+
+  assemble:
+    name: Assemble checksum-bound release
+    needs:
+      - preflight
+      - build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ needs.preflight.outputs.revision }}
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: release-*-${{ needs.preflight.outputs.revision }}
+          path: artifacts
+      - name: Assemble and checksum release
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir dist
+          expected=(
+            stackstead-x86_64-unknown-linux-gnu
+            stackstead-aarch64-unknown-linux-gnu
+            stackstead-x86_64-apple-darwin
+            stackstead-aarch64-apple-darwin
+          )
+          for asset in "${expected[@]}"; do
+            mapfile -t matches < <(find artifacts -type f -name "$asset")
+            [[ ${#matches[@]} -eq 1 ]]
+            cp "${matches[0]}" "dist/$asset"
+          done
+          (cd dist && sha256sum stackstead-* > BINARY_SHA256SUMS)
+          STACKSTEAD_REPOSITORY="$GITHUB_REPOSITORY" \
+            packaging/homebrew/render-formula.sh \
+            "$RELEASE_VERSION" dist/BINARY_SHA256SUMS dist/stackstead.rb
+          cp LICENSE dist/LICENSE
+          rm dist/BINARY_SHA256SUMS
+          (cd dist && sha256sum LICENSE stackstead-* stackstead.rb > SHA256SUMS)
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-bundle-${{ needs.preflight.outputs.revision }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    name: Publish approved release
+    needs:
+      - preflight
+      - assemble
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: release
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
+      RELEASE_REVISION: ${{ needs.preflight.outputs.revision }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ env.RELEASE_REVISION }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Reverify tag before publication
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$RELEASE_REVISION"
+          test "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")" = "$RELEASE_REVISION"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-bundle-${{ needs.preflight.outputs.revision }}
+          path: dist
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: dist/*

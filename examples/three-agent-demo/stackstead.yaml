@@ -1,0 +1,62 @@
+version: "1"
+kind: StacksteadProject
+
+project:
+  name: stackstead-three-agent-proof
+
+source:
+  provider: git-worktree
+  base: main
+
+state:
+  # Keep parallel copies of this proof isolated while leaving state outside the repository.
+  root: "../.stackstead-state-three-agent-demo"
+
+runtime:
+  provider: docker-compose
+  files:
+    - docker-compose.yml
+  project_name_template: "{{ project.name }}-{{ stackstead.id }}"
+
+resources:
+  ports:
+    strategy: deterministic
+    base: 43000
+    stride: 20
+    expose:
+      postgres:
+        container: 5432
+      web:
+        container: 80
+        url: "http://127.0.0.1:{{ ports.web }}"
+
+database:
+  postgres:
+    strategy: compose-volume
+    service: postgres
+    database: app
+    user: app
+    password: app
+
+env:
+  file: ".stackstead/.env"
+  generate:
+    POSTGRES_PORT: "{{ ports.postgres }}"
+    WEB_PORT: "{{ ports.web }}"
+    DATABASE_URL: "postgres://app:app@127.0.0.1:{{ ports.postgres }}/app"
+    STACKSTEAD_ID: "{{ stackstead.id }}"
+
+agent:
+  context_file: ".stackstead/AGENT_CONTEXT.md"
+  rules:
+    - "Use only this stackstead's manifest, ports, Compose project, and database."
+    - "Never infer another agent's runtime from a branch name or directory name."
+    - "Inspect this stackstead before migrations, seeds, recovery, or teardown."
+
+health:
+  timeout_seconds: 30
+  interval_millis: 500
+  checks:
+    - name: web
+      url: "{{ urls.web }}"
+      expect_status: 200

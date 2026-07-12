@@ -1,0 +1,9 @@
+services:
+  web:
+    image: node:18-alpine
+    working_dir: /workspace
+    command: ["node", "index.js"]
+    ports:
+      - "127.0.0.1:${WEB_PORT}:3000"
+    volumes:
+      - .:/workspace

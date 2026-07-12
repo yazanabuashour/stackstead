@@ -1,0 +1,5 @@
+# Merge this section into .webmux.yaml.
+# Replace /absolute/trusted/stackstead-hooks with an owner-controlled installation.
+lifecycleHooks:
+  postCreate: 'cd -- "$WEBMUX_WORKTREE_PATH" && /absolute/trusted/stackstead-hooks/adopt-current.sh'
+  preRemove: 'cd -- "$WEBMUX_WORKTREE_PATH" && STACKSTEAD_MANAGER_TEARDOWN=1 /absolute/trusted/stackstead-hooks/destroy-adopted-current.sh'

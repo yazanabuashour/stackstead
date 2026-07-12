@@ -1,0 +1,7 @@
+/target/
+.stackstead/
+.env
+.env.*
+!.env.example
+!.env.*.example
+.DS_Store

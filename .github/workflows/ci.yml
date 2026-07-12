@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_call:
+    inputs:
+      revision:
+        description: Exact commit to validate
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.repository }}-${{ inputs.revision || github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ inputs.revision == '' }}
+
+jobs:
+  rust:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ inputs.revision || github.sha }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # 2026-07-09
+        with:
+          toolchain: 1.91.1
+          components: clippy,rustfmt
+      - run: cargo fmt --check
+      - run: cargo clippy --locked --all-targets --all-features -- -D warnings
+      - run: cargo test --locked
+      - run: scripts/test-install.sh
+      - run: cargo build --locked --release
+      - run: scripts/test-release-install.sh target/release/stackstead
+      - run: scripts/test-delivery.sh
+
+  docker-integration:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ inputs.revision || github.sha }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # 2026-07-09
+        with:
+          toolchain: 1.91.1
+      - run: cargo build --locked
+      - run: scripts/docker-integration.sh
+
+  macos:
+    if: github.event_name == 'pull_request' || inputs.revision != ''
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ inputs.revision || github.sha }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # 2026-07-09
+        with:
+          toolchain: 1.91.1
+      - run: cargo test --locked
+      - run: scripts/test-install.sh
+      - run: scripts/test-delivery.sh

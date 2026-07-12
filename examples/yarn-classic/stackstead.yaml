@@ -1,0 +1,51 @@
+version: "1"
+kind: StacksteadProject
+
+project:
+  name: stackstead-yarn-classic
+
+source:
+  provider: git-worktree
+  base: main
+
+state:
+  root: "../.stacksteads"
+
+runtime:
+  provider: docker-compose
+  files:
+    - docker-compose.yml
+  project_name_template: "{{ project.name }}-{{ stackstead.id }}"
+
+resources:
+  ports:
+    strategy: deterministic
+    base: 41000
+    stride: 20
+    expose:
+      web:
+        container: 3000
+        url: "http://127.0.0.1:{{ ports.web }}"
+
+dependencies:
+  provider: yarn-classic
+  install:
+    command: "yarn install --frozen-lockfile"
+    shell: false
+  link:
+    enabled: true
+    link_folder: ".stackstead/yarn-links"
+    command: "sh ./scripts/link-packages.sh"
+    shell: false
+
+env:
+  file: ".stackstead/.env"
+  generate:
+    WEB_PORT: "{{ ports.web }}"
+    STACKSTEAD_ID: "{{ stackstead.id }}"
+
+agent:
+  context_file: ".stackstead/AGENT_CONTEXT.md"
+  rules:
+    - "Use the generated YARN_LINK_FOLDER for Yarn Classic links."
+    - "Do not use a shared global Yarn link folder for this stackstead."

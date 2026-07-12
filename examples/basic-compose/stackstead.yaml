@@ -1,0 +1,52 @@
+version: "1"
+kind: StacksteadProject
+
+project:
+  name: stackstead-basic
+
+source:
+  provider: git-worktree
+  base: main
+
+state:
+  root: "../.stacksteads"
+
+runtime:
+  provider: docker-compose
+  files:
+    - docker-compose.yml
+  project_name_template: "{{ project.name }}-{{ stackstead.id }}"
+
+resources:
+  ports:
+    strategy: deterministic
+    base: 39000
+    stride: 20
+    expose:
+      web:
+        container: 80
+        url: "http://127.0.0.1:{{ ports.web }}"
+      postgres:
+        container: 5432
+
+database:
+  postgres:
+    strategy: compose-volume
+    service: postgres
+    database: app
+    user: app
+    password: app
+env:
+  file: ".stackstead/.env"
+  generate:
+    WEB_PORT: "{{ ports.web }}"
+    POSTGRES_PORT: "{{ ports.postgres }}"
+    DATABASE_URL: "postgres://app:app@127.0.0.1:{{ ports.postgres }}/app"
+    STACKSTEAD_ID: "{{ stackstead.id }}"
+
+agent:
+  context_file: ".stackstead/AGENT_CONTEXT.md"
+  rules:
+    - "Use only the generated web and Postgres ports."
+    - "Do not connect this example to a shared database."
+    - "Inspect logs and database status before changing startup configuration."

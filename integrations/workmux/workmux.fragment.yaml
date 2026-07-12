@@ -1,0 +1,7 @@
+# Merge these keys into .workmux.yaml.
+# Replace /absolute/trusted/stackstead-hooks with an owner-controlled installation.
+post_create:
+  - /absolute/trusted/stackstead-hooks/adopt-current.sh
+
+pre_remove:
+  - STACKSTEAD_MANAGER_TEARDOWN=1 /absolute/trusted/stackstead-hooks/destroy-adopted-current.sh
