@@ -20,11 +20,15 @@ redirected.
 
 ## Install
 
-Release binaries do not require Rust. The checksummed curl installer, release workflow, supported platform baselines, and generated Homebrew formula are documented in [Installation](docs/install.md). Until `yazanabuashour/stackstead` is published, build locally:
+The first immutable binary release is being prepared. Until it is published,
+install from this checkout with the pinned Rust toolchain:
 
 ```sh
 cargo install --locked --path .
 ```
+
+The immutable release installer, supported platform baselines, and generated
+Homebrew formula are documented in [Installation](docs/install.md).
 
 Prerequisites are Git and Docker with the Compose plugin. Stackstead v0.1 owns
 Compose runtimes; native host processes must be wrapped in Compose or launched

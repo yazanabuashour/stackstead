@@ -24,7 +24,7 @@ jobs:
     env:
       RELEASE_TAG: ${{ github.ref_name }}
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -81,7 +81,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ needs.preflight.outputs.revision }}
           persist-credentials: false
@@ -118,7 +118,7 @@ jobs:
     env:
       RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ needs.preflight.outputs.revision }}
           persist-credentials: false
@@ -146,9 +146,10 @@ jobs:
           STACKSTEAD_REPOSITORY="$GITHUB_REPOSITORY" \
             packaging/homebrew/render-formula.sh \
             "$RELEASE_VERSION" dist/BINARY_SHA256SUMS dist/stackstead.rb
+          cp install.sh dist/install.sh
           cp LICENSE dist/LICENSE
           rm dist/BINARY_SHA256SUMS
-          (cd dist && sha256sum LICENSE stackstead-* stackstead.rb > SHA256SUMS)
+          (cd dist && sha256sum LICENSE install.sh stackstead-* stackstead.rb > SHA256SUMS)
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: release-bundle-${{ needs.preflight.outputs.revision }}
@@ -170,7 +171,7 @@ jobs:
       RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
       RELEASE_REVISION: ${{ needs.preflight.outputs.revision }}
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ env.RELEASE_REVISION }}
           fetch-depth: 0

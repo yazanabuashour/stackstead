@@ -3,25 +3,20 @@
 Release binaries do not require a Rust toolchain. Stackstead itself still expects
 Git and Docker with the Compose plugin when it manages a runtime.
 
-## Install before the first release
+## Build from source
 
-Until the public repository and its first immutable release exist, install from
-this checkout with a current Rust toolchain:
+The first immutable binary release is being prepared. Until it is published,
+install from this checkout with the pinned Rust toolchain:
 
 ```sh
 cargo install --locked --path .
 ```
 
-## Release installer after publication
+## Release installer
 
-After `yazanabuashour/stackstead` is public and has a release, install its
-checksummed binary with:
-
-```sh
-curl --proto '=https' --tlsv1.2 -fsSL \
-  https://raw.githubusercontent.com/yazanabuashour/stackstead/main/install.sh |
-  sh -s -- --repository yazanabuashour/stackstead
-```
+Each release publishes `install.sh` as an immutable, checksummed release asset.
+After the first release is available, this guide will provide its pinned
+installer command.
 
 The installer selects the current macOS or supported glibc Linux architecture, downloads
 the matching release binary and `SHA256SUMS`, verifies the exact asset checksum,
@@ -30,13 +25,6 @@ needed. Linux x86-64 releases require glibc 2.35 or newer; Linux ARM64 releases
 currently require glibc 2.39 or newer. The installer detects musl, unknown
 libcs, and older glibc before downloading and fails with a build-from-source
 instruction.
-
-Pin a release or choose another destination with:
-
-```sh
-sh install.sh --repository yazanabuashour/stackstead --version 0.1.0 \
-  --install-dir "$HOME/bin"
-```
 
 `STACKSTEAD_REPOSITORY`, `STACKSTEAD_RELEASE_BASE`, `STACKSTEAD_VERSION`, and
 `STACKSTEAD_INSTALL_DIR` are equivalent environment variables. A private mirror
@@ -57,7 +45,7 @@ it locally from a release checksum file:
 
 ```sh
 STACKSTEAD_REPOSITORY=yazanabuashour/stackstead \
-  packaging/homebrew/render-formula.sh 0.1.0 SHA256SUMS stackstead.rb
+  packaging/homebrew/render-formula.sh 0.1.1 SHA256SUMS stackstead.rb
 ```
 
 The formula covers Intel and ARM macOS and the documented glibc Linux baselines.

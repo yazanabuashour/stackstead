@@ -197,8 +197,9 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
 
         let directory = tempfile::tempdir().unwrap();
-        let manifest = manifest(directory.path());
-        let script = directory.path().join("probe");
+        let root = directory.path().canonicalize().unwrap();
+        let manifest = manifest(&root);
+        let script = root.join("probe");
         let script_body = format!(
             r#"#!/bin/sh
 test "$API_TOKEN" = "private" || exit 90
