@@ -45,7 +45,7 @@ it locally from a release checksum file:
 
 ```sh
 STACKSTEAD_REPOSITORY=yazanabuashour/stackstead \
-  packaging/homebrew/render-formula.sh 0.1.1 SHA256SUMS stackstead.rb
+  packaging/homebrew/render-formula.sh 0.1.2 SHA256SUMS stackstead.rb
 ```
 
 The formula covers Intel and ARM macOS and the documented glibc Linux baselines.

@@ -168,6 +168,9 @@ impl Project {
         let temp = tempfile::tempdir().expect("create temporary project parent");
         let repo = temp.path().join("demo-project");
         fs::create_dir(&repo).expect("create temporary repository");
+        let repo = repo
+            .canonicalize()
+            .expect("canonicalize temporary repository");
         git(&repo, &["init", "--initial-branch=main"]);
         git(&repo, &["config", "user.name", "Stackstead Tests"]);
         git(
@@ -260,6 +263,18 @@ fn stackstead(cwd: &Path) -> Command {
         .current_dir(cwd)
         .env("XDG_STATE_HOME", test_state_home(cwd))
         .env_remove("RUST_LOG");
+    command
+}
+
+#[cfg(unix)]
+fn stackstead_without_runtime(cwd: &Path) -> Command {
+    let path = fake_docker_path(
+        cwd.parent().expect("command directory has a parent"),
+        "no-runtime-fake-docker-bin",
+        "#!/bin/sh\n[ \"$#\" -eq 4 ] && [ \"$1 $2 $3 $4\" = 'volume ls --format {{.Name}}' ]\n",
+    );
+    let mut command = stackstead(cwd);
+    command.env("PATH", path);
     command
 }
 
@@ -2002,7 +2017,7 @@ fn destroy_recovery_revalidates_an_adopted_worktree_before_cleanup() {
     assert!(manifest.manifest_path().is_file());
 
     fs::remove_file(dirty).unwrap();
-    stackstead(&project.repo)
+    stackstead_without_runtime(&project.repo)
         .args(["destroy", &manifest.stackstead_id, "--yes"])
         .assert()
         .success();
@@ -3445,7 +3460,7 @@ fn destroy_retries_only_state_after_recorded_source_cleanup() {
     append_destroy_tombstone(&manifest);
     append_event(&manifest.event_log, "source_remove", "succeeded");
 
-    stackstead(&project.repo)
+    stackstead_without_runtime(&project.repo)
         .args(["destroy", "feature-a", "--yes"])
         .assert()
         .success();
@@ -3457,7 +3472,7 @@ fn destroy_resumes_source_cleanup_from_the_persisted_tombstone() {
     let project = Project::initialized();
     let manifest = project.create("feature-a");
     append_destroy_tombstone(&manifest);
-    stackstead(&project.repo)
+    stackstead_without_runtime(&project.repo)
         .args(["destroy", "feature-a", "--yes"])
         .assert()
         .success();
@@ -3508,7 +3523,7 @@ fn destroy_retry_removes_a_git_unregistered_permission_blocked_remainder() {
             .contains(manifest.worktree.to_string_lossy().as_ref())
     );
 
-    stackstead(&project.repo)
+    stackstead_without_runtime(&project.repo)
         .args(["destroy", &manifest.stackstead_id, "--yes"])
         .assert()
         .success();
@@ -3539,7 +3554,7 @@ fn destroy_retry_preserves_a_still_registered_locked_worktree() {
         &project.repo,
         &["worktree", "unlock", manifest.worktree.to_str().unwrap()],
     );
-    stackstead(&project.repo)
+    stackstead_without_runtime(&project.repo)
         .args(["destroy", &manifest.stackstead_id, "--yes"])
         .assert()
         .success();
