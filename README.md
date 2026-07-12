@@ -20,14 +20,21 @@ redirected.
 
 ## Install
 
-The first immutable binary release is being prepared. Until it is published,
-install from this checkout with the pinned Rust toolchain:
+Install v0.1.3 from its immutable release asset:
 
 ```sh
-cargo install --locked --path .
+(
+  install_script="$(mktemp)" &&
+  trap 'rm -f "$install_script"' 0 &&
+  curl --proto '=https' --tlsv1.2 -fsSL \
+    --output "$install_script" \
+    https://github.com/yazanabuashour/stackstead/releases/download/v0.1.3/install.sh &&
+  sh "$install_script" --version 0.1.3
+)
 ```
 
-The immutable release installer, supported platform baselines, and generated
+The installer verifies the selected binary against the release checksums.
+Supported platform baselines, source installation, and the generated
 Homebrew formula are documented in [Installation](docs/install.md).
 
 Prerequisites are Git and Docker with the Compose plugin. Stackstead v0.1 owns

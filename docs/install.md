@@ -3,20 +3,22 @@
 Release binaries do not require a Rust toolchain. Stackstead itself still expects
 Git and Docker with the Compose plugin when it manages a runtime.
 
-## Build from source
-
-The first immutable binary release is being prepared. Until it is published,
-install from this checkout with the pinned Rust toolchain:
-
-```sh
-cargo install --locked --path .
-```
-
 ## Release installer
 
+Install v0.1.3 from its immutable, checksummed release:
+
+```sh
+(
+  install_script="$(mktemp)" &&
+  trap 'rm -f "$install_script"' 0 &&
+  curl --proto '=https' --tlsv1.2 -fsSL \
+    --output "$install_script" \
+    https://github.com/yazanabuashour/stackstead/releases/download/v0.1.3/install.sh &&
+  sh "$install_script" --version 0.1.3
+)
+```
+
 Each release publishes `install.sh` as an immutable, checksummed release asset.
-After the first release is available, this guide will provide its pinned
-installer command.
 
 The installer selects the current macOS or supported glibc Linux architecture, downloads
 the matching release binary and `SHA256SUMS`, verifies the exact asset checksum,
@@ -36,6 +38,14 @@ tested without network access.
 Run `sh install.sh --help` for all options. `--version` selects the Stackstead
 release to install; `--installer-version` prints the install-script contract
 version.
+
+## Build from source
+
+To build from a reviewed checkout with the pinned Rust toolchain:
+
+```sh
+cargo install --locked --path .
+```
 
 ## Homebrew formula
 
@@ -63,12 +73,11 @@ checksums all remain read-only; only the final `release` environment job receive
 `contents: write`, and it rechecks the live tag before attaching the checksum-bound
 bundle to that tag.
 
-Before the first release, create a protected GitHub environment named `release`
-with required reviewers and tag-only deployment rules, protect release tags with
-a repository ruleset, and enable immutable releases in the repository settings.
-Copy the generated formula into an owner-controlled Homebrew tap when the tap
-exists. The workflow never invents a repository owner or publishes from an
-untagged local checkout.
+The public repository uses a protected `release` environment restricted to `v*`
+tags, with no required reviewers or wait timer. A repository ruleset protects
+release tags, and immutable releases are enabled. Copy the generated formula
+into an owner-controlled Homebrew tap when the tap exists. The workflow never
+invents a repository owner or publishes from an untagged local checkout.
 
 ## Test packaging locally
 
