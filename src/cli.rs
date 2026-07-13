@@ -405,6 +405,14 @@ impl Cli {
         println!("Source:        {}", manifest.status.source);
         println!("Dependencies:  {}", manifest.status.dependencies);
         println!("Runtime:       {}", output.live.runtime_status);
+        println!("Services:");
+        if output.live.services.is_empty() {
+            println!("  none");
+        } else {
+            for service in &output.live.services {
+                println!("  {:<14} {}", service.service, service.status());
+            }
+        }
         println!(
             "Database:      {}",
             database_status.map_or_else(|| "not configured".into(), |status| status.to_string())
@@ -627,6 +635,9 @@ impl Cli {
                     "preserved"
                 }
             );
+            println!("  Git branch: {} (preserved)", manifest.branch);
+            println!("  Local Compose build images: removed when runtime resources exist");
+            println!("  Project coordination lock: preserved");
             println!("  Stackstead state: {}", manifest.stackstead_root.display());
             print!("Continue? [y/N] ");
             io::stdout().flush()?;
@@ -644,6 +655,10 @@ impl Cli {
             ))?;
         } else {
             println!("Destroyed {}", destroyed.stackstead_id);
+            println!(
+                "Preserved Git branch {} and the project coordination lock.",
+                destroyed.branch
+            );
         }
         Ok(())
     }

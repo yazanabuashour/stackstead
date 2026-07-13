@@ -89,7 +89,7 @@ stackstead open feature-a web
 stackstead logs feature-a --service web --follow
 ```
 
-Structured commands accept `--json`; every document has command-owned `kind` and `version: "1"` fields and never serializes a persistence type directly. Lifecycle mutations return a `StacksteadChange` envelope with an `action` and a `stackstead` view. `run`, `launch`, and `logs --follow` reject JSON because they own stdout, while `destroy --json` requires `--yes` to prevent prompt output from contaminating JSON. `stackstead open ... --print` returns a configured URL without launching a browser. `stackstead env --print` redacts secret-like values and credential-bearing DSNs unless `--show-secrets` is explicitly supplied.
+Structured commands accept `--json`; every document has command-owned `kind` and `version` fields and never serializes a persistence type directly. `StacksteadInspection` version 2 includes per-service Compose observations; the remaining current documents are version 1. Lifecycle mutations return a `StacksteadChange` envelope with an `action` and a `stackstead` view. `run`, `launch`, and `logs --follow` reject JSON because they own stdout, while `destroy --json` requires `--yes` to prevent prompt output from contaminating JSON. `stackstead open ... --print` returns a configured URL without launching a browser. `stackstead env --print` redacts secret-like values and credential-bearing DSNs unless `--show-secrets` is explicitly supplied.
 
 ## Stop
 
@@ -123,13 +123,17 @@ Destroy shows the resources it will remove and requires confirmation by default.
 
 1. Refuses a dirty worktree before deleting runtime data.
 2. Runs `pre_destroy` hooks and verifies the worktree remains clean.
-3. Verifies the runtime-token claim and every candidate resource, then runs Compose `down -v --remove-orphans` for the manifest's durable project identity only. A never-started stackstead with no claim or candidate resources skips Compose.
+3. Verifies the runtime-token claim and every candidate resource, then runs Compose `down -v --remove-orphans --rmi local` for the manifest's durable project identity only. This removes Compose-local build images without a custom image tag while preserving pulled and explicitly tagged images. A never-started stackstead with no claim or candidate resources skips Compose and image removal.
 4. Removes a Stackstead-owned Git worktree, or only the generated `.stackstead` directory for externally owned source.
 5. Removes the validated stackstead state directory after the mutation and agent-run locks have protected the full teardown.
 
 The retained event log records typed `destroy`, `runtime_remove`, and `source_remove` events with `started`, `succeeded`, or `failed` status. A retry resumes source cleanup only after the latest destroy attempt contains succeeded runtime removal and started source removal. It verifies teardown left no owned runtime resources, removes the verified claim only after source cleanup succeeds, records completion, releases the exact global port lease idempotently, and only then removes final state. A crash or registry write failure therefore leaves a retryable manifest/tombstone. Completed malformed, unknown, or out-of-order records fail closed; only an unterminated final record is treated as a torn write, and the next append truncates that incomplete tail before writing a new synced record.
 
 Stackstead never performs global Docker pruning and never treats an arbitrary directory as a destroy target. Destruction is permanent for stackstead-local Compose volumes. Commit or export anything valuable first.
+
+Destroy preserves the Git branch because it may contain committed user work and
+retains the project coordination lock as stable concurrency state. These are not
+orphaned environment resources and should not be removed as routine cleanup.
 
 Inspection and cleanup validate the durable manifest independently of later non-destructive config path changes, so a revised `env.file` or context path cannot strand an older runtime. Regenerating operations such as `up`, `repair`, and `stackstead run` additionally require the current config to match the manifest contract.
 

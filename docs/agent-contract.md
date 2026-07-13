@@ -28,7 +28,16 @@ stackstead ps --json
 stackstead db status feature-a --json
 ```
 
-Agent managers and wrappers can consume these commands without parsing human output. CLI JSON is not the manifest: each command owns a versioned response DTO, so persistence-only fields cannot appear accidentally. Lifecycle mutations use `{ "kind": "StacksteadChange", "version": "1", "action": "...", "stackstead": { ... } }`; inspection uses `StacksteadInspection`, lists use `StacksteadList`, and doctor uses `DoctorReport`. Consumers should validate `kind` and `version` before reading the command-specific body.
+Agent managers and wrappers can consume these commands without parsing human output. CLI JSON is not the manifest: each command owns a versioned response DTO, so persistence-only fields cannot appear accidentally. Lifecycle mutations use `{ "kind": "StacksteadChange", "version": "1", "action": "...", "stackstead": { ... } }`; inspection uses `StacksteadInspection` version 2 with per-service live observations, while lists and doctor remain version 1. Consumers should validate `kind` and `version` before reading the command-specific body.
+
+Inspection version 2 retains the version 1 fields and adds an always-present,
+deterministically sorted `live.services` array. Each item has string `service`
+and `container` fields, a string `status`, and `exit_code`, which is an integer
+for exited containers when Compose reports one and `null` otherwise. Exit code
+zero renders as `completed (0)`, another exit code as `exited (<code>)`, and
+other statuses use Compose's normalized lowercase state. Before upgrading the
+binary, strict consumers and trusted installed hooks must accept both inspection
+versions 1 and 2; they may read `live.services` only from version 2.
 
 Stackstead also supplies a direct process boundary:
 

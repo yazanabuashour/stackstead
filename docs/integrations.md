@@ -27,6 +27,11 @@ install -d "$HOME/.local/libexec/stackstead-hooks"
 install -m 0755 integrations/hooks/*.sh "$HOME/.local/libexec/stackstead-hooks/"
 ```
 
+When upgrading across a documented inspection JSON version change, install the
+new hooks before replacing the Stackstead binary. The current hooks accept
+inspection versions 1 and 2 so the old binary remains usable during rollout or
+rollback.
+
 Do not invoke a relative hook script from a managed worktree: a branch could
 replace it before a manager lifecycle event. `adopt-current.sh` is idempotent:
 an existing Stackstead pointer causes `up` for that exact identity rather than a

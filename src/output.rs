@@ -5,6 +5,7 @@ use serde::Serialize;
 use crate::{compose, database, doctor, lifecycle, manifest::StacksteadManifest};
 
 const VERSION: &str = "1";
+const INSPECTION_VERSION: &str = "2";
 
 mod private {
     pub trait Sealed {}
@@ -190,6 +191,7 @@ pub(crate) struct StacksteadInspectionOutput {
 #[derive(Debug, Serialize)]
 struct LiveOutput {
     runtime: LiveComponentOutput,
+    services: Vec<LiveServiceOutput>,
     database: Option<LiveDatabaseOutput>,
     health: Option<LiveHealthOutput>,
 }
@@ -198,6 +200,14 @@ struct LiveOutput {
 struct LiveComponentOutput {
     running: bool,
     status: String,
+}
+
+#[derive(Debug, Serialize)]
+struct LiveServiceOutput {
+    service: String,
+    container: String,
+    status: String,
+    exit_code: Option<i64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -224,13 +234,25 @@ impl StacksteadInspectionOutput {
             });
         Self {
             kind: "StacksteadInspection",
-            version: VERSION,
+            version: INSPECTION_VERSION,
             stackstead: (&inspection.manifest).into(),
             live: LiveOutput {
                 runtime: LiveComponentOutput {
-                    running: inspection.live.runtime_running,
+                    running: inspection.live.runtime_status
+                        == crate::manifest::ComponentStatus::Running,
                     status: inspection.live.runtime_status.to_string(),
                 },
+                services: inspection
+                    .live
+                    .services
+                    .iter()
+                    .map(|service| LiveServiceOutput {
+                        service: service.service.clone(),
+                        container: service.container.clone(),
+                        status: service.status(),
+                        exit_code: service.exit_code,
+                    })
+                    .collect(),
                 database,
                 health: inspection
                     .live

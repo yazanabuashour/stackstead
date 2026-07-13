@@ -52,8 +52,8 @@ pub struct InspectOutput {
 
 #[derive(Debug, Clone)]
 pub struct LiveStatus {
-    pub runtime_running: bool,
     pub runtime_status: ComponentStatus,
+    pub services: Vec<compose::ServiceObservation>,
     pub database_reachable: Option<bool>,
     pub health_healthy: Option<bool>,
 }
@@ -1144,18 +1144,27 @@ pub fn inspect(cwd: &Path, name: &str) -> anyhow::Result<InspectOutput> {
     if let Err(error) = validate_source_binding(&manifest) {
         warnings.push(format!("source binding is invalid: {error}"));
     }
-    let (runtime_running, runtime_status) = match compose::is_running(&manifest) {
-        Ok(true) => (true, ComponentStatus::Running),
-        Ok(false) => (false, ComponentStatus::Stopped),
+    let (runtime_status, services) = match compose::service_observations(&manifest) {
+        Ok(services) => {
+            let running = services.iter().any(|service| service.state == "running");
+            (
+                if running {
+                    ComponentStatus::Running
+                } else {
+                    ComponentStatus::Stopped
+                },
+                services,
+            )
+        }
         Err(error) => {
             warnings.push(format!("could not inspect Docker runtime: {error}"));
-            (false, ComponentStatus::Unknown)
+            (ComponentStatus::Unknown, vec![])
         }
     };
     let database_reachable = manifest.database.as_ref().map(|database| {
         database::reachable(&database.host, database.port, Duration::from_millis(250))
     });
-    let health_healthy = runtime_running
+    let health_healthy = (runtime_status == ComponentStatus::Running)
         .then(|| health::healthy_passive(&runtime.config.health, &manifest, &BTreeMap::new()))
         .flatten();
     if !manifest.worktree.is_dir() {
@@ -1174,8 +1183,8 @@ pub fn inspect(cwd: &Path, name: &str) -> anyhow::Result<InspectOutput> {
     Ok(InspectOutput {
         manifest,
         live: LiveStatus {
-            runtime_running,
             runtime_status,
+            services,
             database_reachable,
             health_healthy,
         },

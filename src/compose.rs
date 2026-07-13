@@ -4,6 +4,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use serde::Deserialize;
+
 use crate::{command, manifest::StacksteadManifest};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,6 +53,24 @@ pub struct ComposeApplyOutput {
 pub struct ComposePortTarget {
     pub service: String,
     pub container_port: u16,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ServiceObservation {
+    pub service: String,
+    pub container: String,
+    pub state: String,
+    pub exit_code: Option<i64>,
+}
+
+impl ServiceObservation {
+    pub fn status(&self) -> String {
+        match (self.state.as_str(), self.exit_code) {
+            ("exited", Some(0)) => "completed (0)".into(),
+            ("exited", Some(code)) => format!("exited ({code})"),
+            _ => self.state.clone(),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1101,7 +1121,13 @@ pub fn down_volumes(manifest: &StacksteadManifest) -> anyhow::Result<()> {
         return Ok(());
     }
     let mut args = base_args(manifest);
-    args.extend(["down".into(), "-v".into(), "--remove-orphans".into()]);
+    args.extend([
+        "down".into(),
+        "-v".into(),
+        "--remove-orphans".into(),
+        "--rmi".into(),
+        "local".into(),
+    ]);
     run_docker_compose(manifest, &args)?;
     if verify_runtime_resources(manifest)? {
         remove_labeled_runtime_resources(manifest)?;
@@ -1575,6 +1601,63 @@ pub fn is_running(manifest: &StacksteadManifest) -> anyhow::Result<bool> {
     run_docker_compose(manifest, &args).map(|output| !output.stdout.is_empty())
 }
 
+pub fn service_observations(
+    manifest: &StacksteadManifest,
+) -> anyhow::Result<Vec<ServiceObservation>> {
+    let mut args = base_args(manifest);
+    args.extend([
+        "ps".into(),
+        "--all".into(),
+        "--format".into(),
+        "json".into(),
+    ]);
+    let output = run_docker_compose(manifest, &args)?;
+    parse_service_observations(&output.stdout)
+}
+
+fn parse_service_observations(output: &[u8]) -> anyhow::Result<Vec<ServiceObservation>> {
+    let output = std::str::from_utf8(output)?.trim();
+    if output.is_empty() {
+        return Ok(vec![]);
+    }
+    let values = if output.starts_with('[') {
+        serde_json::from_str::<Vec<ComposeServiceObservation>>(output)
+    } else {
+        output
+            .lines()
+            .map(serde_json::from_str)
+            .collect::<Result<Vec<ComposeServiceObservation>, _>>()
+    }
+    .map_err(|error| {
+        anyhow::anyhow!("Docker Compose returned invalid service status JSON: {error}")
+    })?;
+    let mut observations = values
+        .into_iter()
+        .map(|value| {
+            let state = value.state.to_ascii_lowercase();
+            ServiceObservation {
+                service: value.service,
+                container: value.name,
+                exit_code: value.exit_code.filter(|_| state == "exited"),
+                state,
+            }
+        })
+        .collect::<Vec<_>>();
+    observations.sort_by(|left, right| {
+        (&left.service, &left.container).cmp(&(&right.service, &right.container))
+    });
+    Ok(observations)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct ComposeServiceObservation {
+    name: String,
+    service: String,
+    state: String,
+    exit_code: Option<i64>,
+}
+
 pub fn service_is_running(manifest: &StacksteadManifest, service: &str) -> anyhow::Result<bool> {
     let args = service_running_args(manifest, service);
     run_docker_compose(manifest, &args).map(|output| running_service_output(&output.stdout))
@@ -1795,6 +1878,31 @@ mod tests {
                 &"/state/demo/a-b123/source/.stackstead/compose-ownership.yaml".to_string()
             )
         );
+    }
+
+    #[test]
+    fn parses_array_and_line_delimited_service_observations() {
+        let array = br#"[
+          {"Name":"demo-web-1","Service":"web","State":"running","ExitCode":0},
+          {"Name":"demo-init-1","Service":"init","State":"exited","ExitCode":0},
+          {"Name":"demo-migrate-1","Service":"migrate","State":"exited","ExitCode":7}
+        ]"#;
+        let observations = parse_service_observations(array).unwrap();
+        assert_eq!(
+            observations
+                .iter()
+                .map(|service| (service.service.as_str(), service.status()))
+                .collect::<Vec<_>>(),
+            [
+                ("init", "completed (0)".into()),
+                ("migrate", "exited (7)".into()),
+                ("web", "running".into()),
+            ]
+        );
+
+        let lines = br#"{"Name":"demo-web-1","Service":"web","State":"running","ExitCode":0}
+{"Name":"demo-init-1","Service":"init","State":"exited","ExitCode":0}"#;
+        assert_eq!(parse_service_observations(lines).unwrap().len(), 2);
     }
 
     #[test]

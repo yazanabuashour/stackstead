@@ -45,8 +45,10 @@ printf '%s\n' \
   '{"stackstead_id":"manager-cell-a123","manifest":"/attacker/manifest.json","repo_root":"/attacker/repo"}' \
   >"$manager/.stackstead/stackstead.json"
 inspection="$tmp/inspection.json"
-printf '{"kind":"StacksteadInspection","version":"1","stackstead":{"stackstead_id":"manager-cell-a123","worktree":"%s","files":{"pointer":"%s"},"repo_root":"%s","source_ownership":"external"},"live":{},"warnings":[]}\n' \
-  "$manager" "$manager/.stackstead/stackstead.json" "$tmp" >"$inspection"
+write_inspection() {
+  printf '{"kind":"StacksteadInspection","version":"%s","stackstead":{"stackstead_id":"manager-cell-a123","worktree":"%s","files":{"pointer":"%s"},"repo_root":"%s","source_ownership":"external"},"live":{},"warnings":[]}\n' \
+    "$1" "$manager" "$manager/.stackstead/stackstead.json" "$tmp" >"$inspection"
+}
 destroy_marker="$tmp/destroy-was-called"
 up_marker="$tmp/up-was-called"
 manager_fake="$tmp/fake-manager-stackstead"
@@ -58,10 +60,13 @@ if [ "$1" = destroy ]; then touch "$FAKE_DESTROY_MARKER"; exit 0; fi
 exit 2
 EOF
 chmod +x "$manager_fake"
-(cd "$manager" && STACKSTEAD_BIN="$manager_fake" FAKE_INSPECTION="$inspection" \
-  FAKE_UP_MARKER="$up_marker" "$repo_root/integrations/hooks/adopt-current.sh")
-[[ -e "$up_marker" ]]
-rm -f "$up_marker"
+for version in 1 2; do
+  write_inspection "$version"
+  (cd "$manager" && STACKSTEAD_BIN="$manager_fake" FAKE_INSPECTION="$inspection" \
+    FAKE_UP_MARKER="$up_marker" "$repo_root/integrations/hooks/adopt-current.sh")
+  [[ -e "$up_marker" ]]
+  rm -f "$up_marker"
+done
 cp "$inspection" "$inspection.good"
 sed "s|\"worktree\":\"$manager\"|\"worktree\":\"$tmp/wrong-worktree\"|" \
   "$inspection.good" >"$inspection"
@@ -72,11 +77,14 @@ if (cd "$manager" && STACKSTEAD_BIN="$manager_fake" FAKE_INSPECTION="$inspection
 fi
 [[ ! -e "$up_marker" ]]
 cp "$inspection.good" "$inspection"
-(cd "$manager" && STACKSTEAD_MANAGER_TEARDOWN=1 STACKSTEAD_BIN="$manager_fake" \
-  FAKE_INSPECTION="$inspection" FAKE_DESTROY_MARKER="$destroy_marker" FAKE_UP_MARKER="$up_marker" \
-  "$repo_root/integrations/hooks/destroy-adopted-current.sh")
-[[ -e "$destroy_marker" ]]
-rm -f "$destroy_marker"
+for version in 1 2; do
+  write_inspection "$version"
+  (cd "$manager" && STACKSTEAD_MANAGER_TEARDOWN=1 STACKSTEAD_BIN="$manager_fake" \
+    FAKE_INSPECTION="$inspection" FAKE_DESTROY_MARKER="$destroy_marker" FAKE_UP_MARKER="$up_marker" \
+    "$repo_root/integrations/hooks/destroy-adopted-current.sh")
+  [[ -e "$destroy_marker" ]]
+  rm -f "$destroy_marker"
+done
 sed "s|\"worktree\":\"$manager\"|\"worktree\":\"$tmp/wrong-worktree\"|" \
   "$inspection" >"$inspection.next"
 mv "$inspection.next" "$inspection"

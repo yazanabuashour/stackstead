@@ -169,6 +169,11 @@ verify_three() {
     jq -r '.ports[]' "$manifest" >>"$tmp/ports"
     [ "$(jq -er '.compose_project' "$manifest")" = "$project" ] ||
       die "Compose project mismatch for $id"
+    inspection="$(cd "$example_root" && "$stackstead_bin" --json inspect "$id")"
+    jq -e '
+      .kind == "StacksteadInspection" and .version == "2" and
+      any(.live.services[]; .service == "setup" and .status == "completed (0)")
+    ' <<<"$inspection" >/dev/null || die "inspect did not report the successful setup job for $id"
     container="$(compose_for "$manifest" ps -q postgres)"
     [ -n "$container" ] || die "Postgres is not running for $id"
     label="$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' "$container")"

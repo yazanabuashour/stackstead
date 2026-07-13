@@ -52,7 +52,7 @@ Lifecycle manifest writes derive their destination from the manifest's canonical
 
 Stackstead ships one binary crate (`autolib = false`, `publish = false`) and intentionally has no supported Rust SDK yet. Internal modules may change together without creating a premature semver contract. A library should be introduced only when concrete embedding use cases establish a smaller durable API than the application internals.
 
-Machine-readable output is the supported automation surface. A sealed internal marker permits only command-owned DTOs to reach the JSON writer. Every response is a top-level object with a semantic `kind` and `version: "1"`; lists are wrapped rather than emitted as bare arrays. DTO conversions copy only intended integration data, so manifest fields, doctor internals, and Compose implementation types cannot leak into stdout merely by gaining a serialization derive.
+Machine-readable output is the supported automation surface. A sealed internal marker permits only command-owned DTOs to reach the JSON writer. Every response is a top-level object with a semantic `kind` and `version`; lists are wrapped rather than emitted as bare arrays. `StacksteadInspection` version 2 adds command-owned per-service observations while the remaining current responses are version 1. DTO conversions copy only intended integration data, so manifest fields, doctor internals, and Compose implementation types cannot leak into stdout merely by gaining a serialization derive.
 
 ## Pointer-file discovery
 

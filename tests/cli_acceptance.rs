@@ -2273,6 +2273,7 @@ fn runtime_probe_failure_is_reported_without_breaking_inspect_json() {
         .success();
     let inspected: Value =
         serde_json::from_slice(&inspect.get_output().stdout).expect("parse inspect output");
+    assert_eq!(inspected["version"], "2");
     assert_eq!(inspected["live"]["runtime"]["running"], false);
     assert_eq!(inspected["live"]["runtime"]["status"], "unknown");
     assert_eq!(inspected["live"]["database"]["status"], "unknown");
@@ -2281,6 +2282,48 @@ fn runtime_probe_failure_is_reported_without_breaking_inspect_json() {
             .as_array()
             .is_some_and(|warnings| !warnings.is_empty())
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn inspect_distinguishes_completed_and_failed_compose_services() {
+    let project = Project::initialized();
+    project.create("feature-a");
+    let path = fake_docker_path(
+        project.repo.parent().unwrap(),
+        "inspect-services-bin",
+        r#"#!/bin/sh
+case " $* " in
+  *" ps --all --format json "*)
+    printf '%s\n' '[{"Name":"demo-web-1","Service":"web","State":"running","ExitCode":0},{"Name":"demo-init-1","Service":"init","State":"exited","ExitCode":0},{"Name":"demo-migrate-1","Service":"migrate","State":"exited","ExitCode":7}]'
+    exit 0
+    ;;
+esac
+exit 97
+"#,
+    );
+
+    let json = stackstead(&project.repo)
+        .env("PATH", &path)
+        .args(["inspect", "feature-a", "--json"])
+        .assert()
+        .success();
+    let inspected: Value = serde_json::from_slice(&json.get_output().stdout).unwrap();
+    assert_eq!(inspected["version"], "2");
+    assert_eq!(inspected["live"]["runtime"]["status"], "running");
+    assert_eq!(inspected["live"]["services"][0]["status"], "completed (0)");
+    assert_eq!(inspected["live"]["services"][1]["status"], "exited (7)");
+    assert_eq!(inspected["live"]["services"][2]["status"], "running");
+
+    let human = stackstead(&project.repo)
+        .env("PATH", path)
+        .args(["inspect", "feature-a"])
+        .assert()
+        .success();
+    let stdout = output_text(&human.get_output().stdout);
+    assert!(stdout.contains("init           completed (0)"), "{stdout}");
+    assert!(stdout.contains("migrate        exited (7)"), "{stdout}");
+    assert!(stdout.contains("web            running"), "{stdout}");
 }
 
 #[test]
@@ -2313,7 +2356,7 @@ fn database_status_requires_the_exact_compose_port_publication() {
         project.repo.parent().unwrap(),
         "wrong-database-publication-fake-bin",
         &format!(
-            "#!/bin/sh\nfor arg in \"$@\"; do\n  case \"$arg\" in\n    ps) printf 'container-id\\n'; exit 0 ;;\n    port) printf '127.0.0.2:{port}\\n'; exit 0 ;;\n  esac\ndone\nexit 0\n"
+            "#!/bin/sh\ncase \" $* \" in *\" ps --all --format json \"*) printf '%s\\n' '[{{\"Name\":\"demo-postgres-1\",\"Service\":\"postgres\",\"State\":\"running\",\"ExitCode\":0}}]'; exit 0;; esac\nfor arg in \"$@\"; do\n  case \"$arg\" in\n    ps) printf 'container-id\\n'; exit 0 ;;\n    port) printf '127.0.0.2:{port}\\n'; exit 0 ;;\n  esac\ndone\nexit 0\n"
         ),
     );
     let status = stackstead(&project.repo)
@@ -2352,7 +2395,7 @@ fn database_status_requires_the_exact_compose_port_publication() {
         project.repo.parent().unwrap(),
         "exact-database-publication-fake-bin",
         &format!(
-            "#!/bin/sh\nfor arg in \"$@\"; do\n  case \"$arg\" in\n    ps) printf 'container-id\\n'; exit 0 ;;\n    port) printf '127.0.0.1:{port}\\n'; exit 0 ;;\n  esac\ndone\nexit 0\n"
+            "#!/bin/sh\ncase \" $* \" in *\" ps --all --format json \"*) printf '%s\\n' '[{{\"Name\":\"demo-postgres-1\",\"Service\":\"postgres\",\"State\":\"running\",\"ExitCode\":0}}]'; exit 0;; esac\nfor arg in \"$@\"; do\n  case \"$arg\" in\n    ps) printf 'container-id\\n'; exit 0 ;;\n    port) printf '127.0.0.1:{port}\\n'; exit 0 ;;\n  esac\ndone\nexit 0\n"
         ),
     );
     let status = stackstead(&project.repo)
@@ -2988,6 +3031,9 @@ fn inspect_passively_checks_http_health_only_for_a_running_runtime() {
     };
 
     let project = Project::initialized();
+    let mut config = load_config(&project.repo.join("stackstead.yaml"));
+    config["resources"]["ports"]["base"] = serde_yaml::Value::Number(50_000.into());
+    project.write_config(&config, "isolate passive health test ports");
     let manifest = project.create("feature-a");
     let listener =
         TcpListener::bind(("127.0.0.1", manifest.ports["web"])).expect("bind allocated web port");
@@ -3012,7 +3058,7 @@ fn inspect_passively_checks_http_health_only_for_a_running_runtime() {
     let path = fake_docker_path(
         project.repo.parent().unwrap(),
         "inspect-health-fake-bin",
-        "#!/bin/sh\necho running\n",
+        "#!/bin/sh\nprintf '%s\n' '[{\"Name\":\"demo-web-1\",\"Service\":\"web\",\"State\":\"running\",\"ExitCode\":0}]'\n",
     );
 
     for expected in [true, false] {
@@ -3791,13 +3837,20 @@ fn destroy_removes_reverified_residual_owned_resources() {
     const DOCKER: &str = r#"#!/bin/sh
 set -eu
 mkdir -p "$FAKE_STATE"
+printf '%s\n' "$*" >> "$FAKE_STATE/commands"
 kind=${1-}
 verb=${2-}
 last=
 for argument in "$@"; do last=$argument; done
 claim="$COMPOSE_PROJECT_NAME-stackstead-claim"
 case "$kind $verb" in
-  "container ls"|"network ls") ;;
+  "container ls")
+    test -f "$FAKE_STATE/runtime" && printf '%s\n' "$COMPOSE_PROJECT_NAME-web-1"
+    ;;
+  "container inspect")
+    printf '{"io.stackstead.runtime-token":"%s"}\n' "$EXPECTED_TOKEN"
+    ;;
+  "network ls") ;;
   "volume ls")
     test -f "$FAKE_STATE/claim" && printf '%s\n' "$claim"
     test -f "$FAKE_STATE/residual" && printf '%s\n' "$COMPOSE_PROJECT_NAME-retired"
@@ -3814,7 +3867,11 @@ case "$kind $verb" in
     ;;
   "compose -p")
     case " $* " in
-      *" down -v --remove-orphans "*) : > "$FAKE_STATE/residual" ;;
+      *" up -d "*) : > "$FAKE_STATE/runtime" ;;
+      *" down -v --remove-orphans --rmi local "*)
+        rm "$FAKE_STATE/runtime"
+        : > "$FAKE_STATE/residual"
+        ;;
     esac
     ;;
 esac
@@ -3846,6 +3903,11 @@ exit 0
         .success();
     assert!(!manifest.stackstead_root.exists());
     assert!(!state.join("claim").exists());
+    assert!(
+        fs::read_to_string(state.join("commands"))
+            .unwrap()
+            .contains("down -v --remove-orphans --rmi local")
+    );
 }
 
 #[cfg(unix)]

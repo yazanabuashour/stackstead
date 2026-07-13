@@ -58,7 +58,7 @@ manifest. Compose then reads the generated values through the explicit
 Tracked config cannot define process-, Docker-, or Compose-control keys, so it
 cannot redirect executable lookup, the daemon, files, or project identity.
 
-Stop uses `stop`; destroy uses `down -v --remove-orphans`. Logs use the same identity and file list with `logs --tail=<n>`. Stackstead does not rediscover a project by container labels or directory name when a manifest exists.
+Stop uses `stop`; destroy uses `down -v --remove-orphans --rmi local`, removing only Compose-local build images without a custom image tag while preserving pulled and explicitly tagged images. Logs use the same identity and file list with `logs --tail=<n>`. Stackstead does not rediscover a project by container labels or directory name when a manifest exists.
 
 The final generated override labels every direct service and managed network or
 volume with the manifest's cryptographically random runtime token. Stackstead also
@@ -153,6 +153,10 @@ or launch them separately with `stackstead run` and manage their process lifetim
 yourself. The first option gives Stackstead health, logs, recovery, and teardown
 coverage for the whole application; the second does not. Stackstead does not yet
 claim PID-aware native host-process supervision.
+
+Keep Compose service commands in the foreground. Framework modes that detach or
+daemonize must be disabled in the project's checked-in configuration; detached
+processes are outside Compose lifecycle and teardown coverage.
 
 When a container bind-mounts the generated source checkout, run it as the host
 UID/GID or keep dependency output in managed volumes. Root-owned ignored files

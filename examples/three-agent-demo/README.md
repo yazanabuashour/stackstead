@@ -62,6 +62,7 @@ project and volume. Re-running cleanup after success is a no-op.
 - Three manifest IDs, Compose projects, worktrees, and pairs of host ports are
   distinct.
 - Every published Docker port binds only to loopback, never all host interfaces.
+- `inspect` reports the successful one-shot setup service as `completed (0)`.
 - Each Postgres container's Compose label equals its manifest project.
 - The same migration ID has the branch-specific payload in each database.
 - The same seed key has `alpha`, `beta`, or `gamma` as its branch-local value.

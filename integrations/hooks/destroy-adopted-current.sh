@@ -29,7 +29,7 @@ jq -e \
   --arg worktree "$worktree" \
   --arg pointer "$pointer" \
   --arg repo_root "$repo_root" \
-  '.kind == "StacksteadInspection" and .version == "1" and
+  '.kind == "StacksteadInspection" and (.version == "1" or .version == "2") and
    (.stackstead |
     .stackstead_id == $id and
     .worktree == $worktree and
