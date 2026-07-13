@@ -82,7 +82,7 @@ Worktrunk, workmux, webmux, and generic launchers live in
 [`integrations/`](integrations). See [Manager integrations](docs/integrations.md)
 for the ownership and teardown contract.
 
-## Proof, not promises
+## Verified isolation
 
 The [three-agent demo](examples/three-agent-demo/README.md) starts three real
 Nginx/Postgres stacks, proves their ports and databases are isolated, recovers
