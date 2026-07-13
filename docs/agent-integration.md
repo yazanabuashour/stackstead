@@ -3,7 +3,7 @@
 Create, start, and enter a new environment in one command:
 
 ```sh
-stackstead launch feature-a -- codex
+stackstead launch feature-a -- claude
 ```
 
 `launch` composes `create`, `up`, and `run` for a new environment. It preserves the
@@ -35,26 +35,33 @@ unblock teardown beneath a still-running agent.
 
 ## Runtime contract
 
-The wrapper injects the generated `.stackstead/.env` values, then pins these non-secret identity variables:
+The wrapper injects the generated `.stackstead/.env` values, then pins its
+non-secret runtime identity. Most agents need only the first three values;
+the rest support scripts and integrations.
 
 | Variable | Meaning |
 | --- | --- |
-| `STACKSTEAD_ID` | Durable stackstead identity |
+| `STACKSTEAD_ID` | Core: durable stackstead identity |
+| `STACKSTEAD_WORKTREE` | Core: exact source checkout and child working directory |
+| `STACKSTEAD_CONTEXT` | Core: human/agent-readable contract and project rules |
 | `STACKSTEAD_PROJECT` | Stackstead project name |
-| `STACKSTEAD_WORKTREE` | Exact source checkout and child working directory |
 | `STACKSTEAD_MANIFEST` | Machine-readable runtime contract |
-| `STACKSTEAD_CONTEXT` | Human/agent-readable contract and project rules |
 | `STACKSTEAD_ENV_FILE` | Generated environment file; do not print or retain its contents |
 | `STACKSTEAD_COMPOSE_PROJECT` | Manifest-owned Compose identity |
 | `COMPOSE_PROJECT_NAME` | The same identity in Docker Compose's standard variable |
 
-Stackstead does not print the generated environment or child arguments. The child still inherits the launching user's host environment and permissions; this is runtime isolation, not a hostile-code sandbox.
+Read these values; do not invent or override them. `STACKSTEAD_ID` is also
+written to the generated Compose environment, while the wrapper pins it for
+agents, hooks, and other child commands. Stackstead does not print the generated
+environment or child arguments. The child still inherits the launching user's
+host environment and permissions; this is runtime isolation, not a hostile-code
+sandbox.
 
 ## Repository instructions
 
 Generated context cannot help an agent that starts normally in the canonical
 checkout and does not yet know the project expects Stackstead. Add the copyable
-policy from the [agent setup guide](agent-setup-v1.md#repository-policy) to
+policy from the [agent setup guide](agent-setup.md#repository-policy) to
 `AGENTS.md`, `CLAUDE.md`, or the equivalent repository instruction file.
 Stackstead recommends this after human-readable `init` output but never creates,
 parses, or edits those human-owned files.

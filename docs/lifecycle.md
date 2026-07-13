@@ -71,7 +71,7 @@ stackstead db status feature-a
 ## Launch a new environment
 
 ```sh
-stackstead launch feature-a -- codex
+stackstead launch feature-a -- claude
 ```
 
 `launch` is the new-environment path: it runs `create`, carries the returned full ID

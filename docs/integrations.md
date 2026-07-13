@@ -73,9 +73,9 @@ Source: [webmux lifecycle and runtime reference](https://webmux.dev/docs/).
 ## Generic launchers and coding agents
 
 See `integrations/generic/README.md`. A launcher can consume the JSON returned
-by `create-stackstead-owned.sh` and invoke `stackstead run <full-id> -- codex` (or
+by `create-stackstead-owned.sh` and invoke `stackstead run <full-id> -- claude` (or
 another agent/command). For manager panes already inside the checkout, use the
-trusted installed `run-current.sh codex`; it reads the pointer instead of
+trusted installed `run-current.sh claude`; it reads the pointer instead of
 guessing from a branch name. The agent should read the generated context and use
 `stackstead inspect <full-id> --json` before touching ports, logs, databases,
 recovery, or teardown.

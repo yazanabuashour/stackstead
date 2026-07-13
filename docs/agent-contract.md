@@ -33,7 +33,7 @@ Agent managers and wrappers can consume these commands without parsing human out
 Stackstead also supplies a direct process boundary:
 
 ```sh
-stackstead run feature-a -- codex
+stackstead run feature-a -- claude
 stackstead run feature-a -- <agent-or-command> [arguments...]
 ```
 

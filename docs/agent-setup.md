@@ -1,4 +1,4 @@
-# Stackstead agent setup v1
+# Agent setup
 
 Use this guide to add Stackstead to an existing Git repository with a Docker
 Compose development setup. Make the smallest changes needed and stop before
@@ -47,5 +47,5 @@ or manager supplies its exact full ID.
 After the user reviews and commits the setup, the first environment can start with:
 
 ```sh
-stackstead launch <name> -- <agent-or-command>
+stackstead launch <name> -- claude
 ```
