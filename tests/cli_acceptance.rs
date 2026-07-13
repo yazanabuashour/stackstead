@@ -801,7 +801,11 @@ exit 97
     let opener = fake_bin.join("xdg-open");
     fs::write(
         &opener,
-        format!("#!/bin/sh\nprintf '%s' \"$1\" > '{}'\n", marker.display()),
+        format!(
+            "#!/bin/sh\n: > '{}'\nsleep 0.05\nprintf '%s' \"$1\" > '{}'\n",
+            marker.display(),
+            marker.display()
+        ),
     )
     .unwrap();
     fs::set_permissions(&opener, fs::Permissions::from_mode(0o755)).unwrap();
@@ -813,12 +817,19 @@ exit 97
         .args(["open", &manifest.stackstead_id, "web"])
         .assert()
         .success();
-    assert!(wait_for_file(
-        &marker,
-        100,
-        std::time::Duration::from_millis(10)
-    ));
-    assert_eq!(fs::read_to_string(marker).unwrap(), manifest.urls["web"]);
+    let mut opened_url = String::new();
+    for _ in 0..100 {
+        match fs::read_to_string(&marker) {
+            Ok(url) => opened_url = url,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => panic!("failed to read browser URL marker: {error}"),
+        }
+        if opened_url == manifest.urls["web"] {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert_eq!(opened_url, manifest.urls["web"]);
 }
 
 #[test]
