@@ -1,8 +1,18 @@
-# Stackstead: a real app stack for every coding agent
+# Run parallel coding agents against your real app—without sharing ports, services, or databases.
 
-Run agents in parallel without sharing source, services, ports, or data.
-Stackstead builds isolated environments on top of your existing Docker Compose
-setup and works with Codex, Claude Code, Cursor, and worktree managers.
+Stackstead turns your existing Docker Compose setup into a separate local app
+stack for every agent. Each gets its own worktree, Compose project, URLs,
+volumes, and database state, with validated cleanup when the work is done.
+
+- **Your real stack:** reuse the existing Compose topology instead of maintaining
+  a second agent-specific environment.
+- **One identity:** source, services, ports, data, URLs, and lifecycle belong to
+  one durable environment ID.
+- **Safe teardown:** clean up one agent’s runtime without touching another
+  agent’s work or state.
+
+Stackstead works with Codex, Claude Code, Cursor, other coding agents, and
+worktree managers.
 
 ## Install
 
@@ -35,17 +45,6 @@ To add Stackstead to a repository, ask your coding agent to follow the
 > and show me the diff before committing.
 
 Prefer to do it yourself? Follow the [manual quickstart](docs/quickstart.md).
-
-## Why Stackstead
-
-- **No collisions.** Every environment gets its own checkout, Compose project,
-  ports, volumes, and database state.
-- **No guessing.** A durable ID ties the checkout, runtime, generated context,
-  and lifecycle state together.
-- **Safe cleanup.** `stop` preserves source and data; `destroy` validates identity
-  and checkout cleanliness before removing only the selected environment.
-- **Use your existing tools.** Stackstead supplies the runtime beneath your agent,
-  terminal, editor, dashboard, or worktree manager instead of replacing them.
 
 ## Everyday commands
 
