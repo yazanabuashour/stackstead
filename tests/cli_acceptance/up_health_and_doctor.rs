@@ -633,12 +633,19 @@ fn doctor_fail_on_error_keeps_complete_json_and_ignores_warnings() {
     assert!(!error_report["diagnostics"].as_array().unwrap().is_empty());
 }
 
+#[cfg(unix)]
 #[test]
 fn doctor_reports_repository_policy_freshness_without_failing() {
     let project = Project::initialized();
     let instructions = project.repo.join("AGENTS.md");
+    let path = fake_docker_path(
+        project.repo.parent().unwrap(),
+        "policy-doctor-fake-bin",
+        "#!/bin/sh\nexit 0\n",
+    );
 
     let report = stackstead(&project.repo)
+        .env("PATH", &path)
         .args(["doctor", "--json", "--fail-on-error"])
         .assert()
         .success();
@@ -673,6 +680,7 @@ fn doctor_reports_repository_policy_freshness_without_failing() {
     ] {
         fs::write(&instructions, contents).unwrap();
         let report = stackstead(&project.repo)
+            .env("PATH", &path)
             .args(["doctor", "--json", "--fail-on-error"])
             .assert()
             .success();
