@@ -10,7 +10,7 @@ contract="$(./integrations/generic/create-stackstead-owned.sh my-task)"
 worktree="$(printf '%s' "$contract" | jq -r .worktree)"
 id="$(printf '%s' "$contract" | jq -r .stackstead_id)"
 cd "$worktree"
-stackstead run "$id" -- codex
+stackstead run "$id" -- claude
 ```
 
 For a manager that must create its own worktree, run

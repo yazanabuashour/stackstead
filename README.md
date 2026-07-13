@@ -15,7 +15,13 @@ worktree managers.
 ## Install
 
 ```sh
-curl -fsSL https://github.com/yazanabuashour/stackstead/releases/latest/download/install.sh | sh
+install_script="$(mktemp)" &&
+  curl -fsSLo "$install_script" \
+    https://github.com/yazanabuashour/stackstead/releases/latest/download/install.sh &&
+  sh "$install_script"
+status=$?
+[ -z "${install_script:-}" ] || rm -f "$install_script"
+(exit "$status")
 ```
 
 This installs the latest checksummed binary to `~/.local/bin`. Stackstead
@@ -32,15 +38,15 @@ stackstead launch feature-a -- claude
 ```
 
 Stackstead creates a worktree and Compose project, allocates ports, starts the
-services, and launches Codex inside that exact environment. Replace `claude` with
+services, and launches Claude inside that exact environment. Replace `claude` with
 any agent or command.
 
 To add Stackstead to a repository, ask your coding agent to follow the
-[agent setup guide](docs/agent-setup-v1.md):
+[agent setup guide](docs/agent-setup.md):
 
-> Set up Stackstead in this repository. Follow the Stackstead agent setup v1
-> guide, reuse the existing Compose setup, make the smallest changes needed,
-> and show me the diff before committing.
+> Set up Stackstead in this repository. Follow the Stackstead agent setup guide,
+> reuse the existing Compose setup, make the smallest changes needed, and show
+> me the diff before committing.
 
 Prefer to do it yourself? Follow the [manual quickstart](docs/quickstart.md).
 
@@ -69,9 +75,9 @@ ownership of the source:
 
 ```sh
 stackstead adopt feature-a --worktree /absolute/path/to/worktree
-stackstead up feature-a
-stackstead run feature-a -- codex
-stackstead destroy feature-a --yes
+stackstead up <full-id>
+stackstead run <full-id> -- claude
+stackstead destroy <full-id> --yes
 ```
 
 The external checkout is preserved after teardown. Ready-to-use hooks for
@@ -88,7 +94,7 @@ runs in CI through `scripts/docker-integration.sh`.
 
 ## Documentation
 
-- Get started: [Quickstart](docs/quickstart.md) · [Agent setup](docs/agent-setup-v1.md)
+- Get started: [Quickstart](docs/quickstart.md) · [Agent setup](docs/agent-setup.md)
   · [Installation](docs/install.md)
 - Configure and operate: [Configuration](docs/config.md) ·
   [Lifecycle and cleanup](docs/lifecycle.md) · [Docker Compose](docs/compose.md) ·

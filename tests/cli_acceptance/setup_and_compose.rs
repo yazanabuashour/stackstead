@@ -95,13 +95,16 @@ fn human_init_recommends_but_does_not_edit_repository_instructions() {
     let stdout = output_text(&assert.get_output().stdout);
     for expected in [
         "review, add, and commit this policy",
-        "lifecycle commands instead of bare Docker Compose",
+        "commands instead of bare Docker Compose",
         "stackstead --json create <name>",
         "stackstead up <full-id>",
         "stackstead run <full-id> -- <agent-or-command>",
-        "use only the ports, URLs, and database it provides",
-        "Reuse an environment only when the user or manager supplies its exact full ID",
-        "Stackstead does not edit human-owned agent instructions",
+        "only the ports, URLs, and database it provides",
+        "Reuse an environment only when the user",
+        "manager supplies its exact full ID",
+        "<!-- stackstead-policy: 1 -->",
+        "Stackstead may read recognized root instruction files during `doctor`",
+        "does not edit human-owned agent instructions",
     ] {
         assert!(
             stdout.contains(expected),

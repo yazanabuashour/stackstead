@@ -634,6 +634,59 @@ fn doctor_fail_on_error_keeps_complete_json_and_ignores_warnings() {
 }
 
 #[test]
+fn doctor_reports_repository_policy_freshness_without_failing() {
+    let project = Project::initialized();
+    let instructions = project.repo.join("AGENTS.md");
+
+    let report = stackstead(&project.repo)
+        .args(["doctor", "--json", "--fail-on-error"])
+        .assert()
+        .success();
+    let report: Value = serde_json::from_slice(&report.get_output().stdout).unwrap();
+    assert!(has_diagnostic(
+        &report,
+        "repository_policy.missing",
+        "warning"
+    ));
+
+    for (contents, code, severity) in [
+        (
+            "<!-- stackstead-policy: 0 -->\n",
+            "repository_policy.outdated",
+            "warning",
+        ),
+        (
+            "## Stackstead\nRead `$STACKSTEAD_CONTEXT`.\n",
+            "repository_policy.unversioned",
+            "warning",
+        ),
+        (
+            "<!-- stackstead-policy: 2 -->\n",
+            "repository_policy.binary_outdated",
+            "warning",
+        ),
+        (
+            "<!-- stackstead-policy: 1 -->\n",
+            "repository_policy.current",
+            "info",
+        ),
+    ] {
+        fs::write(&instructions, contents).unwrap();
+        let report = stackstead(&project.repo)
+            .args(["doctor", "--json", "--fail-on-error"])
+            .assert()
+            .success();
+        let report: Value = serde_json::from_slice(&report.get_output().stdout).unwrap();
+        assert!(has_diagnostic(&report, code, severity), "{report:#}");
+        assert!(!has_diagnostic(
+            &report,
+            "repository_policy.missing",
+            "warning"
+        ));
+    }
+}
+
+#[test]
 fn env_outputs_redact_credentials_and_generation_is_deterministic() {
     let project = Project::initialized();
     project.replace_config(

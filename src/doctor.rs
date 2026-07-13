@@ -1,11 +1,12 @@
 use std::collections::BTreeMap;
+use std::fs;
 use std::path::Path;
 use std::process::Command;
 
 use crate::config::StacksteadConfig;
 use crate::discovery::{self, Discovery};
 use crate::manifest::StacksteadManifest;
-use crate::{command, compose, events, git, lock, paths, state};
+use crate::{command, compose, events, git, lock, paths, repository_policy, state};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DiagnosticSeverity {
@@ -95,6 +96,7 @@ pub fn run(cwd: &Path) -> anyhow::Result<Vec<Diagnostic>> {
 
     diagnose_initial_discovery(&discovery, &mut diagnostics);
     let repo_root = discovery::project_root(&discovery).to_path_buf();
+    diagnose_repository_policy(&repo_root, &mut diagnostics);
     let config_path = repo_root.join(crate::config::CONFIG_FILE);
     let config = match StacksteadConfig::load(&config_path) {
         Ok(config) => config,
@@ -311,6 +313,107 @@ fn diagnose_repository(repo_root: &Path, git_available: bool, diagnostics: &mut 
             "run Stackstead from a valid Git repository",
         )),
     }
+}
+
+fn diagnose_repository_policy(repo_root: &Path, diagnostics: &mut Vec<Diagnostic>) {
+    let mut found = false;
+    for name in ["AGENTS.md", "CLAUDE.md"] {
+        let path = repo_root.join(name);
+        let contents = match fs::read_to_string(&path) {
+            Ok(contents) => contents,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => {
+                found = true;
+                diagnostics.push(Diagnostic::warning(
+                    "repository_policy.unreadable",
+                    format!(
+                        "cannot read repository policy file {}: {error}",
+                        path.display()
+                    ),
+                    "make the instruction file readable and rerun `stackstead doctor`",
+                ));
+                continue;
+            }
+        };
+        match policy_marker_version(&contents) {
+            Some(Ok(version)) => {
+                found = true;
+                if version == repository_policy::VERSION {
+                    diagnostics.push(Diagnostic::info(
+                        "repository_policy.current",
+                        format!("repository policy is current in {}", path.display()),
+                    ));
+                } else if version < repository_policy::VERSION {
+                    diagnostics.push(Diagnostic::warning(
+                        "repository_policy.outdated",
+                        format!(
+                            "repository policy version {version} in {} is older than version {} required by this Stackstead binary",
+                            path.display(),
+                            repository_policy::VERSION
+                        ),
+                        format!("update the policy from {}", repository_policy::GUIDE_URL),
+                    ));
+                } else {
+                    diagnostics.push(Diagnostic::warning(
+                        "repository_policy.binary_outdated",
+                        format!(
+                            "repository policy version {version} in {} is newer than version {} understood by this Stackstead binary",
+                            path.display(),
+                            repository_policy::VERSION
+                        ),
+                        "upgrade Stackstead before relying on this repository policy",
+                    ));
+                }
+            }
+            Some(Err(())) => {
+                found = true;
+                diagnostics.push(Diagnostic::warning(
+                    "repository_policy.invalid",
+                    format!("repository policy marker is invalid in {}", path.display()),
+                    format!(
+                        "replace it with the current policy from {}",
+                        repository_policy::GUIDE_URL
+                    ),
+                ));
+            }
+            None if contents.contains("## Stackstead")
+                && contents.contains("$STACKSTEAD_CONTEXT") =>
+            {
+                found = true;
+                diagnostics.push(Diagnostic::warning(
+                    "repository_policy.unversioned",
+                    format!(
+                        "Stackstead repository policy in {} has no version marker",
+                        path.display()
+                    ),
+                    format!("update the policy from {}", repository_policy::GUIDE_URL),
+                ));
+            }
+            None => {}
+        }
+    }
+    if !found {
+        diagnostics.push(Diagnostic::warning(
+            "repository_policy.missing",
+            "no current Stackstead repository policy was found in AGENTS.md or CLAUDE.md",
+            format!("add the policy from {}", repository_policy::GUIDE_URL),
+        ));
+    }
+}
+
+fn policy_marker_version(contents: &str) -> Option<Result<u64, ()>> {
+    contents.lines().find_map(|line| {
+        line.trim()
+            .strip_prefix(repository_policy::MARKER_PREFIX)
+            .map(|value| {
+                value
+                    .strip_suffix(repository_policy::MARKER_SUFFIX)
+                    .ok_or(())?
+                    .trim()
+                    .parse()
+                    .map_err(|_| ())
+            })
+    })
 }
 
 fn diagnose_compose_files(
@@ -934,6 +1037,77 @@ mod tests {
     #[test]
     fn diagnostic_severity_displays_stably() {
         assert_eq!(DiagnosticSeverity::Warning.to_string(), "warning");
+    }
+
+    #[test]
+    fn repository_policy_reports_missing_and_current_files() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut diagnostics = Vec::new();
+        diagnose_repository_policy(directory.path(), &mut diagnostics);
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].code, "repository_policy.missing");
+        assert_eq!(diagnostics[0].severity, DiagnosticSeverity::Warning);
+
+        std::fs::write(
+            directory.path().join("AGENTS.md"),
+            format!(
+                "{}\n{}",
+                repository_policy::marker(),
+                repository_policy::TEXT
+            ),
+        )
+        .unwrap();
+        std::fs::write(directory.path().join("CLAUDE.md"), "# Other policy\n").unwrap();
+        diagnostics.clear();
+        diagnose_repository_policy(directory.path(), &mut diagnostics);
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].code, "repository_policy.current");
+        assert_eq!(diagnostics[0].severity, DiagnosticSeverity::Info);
+    }
+
+    #[test]
+    fn repository_policy_reports_older_and_newer_markers() {
+        for (version, code) in [
+            (repository_policy::VERSION - 1, "repository_policy.outdated"),
+            (
+                repository_policy::VERSION + 1,
+                "repository_policy.binary_outdated",
+            ),
+        ] {
+            let directory = tempfile::tempdir().unwrap();
+            std::fs::write(
+                directory.path().join("AGENTS.md"),
+                format!("<!-- stackstead-policy: {version} -->\n"),
+            )
+            .unwrap();
+            let mut diagnostics = Vec::new();
+            diagnose_repository_policy(directory.path(), &mut diagnostics);
+            assert_eq!(diagnostics.len(), 1);
+            assert_eq!(diagnostics[0].code, code);
+            assert_eq!(diagnostics[0].severity, DiagnosticSeverity::Warning);
+        }
+    }
+
+    #[test]
+    fn repository_policy_reports_unversioned_and_invalid_markers() {
+        for (contents, code) in [
+            (
+                "## Stackstead\nRead `$STACKSTEAD_CONTEXT`.\n",
+                "repository_policy.unversioned",
+            ),
+            (
+                "<!-- stackstead-policy: nope -->\n",
+                "repository_policy.invalid",
+            ),
+        ] {
+            let directory = tempfile::tempdir().unwrap();
+            std::fs::write(directory.path().join("CLAUDE.md"), contents).unwrap();
+            let mut diagnostics = Vec::new();
+            diagnose_repository_policy(directory.path(), &mut diagnostics);
+            assert_eq!(diagnostics.len(), 1);
+            assert_eq!(diagnostics[0].code, code);
+            assert_eq!(diagnostics[0].severity, DiagnosticSeverity::Warning);
+        }
     }
 
     #[test]

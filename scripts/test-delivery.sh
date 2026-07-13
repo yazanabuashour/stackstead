@@ -6,7 +6,7 @@ tmp="$(mktemp -d "${TMPDIR:-/tmp}/stackstead-delivery-test.XXXXXX")"
 tmp="$(CDPATH= cd -- "$tmp" && pwd -P)"
 trap 'rm -rf "$tmp"' EXIT
 
-for file in LICENSE SECURITY.md CONTRIBUTING.md docs/quickstart.md docs/agent-setup-v1.md; do
+for file in LICENSE SECURITY.md CONTRIBUTING.md docs/quickstart.md docs/agent-setup.md docs/agent-setup-v1.md; do
   [[ -s "$repo_root/$file" ]]
 done
 
@@ -22,7 +22,8 @@ while IFS= read -r document; do
   done < <(grep -oE '\]\([^)]+' "$repo_root/$document" | sed 's/^](//')
 done < <(git -C "$repo_root" ls-files '*.md')
 
-grep -q 'stackstead launch feature-a -- codex' "$repo_root/docs/quickstart.md"
+grep -q 'stackstead launch feature-a -- claude' "$repo_root/docs/quickstart.md"
+grep -q '<!-- stackstead-policy: 1 -->' "$repo_root/docs/agent-setup.md"
 sh -n "$repo_root/scripts/test-release-install.sh"
 grep -q 'scripts/test-release-install.sh' "$repo_root/.github/workflows/ci.yml"
 grep -q 'scripts/test-release-install.sh' "$repo_root/.github/workflows/release.yml"

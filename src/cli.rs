@@ -9,7 +9,7 @@ use crate::{
     agent, compose, database, doctor, envfile, lifecycle,
     lock::LockGuard,
     manifest::{ComponentStatus, SourceOwnership, StacksteadManifest},
-    open, output, repair,
+    open, output, repair, repository_policy,
 };
 use clap::{Args, Parser, Subcommand};
 
@@ -169,18 +169,11 @@ impl Cli {
                     print_compose_plan(&lifecycle::compose_plan(&cwd)?);
                     println!(
                         "\nNext: review, add, and commit this policy in AGENTS.md, CLAUDE.md, \
-                         or your repository's equivalent instruction file:\n\n\
-                         ## Stackstead\n\n\
-                         For tasks that need services, ports, URLs, databases, migrations, or \
-                         runtime tests, work in a Stackstead—not the canonical checkout—and use \
-                         Stackstead lifecycle commands instead of bare Docker Compose.\n\n\
-                         If `$STACKSTEAD_CONTEXT` is set, read it, stay in `$STACKSTEAD_WORKTREE`, and \
-                         use only the ports, URLs, and database it provides. Otherwise, create a \
-                         new environment with `stackstead --json create <name>`, capture its full \
-                         `stackstead_id`, run `stackstead up <full-id>`, then enter it with `stackstead \
-                         run <full-id> -- <agent-or-command>`. Reuse an environment only when the user or \
-                         manager supplies its exact full ID.\n\n\
-                         Stackstead does not edit human-owned agent instructions."
+                         or your repository's equivalent instruction file:\n\n{}\n{}\n\n\
+                         Stackstead may read recognized root instruction files during `doctor`, \
+                         but it does not edit human-owned agent instructions.",
+                        repository_policy::marker(),
+                        repository_policy::TEXT
                     );
                 }
             }

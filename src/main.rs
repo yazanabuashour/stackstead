@@ -23,6 +23,7 @@ mod output;
 mod paths;
 mod ports;
 mod repair;
+mod repository_policy;
 mod slug;
 mod state;
 mod template;

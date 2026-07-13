@@ -418,6 +418,21 @@ mod tests {
     }
 
     #[test]
+    fn trusted_environment_pins_both_compose_project_variables() {
+        let manifest: StacksteadManifest =
+            serde_json::from_value(manifest_value(MANIFEST_VERSION)).unwrap();
+        let environment = manifest.trusted_environment(&BTreeMap::new());
+        assert_eq!(
+            environment.get("COMPOSE_PROJECT_NAME"),
+            Some(&manifest.compose_project)
+        );
+        assert_eq!(
+            environment.get("STACKSTEAD_COMPOSE_PROJECT"),
+            Some(&manifest.compose_project)
+        );
+    }
+
+    #[test]
     fn pointer_reader_validates_header_before_body() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("stackstead.json");

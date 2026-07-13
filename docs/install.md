@@ -1,103 +1,105 @@
-# Install Stackstead
+# Installation
 
-Release binaries do not require a Rust toolchain. Stackstead itself still expects
-Git and Docker with the Compose plugin when it manages a runtime.
+Stackstead supports Intel and Apple Silicon macOS, plus x86-64 and ARM64
+glibc Linux. It requires Git and Docker with the Compose plugin to manage a
+runtime; release binaries do not require Rust.
 
-## Release installer
-
-Install v0.1.3 from its immutable, checksummed release:
+## Install the latest release
 
 ```sh
-(
-  install_script="$(mktemp)" &&
-  trap 'rm -f "$install_script"' 0 &&
-  curl --proto '=https' --tlsv1.2 -fsSL \
-    --output "$install_script" \
-    https://github.com/yazanabuashour/stackstead/releases/download/v0.1.3/install.sh &&
-  sh "$install_script" --version 0.1.3
-)
+install_script="$(mktemp)" &&
+  curl --proto '=https' --tlsv1.2 -fsSLo "$install_script" \
+    https://github.com/yazanabuashour/stackstead/releases/latest/download/install.sh &&
+  sh "$install_script"
+status=$?
+[ -z "${install_script:-}" ] || rm -f "$install_script"
+(exit "$status")
 ```
 
-Each release publishes `install.sh` as an immutable, checksummed release asset.
+The installer downloads the binary and release checksums, verifies the exact
+asset, and installs `stackstead` to `~/.local/bin`. Add that directory to
+`PATH` if needed, then verify the installation:
 
-The installer selects the current macOS or supported glibc Linux architecture, downloads
-the matching release binary and `SHA256SUMS`, verifies the exact asset checksum,
-then installs `stackstead` to `~/.local/bin`. Add that directory to `PATH` if
-needed. Linux x86-64 releases require glibc 2.35 or newer; Linux ARM64 releases
-currently require glibc 2.39 or newer. The installer detects musl, unknown
-libcs, and older glibc before downloading and fails with a build-from-source
-instruction.
+```sh
+stackstead --version
+```
 
-`STACKSTEAD_REPOSITORY`, `STACKSTEAD_RELEASE_BASE`, `STACKSTEAD_VERSION`, and
-`STACKSTEAD_INSTALL_DIR` are equivalent environment variables. A private mirror
-can use `--release-base https://releases.example.com/stackstead`; it must expose
-GitHub-style `download/vVERSION/ASSET` and `latest/download/ASSET` paths.
-Plain HTTP is rejected. `file://` is accepted only so the installer can be
-tested without network access.
+Prefer to inspect the [installer source](../install.sh) first?
 
-Run `sh install.sh --help` for all options. `--version` selects the Stackstead
-release to install; `--installer-version` prints the install-script contract
-version.
+```sh
+curl --proto '=https' --tlsv1.2 -fsSLo stackstead-install.sh \
+  https://github.com/yazanabuashour/stackstead/releases/latest/download/install.sh
+less stackstead-install.sh
+sh stackstead-install.sh
+```
+
+Run `sh stackstead-install.sh --help` to select a release, install directory,
+fork, or private mirror. The corresponding environment variables are
+`STACKSTEAD_VERSION`, `STACKSTEAD_INSTALL_DIR`, `STACKSTEAD_REPOSITORY`, and
+`STACKSTEAD_RELEASE_BASE`. Mirrors must use HTTPS and expose GitHub-style
+release paths; `file://` is reserved for local installer tests.
+
+Linux x86-64 releases require glibc 2.35 or newer, and Linux ARM64 releases
+require glibc 2.39 or newer. Build from source on musl, older glibc, or another
+unsupported platform. Windows binaries are not currently published.
 
 ## Build from source
 
-To build from a reviewed checkout with the pinned Rust toolchain:
+From a reviewed checkout, use the repository's pinned Rust toolchain:
 
 ```sh
 cargo install --locked --path .
 ```
 
+## Upgrade
+
+Run the latest-release installer again, then run `stackstead doctor`. Also
+compare the repository policy in your agent instruction file with the current
+[agent setup guide](agent-setup.md#repository-policy); agent instructions can
+change independently of the binary.
+
+## Uninstall
+
+Run `stackstead ps` and destroy any retained environments you no longer need,
+using each exact full ID. Then remove `stackstead` from `~/.local/bin`, or from
+the custom directory passed to the installer. Removing only the binary leaves
+worktrees, runtime state, and volumes intact.
+
 ## Homebrew formula
 
-Every release publishes a generated `stackstead.rb` formula alongside the
-binaries. A tap can copy that formula without changing its checksums. To render
-it locally from a release checksum file:
+Each release includes a generated `stackstead.rb` formula for maintainers of
+Homebrew taps. The project does not yet publish its own tap. To render the
+formula locally from a release checksum file:
 
 ```sh
-STACKSTEAD_REPOSITORY=yazanabuashour/stackstead \
-  packaging/homebrew/render-formula.sh 0.1.3 SHA256SUMS stackstead.rb
+packaging/homebrew/render-formula.sh VERSION SHA256SUMS stackstead.rb
 ```
 
-The formula covers Intel and ARM macOS and the documented glibc Linux baselines.
-Windows is not published until Stackstead can preserve its agent-run teardown
-lease across wrapper termination with native Windows process supervision.
+Use the release version without a `v` prefix. Set `STACKSTEAD_REPOSITORY` for a
+fork, or pass a release base as the script's fourth argument for a mirror.
 
-## Publish a release
+## Maintainers
 
-Publication requires the repository owner's GitHub authority. Create and push
-an exact semantic `v`-prefixed tag whose version equals `Cargo.toml`. Preflight resolves
-the tag once, verifies that commit is on `origin/main`, and checks the package
-version. The complete reusable CI workflow then validates that exact revision
-before any matrix build starts. Builds, formula rendering, license assembly, and
-checksums all remain read-only; only the final `release` environment job receives
-`contents: write`, and it rechecks the live tag before attaching the checksum-bound
-bundle to that tag.
+### Publish a release
 
-The public repository uses a protected `release` environment restricted to `v*`
-tags, with no required reviewers or wait timer. A repository ruleset protects
-release tags, and immutable releases are enabled. Copy the generated formula
-into an owner-controlled Homebrew tap when the tap exists. The workflow never
-invents a repository owner or publishes from an untagged local checkout.
+Create and push a `v`-prefixed semantic version tag that exactly matches
+`Cargo.toml`. The release workflow verifies that the tagged commit is on
+`origin/main`, runs the full CI workflow, builds and tests every supported
+binary, and publishes the checksum-bound bundle through the protected
+`release` environment.
 
-## Test packaging locally
+### Test packaging locally
 
-The packaging test builds a tiny fixture binary, serves it through `file://`,
-checks pinned and latest installation, confirms tampering is rejected, and
-renders the Homebrew formula. It makes no network requests:
+The fixture test exercises pinned and latest installation, checksum failure,
+and Homebrew formula rendering without network access:
 
 ```sh
 scripts/test-install.sh
 ```
 
-The real-binary clean-install smoke test builds or accepts the native release
-binary, creates a local GitHub-style release tree and checksum file, installs it
-through `install.sh`, clears the caller environment, and proves the installed
-command reports the exact Cargo package version:
+The clean-install smoke test uses the real release binary:
 
 ```sh
 cargo build --locked --release
 scripts/test-release-install.sh target/release/stackstead
 ```
-
-CI runs this test on the native Linux build, and every release matrix runner
-runs it against the exact macOS or Linux binary before uploading that artifact.

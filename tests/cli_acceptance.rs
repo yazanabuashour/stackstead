@@ -111,6 +111,14 @@ fn load_config(path: &Path) -> StacksteadConfig {
         .expect("parse config fixture")
 }
 
+fn has_diagnostic(report: &Value, code: &str, severity: &str) -> bool {
+    report["diagnostics"].as_array().is_some_and(|items| {
+        items
+            .iter()
+            .any(|item| item["code"] == code && item["severity"] == severity)
+    })
+}
+
 fn append_event(path: &Path, event_type: &str, status: &str) {
     use std::io::Write;
 

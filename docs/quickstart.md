@@ -9,7 +9,7 @@ Docker with the Compose plugin, and the `stackstead` binary.
 If the repository already contains a reviewed and committed `stackstead.yaml`:
 
 ```sh
-stackstead launch feature-a -- codex
+stackstead launch feature-a -- claude
 ```
 
 `launch` creates and starts a new environment, prints its full ID, URLs, and startup
@@ -29,15 +29,14 @@ stackstead destroy <full-id> --yes
 
 ### Use your coding agent
 
-Open the [Stackstead agent setup v1 guide](agent-setup-v1.md), then paste this into
+Open the [Stackstead agent setup guide](agent-setup.md), then paste this into
 a coding agent running from the repository root:
 
-> Set up Stackstead in this repository. Follow the Stackstead agent setup v1 guide,
+> Set up Stackstead in this repository. Follow the Stackstead agent setup guide,
 > reuse the existing Compose setup, make the smallest changes needed, and show
 > me the diff before committing.
 
-The [versioned agent guide](agent-setup-v1.md) contains the current commands,
-repository policy, and safety boundaries.
+The guide contains the current commands, repository policy, and safety boundaries.
 
 ### Set it up manually
 
@@ -54,7 +53,7 @@ repository policy, and safety boundaries.
    For a nested Compose file, pass its repository-relative path with
    `stackstead init --compose-file <path>`.
 
-2. Add the [Stackstead repository policy](agent-setup-v1.md#repository-policy) to
+2. Add the [Stackstead repository policy](agent-setup.md#repository-policy) to
    `AGENTS.md`, `CLAUDE.md`, or the equivalent file used by your coding agents.
 
 3. Review and commit `stackstead.yaml`, the Compose changes, and the repository
@@ -63,7 +62,7 @@ repository policy, and safety boundaries.
 4. Start the first environment:
 
    ```sh
-   stackstead launch feature-a -- codex
+   stackstead launch feature-a -- claude
    ```
 
 For configuration details, see [Configuration](config.md). For recovery and

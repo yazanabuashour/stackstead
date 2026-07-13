@@ -146,7 +146,7 @@ Compose override mappings for environment-specific changes.
 
 ## Applications not already in Compose
 
-Stackstead v0.1 owns Docker Compose runtime lifecycles. A monorepo that normally
+Stackstead currently owns Docker Compose runtime lifecycles. A monorepo that normally
 runs Postgres in Docker but starts API and frontend processes on the host has two
 honest options: add a development Compose service that launches those processes,
 or launch them separately with `stackstead run` and manage their process lifetime

@@ -42,7 +42,7 @@ versions 1 and 2; they may read `live.services` only from version 2.
 Stackstead also supplies a direct process boundary:
 
 ```sh
-stackstead run feature-a -- codex
+stackstead run feature-a -- claude
 stackstead run feature-a -- <agent-or-command> [arguments...]
 ```
 
