@@ -95,7 +95,7 @@ pub fn init_with_compose_file(cwd: &Path, compose_file: Option<&Path>) -> anyhow
         .and_then(|name| name.to_str())
         .ok_or_else(|| anyhow::anyhow!("repository path is not valid UTF-8"))?;
     let project = sanitize_slug(project)?;
-    let base = current_branch(&repo_root).unwrap_or_else(|_| "main".into());
+    let base = current_base(&repo_root)?;
     let plan = compose::plan_at(&repo_root, compose_file)?;
     let yaml = default_config(&project, &base, &plan)?;
     let mut file = std::fs::OpenOptions::new()
@@ -706,8 +706,17 @@ fn up_with_lock(
             let database_state = manifest
                 .database
                 .as_ref()
-                .expect("validated contract has database state");
-            let container_port = manifest.container_ports[&config.service];
+                .ok_or_else(|| anyhow::anyhow!("validated database contract has no state"))?;
+            let container_port = manifest
+                .container_ports
+                .get(&config.service)
+                .copied()
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "validated database contract has no container port for `{}`",
+                        config.service
+                    )
+                })?;
             compose::ensure_endpoint_published(
                 &manifest,
                 &config.service,
@@ -768,7 +777,7 @@ fn up_with_lock(
                 manifest
                     .database
                     .as_mut()
-                    .expect("validated contract has database state")
+                    .ok_or_else(|| anyhow::anyhow!("validated database contract has no state"))?
                     .seed_status = ComponentStatus::Failed;
                 manifest.save_atomic()?;
                 events::append(
@@ -782,7 +791,7 @@ fn up_with_lock(
             let database_state = manifest
                 .database
                 .as_mut()
-                .expect("validated contract has database state");
+                .ok_or_else(|| anyhow::anyhow!("validated database contract has no state"))?;
             database_state.seed_status = ComponentStatus::Ready;
             database_state.last_seed_at = Some(Utc::now());
             timings.seed = Some(phase_started.elapsed());
@@ -1171,13 +1180,21 @@ pub fn inspect(cwd: &Path, name: &str) -> anyhow::Result<InspectOutput> {
         warnings.push("worktree is missing; run `stackstead doctor`".into());
     }
     for file in &manifest.compose_files {
-        for fixed in compose::fixed_ports_in_file(file).unwrap_or_default() {
-            warnings.push(format!(
-                "fixed host port {} in {}:{}",
-                fixed.host_port,
-                file.display(),
-                fixed.file_line
-            ));
+        match compose::fixed_ports_in_file(file) {
+            Ok(fixed_ports) => {
+                for fixed in fixed_ports {
+                    warnings.push(format!(
+                        "fixed host port {} in {}:{}",
+                        fixed.host_port,
+                        file.display(),
+                        fixed.file_line
+                    ));
+                }
+            }
+            Err(error) => warnings.push(format!(
+                "could not inspect fixed ports in {}: {error}",
+                file.display()
+            )),
         }
     }
     Ok(InspectOutput {
@@ -1478,6 +1495,9 @@ pub(crate) fn validate_manifest_binding(
     if manifest.compose_files.is_empty() {
         anyhow::bail!("manifest has no Compose files");
     }
+    if manifest.ports.keys().ne(manifest.container_ports.keys()) {
+        anyhow::bail!("manifest host and container port service sets differ");
+    }
     for file in &manifest.compose_files {
         validate_worktree_path(&manifest.worktree, file, "Compose")?;
     }
@@ -1605,8 +1625,8 @@ fn write_command_log(
     Ok(())
 }
 
-fn current_branch(repo_root: &Path) -> anyhow::Result<String> {
-    let output = command::run(
+fn current_base(repo_root: &Path) -> anyhow::Result<String> {
+    let branch = command::run(
         "git",
         &[
             "symbolic-ref".into(),
@@ -1616,7 +1636,19 @@ fn current_branch(repo_root: &Path) -> anyhow::Result<String> {
         ],
         repo_root,
         &BTreeMap::new(),
-    )?;
+    );
+    let output = match branch {
+        Ok(output) => output,
+        Err(branch_error) => command::run(
+            "git",
+            &["rev-parse".into(), "--verify".into(), "HEAD".into()],
+            repo_root,
+            &BTreeMap::new(),
+        )
+        .with_context(|| {
+            format!("cannot determine the current branch or commit: {branch_error}")
+        })?,
+    };
     Ok(String::from_utf8(output.stdout)?.trim().into())
 }
 
@@ -1685,7 +1717,9 @@ mod tests {
     use super::*;
 
     fn cleanup_manifest(root: &Path, ownership: SourceOwnership) -> StacksteadManifest {
-        let stackstead_root = root.join("state/demo/feature-a-a123");
+        let short_id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let stackstead_id = format!("feature-a-{short_id}");
+        let stackstead_root = root.join("state/demo").join(&stackstead_id);
         let worktree = match ownership {
             SourceOwnership::Stackstead => stackstead_root.join("source"),
             SourceOwnership::External => root.join("manager-source"),
@@ -1716,9 +1750,9 @@ mod tests {
         StacksteadManifest {
             kind: "StacksteadManifest".into(),
             version: crate::manifest::MANIFEST_VERSION.into(),
-            stackstead_id: "feature-a-a123".into(),
+            stackstead_id: stackstead_id.clone(),
             slug: "feature-a".into(),
-            short_id: "a123".into(),
+            short_id: short_id.into(),
             runtime_token: "0123456789abcdef0123456789abcdef".into(),
             project: "demo".into(),
             branch: "feature-a".into(),
@@ -1730,7 +1764,7 @@ mod tests {
             worktree: worktree.clone(),
             state_dir,
             port_lease_state_dir: None,
-            compose_project: "demo-feature-a-a123".into(),
+            compose_project: format!("demo-{stackstead_id}"),
             compose_files: vec![worktree.join("compose.yaml")],
             ports: BTreeMap::new(),
             container_ports: BTreeMap::new(),
@@ -1784,6 +1818,32 @@ mod tests {
         assert!(validate_compose_project("demo-feature-a17c").is_ok());
         assert!(validate_compose_project("Demo-feature").is_err());
         assert!(validate_compose_project("../demo").is_err());
+    }
+
+    #[test]
+    fn manifest_binding_rejects_mismatched_port_service_sets() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut manifest = cleanup_manifest(directory.path(), SourceOwnership::Stackstead);
+        manifest.ports.insert("web".into(), 39000);
+        let mut config = StacksteadConfig::default();
+        config.project.name = "demo".into();
+        let runtime = ProjectRuntime {
+            config,
+            paths: ProjectPaths::new(
+                directory.path().join("repo"),
+                directory.path().join("state"),
+                "demo",
+            ),
+        };
+
+        let error = validate_manifest_binding(&runtime, &manifest)
+            .unwrap_err()
+            .to_string();
+
+        assert_eq!(
+            error,
+            "manifest host and container port service sets differ"
+        );
     }
 
     #[test]

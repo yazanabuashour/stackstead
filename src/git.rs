@@ -5,6 +5,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use anyhow::Context;
+
 use crate::command;
 
 fn empty_env() -> BTreeMap<String, String> {
@@ -242,13 +244,27 @@ pub fn is_registered_worktree(repo_root: &Path, worktree: &Path) -> anyhow::Resu
         repo_root,
         &empty_env(),
     )?;
-    let expected = std::fs::canonicalize(worktree).unwrap_or_else(|_| worktree.to_owned());
-    Ok(String::from_utf8(listed.stdout)?
+    let expected = canonicalize_if_exists(worktree)?;
+    for path in String::from_utf8(listed.stdout)?
         .split('\0')
         .filter_map(|field| field.strip_prefix("worktree "))
         .map(Path::new)
-        .map(|path| std::fs::canonicalize(path).unwrap_or_else(|_| path.to_owned()))
-        .any(|path| path == expected))
+    {
+        if canonicalize_if_exists(path)? == expected {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn canonicalize_if_exists(path: &Path) -> anyhow::Result<PathBuf> {
+    match std::fs::canonicalize(path) {
+        Ok(path) => Ok(path),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(path.to_owned()),
+        Err(error) => {
+            Err(error).with_context(|| format!("cannot resolve worktree path {}", path.display()))
+        }
+    }
 }
 
 pub fn ensure_worktree_clean(worktree: &Path) -> anyhow::Result<()> {
@@ -288,7 +304,14 @@ pub fn ensure_excluded(repository: &Path, pattern: &str) -> anyhow::Result<PathB
         &empty_env(),
     )?;
     let path = PathBuf::from(String::from_utf8(output.stdout)?.trim());
-    let existing = std::fs::read_to_string(&path).unwrap_or_default();
+    let existing = match std::fs::read_to_string(&path) {
+        Ok(existing) => existing,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(error) => {
+            return Err(error)
+                .with_context(|| format!("cannot read Git exclude file {}", path.display()));
+        }
+    };
     if !existing.lines().any(|line| line.trim() == pattern) {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
@@ -318,6 +341,7 @@ pub fn is_stackstead_ignored(worktree: &Path) -> bool {
 
 #[cfg(all(test, unix))]
 mod tests {
+    use std::os::unix::fs::symlink;
     use std::process::Command;
 
     use super::*;
@@ -357,5 +381,41 @@ mod tests {
             .unwrap();
         assert!(output.success());
         assert!(is_registered_worktree(&repository, &worktree).unwrap());
+        std::fs::remove_dir_all(&worktree).unwrap();
+        assert!(is_registered_worktree(&repository, &worktree).unwrap());
+    }
+
+    #[test]
+    fn registered_worktree_check_propagates_canonicalization_errors() {
+        let directory = tempfile::tempdir().unwrap();
+        let repository = directory.path().join("repository");
+        std::fs::create_dir(&repository).unwrap();
+        git(&repository, &["init", "-q"]);
+        let loop_path = directory.path().join("loop");
+        symlink(&loop_path, &loop_path).unwrap();
+
+        let error = is_registered_worktree(&repository, &loop_path)
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("cannot resolve worktree path"));
+    }
+
+    #[test]
+    fn ensure_excluded_preserves_invalid_utf8_on_error() {
+        let directory = tempfile::tempdir().unwrap();
+        let repository = directory.path().join("repository");
+        std::fs::create_dir(&repository).unwrap();
+        git(&repository, &["init", "-q"]);
+        let exclude = repository.join(".git/info/exclude");
+        let original = b"existing\n\xffinvalid\n";
+        std::fs::write(&exclude, original).unwrap();
+
+        let error = ensure_excluded(&repository, ".stackstead/")
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("cannot read Git exclude file"));
+        assert_eq!(std::fs::read(exclude).unwrap(), original);
     }
 }

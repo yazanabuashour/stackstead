@@ -256,7 +256,7 @@ impl Cli {
                 }
                 let (program, args) = command
                     .split_first()
-                    .expect("clap requires at least one command argument");
+                    .ok_or_else(|| anyhow::anyhow!("run requires a command after `--`"))?;
                 return agent::run(&cwd, name, program, args).map(agent::exit_code);
             }
             Commands::Launch { name, command } => {
@@ -267,7 +267,7 @@ impl Cli {
                 }
                 let (program, args) = command
                     .split_first()
-                    .expect("clap requires at least one command argument");
+                    .ok_or_else(|| anyhow::anyhow!("launch requires a command after `--`"))?;
                 let created = lifecycle::create_for_launch(&cwd, name)?;
                 println!("Created {}", created.manifest.stackstead_id);
                 let stackstead_id = created.manifest.stackstead_id.clone();
@@ -434,7 +434,12 @@ impl Cli {
                 .container_ports
                 .get(service)
                 .copied()
-                .unwrap_or_default();
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "manifest port contract for {} has no container port for `{service}`",
+                        manifest.stackstead_id
+                    )
+                })?;
             println!("  {service:<14} {port} -> {target}");
         }
         println!("\nFiles:");

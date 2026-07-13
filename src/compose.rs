@@ -870,15 +870,22 @@ fn ownership_model(files: &[PathBuf]) -> anyhow::Result<OwnershipModel> {
                     file.display()
                 );
             }
-            if service
-                .get(serde_yaml::Value::String("container_name".into()))
-                .and_then(serde_yaml::Value::as_str)
-                .is_some_and(contains_interpolation)
+            if let Some(container_name) =
+                service.get(serde_yaml::Value::String("container_name".into()))
+                && !is_null_or_tagged_null(container_name)
             {
-                anyhow::bail!(
-                    "Compose service `{name}` in {} uses interpolation in container_name; Stackstead requires a literal name for ownership attestation",
-                    file.display()
-                );
+                let container_name = container_name.as_str().ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "Compose service `{name}` in {} has a non-string container_name",
+                        file.display()
+                    )
+                })?;
+                if contains_interpolation(container_name) {
+                    anyhow::bail!(
+                        "Compose service `{name}` in {} uses interpolation in container_name; Stackstead requires a literal name for ownership attestation",
+                        file.display()
+                    );
+                }
             }
             validate_service_volumes(name, service, &declared_volumes, file)?;
             model.services.insert(name.into());
@@ -919,7 +926,16 @@ fn collect_resource_states(
         let external = resource_is_external(mapping, field, name, file)?;
         let custom_name = mapping
             .and_then(|mapping| mapping.get(serde_yaml::Value::String("name".into())))
-            .and_then(serde_yaml::Value::as_str);
+            .filter(|value| !is_null_or_tagged_null(value))
+            .map(|value| {
+                value.as_str().ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "Compose {field} `{name}` in {} has a non-string name",
+                        file.display()
+                    )
+                })
+            })
+            .transpose()?;
         if custom_name.is_some_and(contains_interpolation) {
             anyhow::bail!(
                 "Compose {field} `{name}` in {} uses interpolation in name; Stackstead requires a literal name for ownership attestation",
@@ -967,10 +983,15 @@ fn validate_service_volumes(
                 ),
             }
         } else if let Some(mapping) = volume.as_mapping() {
-            let kind = mapping
-                .get(serde_yaml::Value::String("type".into()))
-                .and_then(serde_yaml::Value::as_str)
-                .unwrap_or("volume");
+            let kind = match mapping.get(serde_yaml::Value::String("type".into())) {
+                Some(value) => value.as_str().ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "Compose service `{service_name}` in {} has a non-string volume type",
+                        file.display()
+                    )
+                })?,
+                None => "volume",
+            };
             if kind != "volume" {
                 None
             } else {
@@ -1368,25 +1389,23 @@ fn expected_runtime_names(manifest: &StacksteadManifest) -> anyhow::Result<Expec
                     file.display()
                 )
             })?;
-            let custom = value
-                .get(serde_yaml::Value::String("container_name".into()))
-                .map(|value| {
-                    value.as_str().map(str::to_owned).ok_or_else(|| {
-                        anyhow::anyhow!(
-                            "Compose service `{name}` in {} has a non-string container_name",
-                            file.display()
-                        )
-                    })
-                })
-                .transpose()?;
+            let custom = match value.get(serde_yaml::Value::String("container_name".into())) {
+                None => services.get(name).cloned().flatten(),
+                Some(value) if is_null_or_tagged_null(value) => None,
+                Some(value) => Some(value.as_str().map(str::to_owned).ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "Compose service `{name}` in {} has a non-string container_name",
+                        file.display()
+                    )
+                })?),
+            };
             if custom.as_deref().is_some_and(contains_interpolation) {
                 anyhow::bail!(
                     "Compose service `{name}` in {} uses interpolation in container_name; Stackstead requires a literal name for ownership attestation",
                     file.display()
                 );
             }
-            let inherited = services.get(name).cloned().flatten();
-            services.insert(name.into(), custom.or(inherited));
+            services.insert(name.into(), custom);
         }
     }
     let mut container_names = BTreeSet::new();
@@ -1466,6 +1485,7 @@ fn collect_runtime_names(
         let managed = !resource_is_external(mapping, field, name, file)?;
         let custom = mapping
             .and_then(|mapping| mapping.get(serde_yaml::Value::String("name".into())))
+            .filter(|value| !is_null_or_tagged_null(value))
             .map(|value| {
                 value.as_str().map(str::to_owned).ok_or_else(|| {
                     anyhow::anyhow!(
@@ -1499,6 +1519,14 @@ fn collect_runtime_names(
 
 fn contains_interpolation(value: &str) -> bool {
     value.contains('$')
+}
+
+fn is_null_or_tagged_null(value: &serde_yaml::Value) -> bool {
+    match value {
+        serde_yaml::Value::Null => true,
+        serde_yaml::Value::Tagged(value) => is_null_or_tagged_null(&value.value),
+        _ => false,
+    }
 }
 
 fn resource_is_external(
@@ -1981,6 +2009,90 @@ volumes:
                 .to_string();
             assert!(error.contains(expected), "unexpected error: {error}");
         }
+    }
+
+    #[test]
+    fn ownership_override_rejects_non_string_optional_fields() {
+        let directory = tempfile::tempdir().unwrap();
+        let compose = directory.path().join("compose.yaml");
+        let mut manifest = manifest();
+        manifest.compose_files = vec![compose.clone()];
+        for (contents, subject, expected) in [
+            (
+                "services:\n  web:\n    container_name: 7\n",
+                "service `web`",
+                "non-string container_name",
+            ),
+            (
+                "services:\n  web:\n    volumes:\n      - type: 7\n        source: data\n        target: /data\nvolumes:\n  data: {}\n",
+                "service `web`",
+                "non-string volume type",
+            ),
+            (
+                "services:\n  web: {}\nvolumes:\n  data:\n    name: 7\n",
+                "volumes `data`",
+                "non-string name",
+            ),
+        ] {
+            std::fs::write(&compose, contents).unwrap();
+            let error = render_ownership_override(&manifest)
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains(subject), "unexpected error: {error}");
+            assert!(error.contains(expected), "unexpected error: {error}");
+            assert!(
+                error.contains(&compose.display().to_string()),
+                "unexpected error: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn ownership_and_runtime_names_accept_null_name_resets() {
+        let directory = tempfile::tempdir().unwrap();
+        let primary = directory.path().join("compose.yaml");
+        let overlay = directory.path().join("compose.reset.yaml");
+        std::fs::write(
+            &primary,
+            "services:\n  web:\n    container_name: custom-web\n",
+        )
+        .unwrap();
+        std::fs::write(
+            &overlay,
+            "services:\n  web:\n    container_name: !reset null\nvolumes:\n  data:\n    name: null\nnetworks:\n  backend:\n    name: !reset null\n",
+        )
+        .unwrap();
+        let mut manifest = manifest();
+        manifest.compose_files = vec![primary, overlay];
+
+        assert!(render_ownership_override(&manifest).is_ok());
+        let runtime_names = expected_runtime_names(&manifest).unwrap();
+        let names = |kind: &str| {
+            runtime_names
+                .iter()
+                .find(|(candidate, ..)| candidate == kind)
+                .map(|(_, _, _, names)| names)
+                .unwrap()
+        };
+        assert!(names("container").contains("demo-a-b123-web-1"));
+        assert!(!names("container").contains("custom-web"));
+        assert!(names("volume").contains("demo-a-b123_data"));
+        assert!(names("network").contains("demo-a-b123_backend"));
+    }
+
+    #[test]
+    fn ownership_override_defaults_an_omitted_volume_type() {
+        let directory = tempfile::tempdir().unwrap();
+        let compose = directory.path().join("compose.yaml");
+        std::fs::write(
+            &compose,
+            "services:\n  web:\n    volumes:\n      - source: data\n        target: /data\nvolumes:\n  data: {}\n",
+        )
+        .unwrap();
+        let mut manifest = manifest();
+        manifest.compose_files = vec![compose];
+
+        assert!(render_ownership_override(&manifest).is_ok());
     }
 
     #[test]
