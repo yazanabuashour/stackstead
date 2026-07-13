@@ -23,6 +23,7 @@ while IFS= read -r document; do
 done < <(git -C "$repo_root" ls-files '*.md')
 
 grep -q 'stackstead launch feature-a -- claude' "$repo_root/docs/quickstart.md"
+grep -q '<!-- stackstead-policy: 1 -->' "$repo_root/docs/agent-setup.md"
 sh -n "$repo_root/scripts/test-release-install.sh"
 grep -q 'scripts/test-release-install.sh' "$repo_root/.github/workflows/ci.yml"
 grep -q 'scripts/test-release-install.sh' "$repo_root/.github/workflows/release.yml"

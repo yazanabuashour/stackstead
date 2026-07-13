@@ -1,3 +1,4 @@
+<!-- stackstead-policy: 1 -->
 # Stackstead Project Rules
 
 ## Runtime Identity And Safety

@@ -111,6 +111,14 @@ fn load_config(path: &Path) -> StacksteadConfig {
         .expect("parse config fixture")
 }
 
+fn has_diagnostic(report: &Value, code: &str, severity: &str) -> bool {
+    report["diagnostics"].as_array().is_some_and(|items| {
+        items
+            .iter()
+            .any(|item| item["code"] == code && item["severity"] == severity)
+    })
+}
+
 fn append_event(path: &Path, event_type: &str, status: &str) {
     use std::io::Write;
 
@@ -441,13 +449,16 @@ fn human_init_recommends_but_does_not_edit_repository_instructions() {
     let stdout = output_text(&assert.get_output().stdout);
     for expected in [
         "review, add, and commit this policy",
-        "lifecycle commands instead of bare Docker Compose",
+        "commands instead of bare Docker Compose",
         "stackstead --json create <name>",
         "stackstead up <full-id>",
         "stackstead run <full-id> -- <agent-or-command>",
-        "use only the ports, URLs, and database it provides",
-        "Reuse an environment only when the user or manager supplies its exact full ID",
-        "Stackstead does not edit human-owned agent instructions",
+        "only the ports, URLs, and database it provides",
+        "Reuse an environment only when the user",
+        "manager supplies its exact full ID",
+        "<!-- stackstead-policy: 1 -->",
+        "Stackstead may read recognized root instruction files during `doctor`",
+        "does not edit human-owned agent instructions",
     ] {
         assert!(
             stdout.contains(expected),
@@ -1087,7 +1098,7 @@ fn run_pins_stackstead_identity_and_preserves_the_child_exit_code() {
         r#"#!/bin/sh
 test "$PWD" = "$1" || exit 91
 test "$STACKSTEAD_ID" = "$2" || exit 92
-test "$STACKSTEAD_COMPOSE_PROJECT" = "$3" || exit 93
+test -z "${STACKSTEAD_COMPOSE_PROJECT+x}" || exit 93
 test "$COMPOSE_PROJECT_NAME" = "$3" || exit 94
 test "$STACKSTEAD_WORKTREE" = "$1" || exit 95
 printf '%s|%s\n' "$STACKSTEAD_ID" "$4"
@@ -3255,6 +3266,59 @@ fn doctor_fail_on_error_keeps_complete_json_and_ignores_warnings() {
     assert_eq!(error_report["ok"], false);
     assert!(error_report["error_count"].as_u64().unwrap() > 0);
     assert!(!error_report["diagnostics"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn doctor_reports_repository_policy_freshness_without_failing() {
+    let project = Project::initialized();
+    let instructions = project.repo.join("AGENTS.md");
+
+    let report = stackstead(&project.repo)
+        .args(["doctor", "--json", "--fail-on-error"])
+        .assert()
+        .success();
+    let report: Value = serde_json::from_slice(&report.get_output().stdout).unwrap();
+    assert!(has_diagnostic(
+        &report,
+        "repository_policy.missing",
+        "warning"
+    ));
+
+    for (contents, code, severity) in [
+        (
+            "<!-- stackstead-policy: 0 -->\n",
+            "repository_policy.outdated",
+            "warning",
+        ),
+        (
+            "## Stackstead\nRead `$STACKSTEAD_CONTEXT`.\n",
+            "repository_policy.unversioned",
+            "warning",
+        ),
+        (
+            "<!-- stackstead-policy: 2 -->\n",
+            "repository_policy.binary_outdated",
+            "warning",
+        ),
+        (
+            "<!-- stackstead-policy: 1 -->\n",
+            "repository_policy.current",
+            "info",
+        ),
+    ] {
+        fs::write(&instructions, contents).unwrap();
+        let report = stackstead(&project.repo)
+            .args(["doctor", "--json", "--fail-on-error"])
+            .assert()
+            .success();
+        let report: Value = serde_json::from_slice(&report.get_output().stdout).unwrap();
+        assert!(has_diagnostic(&report, code, severity), "{report:#}");
+        assert!(!has_diagnostic(
+            &report,
+            "repository_policy.missing",
+            "warning"
+        ));
+    }
 }
 
 #[test]

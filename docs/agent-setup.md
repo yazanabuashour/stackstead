@@ -30,6 +30,7 @@ committing.
 ## Repository policy
 
 ```md
+<!-- stackstead-policy: 1 -->
 ## Stackstead
 
 For tasks that need services, ports, URLs, databases, migrations, or runtime
@@ -43,6 +44,10 @@ with `stackstead --json create <name>`, capture its full `stackstead_id`, run
 `stackstead run <full-id> -- <agent-or-command>`. Reuse an environment only when the user
 or manager supplies its exact full ID.
 ```
+
+`doctor` verifies this marker in a root `AGENTS.md` or `CLAUDE.md`. Other
+instruction filenames remain valid for agents, but Stackstead cannot detect
+their policy version.
 
 After the user reviews and commits the setup, the first environment can start with:
 

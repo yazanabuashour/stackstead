@@ -47,8 +47,7 @@ the rest support scripts and integrations.
 | `STACKSTEAD_PROJECT` | Stackstead project name |
 | `STACKSTEAD_MANIFEST` | Machine-readable runtime contract |
 | `STACKSTEAD_ENV_FILE` | Generated environment file; do not print or retain its contents |
-| `STACKSTEAD_COMPOSE_PROJECT` | Manifest-owned Compose identity |
-| `COMPOSE_PROJECT_NAME` | The same identity in Docker Compose's standard variable |
+| `COMPOSE_PROJECT_NAME` | Manifest-owned identity using Docker Compose's standard variable |
 
 Read these values; do not invent or override them. `STACKSTEAD_ID` is also
 written to the generated Compose environment, while the wrapper pins it for
@@ -63,8 +62,9 @@ Generated context cannot help an agent that starts normally in the canonical
 checkout and does not yet know the project expects Stackstead. Add the copyable
 policy from the [agent setup guide](agent-setup.md#repository-policy) to
 `AGENTS.md`, `CLAUDE.md`, or the equivalent repository instruction file.
-Stackstead recommends this after human-readable `init` output but never creates,
-parses, or edits those human-owned files.
+Stackstead recommends this after human-readable `init` output. `doctor` reads
+recognized root instruction files to check the policy marker, but Stackstead
+never creates or edits those human-owned files.
 
 The layers have separate responsibilities:
 

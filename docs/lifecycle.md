@@ -107,7 +107,14 @@ stackstead doctor --fail-on-error
 stackstead repair feature-a
 ```
 
-`doctor` is read-only. It checks local prerequisites, config, state/manifests, typed event journals, lock files, port allocation, Compose port patterns, generated files, worktree discovery, and known Docker projects. The default command reports the complete result and exits successfully when diagnostics were produced. `--fail-on-error` exits 1 only when at least one error diagnostic exists, making the same complete human or JSON report suitable for CI; warnings alone still exit 0.
+`doctor` is read-only. It checks local prerequisites, the policy marker in a
+root `AGENTS.md` or `CLAUDE.md`, config, state/manifests, typed event journals,
+lock files, port allocation, Compose port patterns, generated files, worktree
+discovery, and known Docker projects. Missing, unversioned, outdated, or newer
+policy markers are warnings. The default command reports the complete result
+and exits successfully when diagnostics were produced. `--fail-on-error` exits
+1 only when at least one error diagnostic exists, making the same complete
+human or JSON report suitable for CI; warnings alone still exit 0.
 
 `repair` is deliberately conservative. It first verifies the exact host-wide port lease, then may regenerate env, context, and pointer files; recreate non-destructive state directories; refresh the Git exclude; rerun configured dependency/link setup; and refresh status. It does not delete worktrees or volumes, rewrite Compose files, or run Docker prune.
 

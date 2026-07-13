@@ -225,7 +225,6 @@ impl StacksteadManifest {
                 self.agent_context.display().to_string(),
             ),
             ("STACKSTEAD_ENV_FILE", self.env_file.display().to_string()),
-            ("STACKSTEAD_COMPOSE_PROJECT", self.compose_project.clone()),
             ("COMPOSE_PROJECT_NAME", self.compose_project.clone()),
         ] {
             environment.insert(key.into(), value);
@@ -415,6 +414,18 @@ mod tests {
     fn generated_runtime_tokens_have_the_contract_shape() {
         let token = new_runtime_token().unwrap();
         assert!(valid_runtime_token(&token));
+    }
+
+    #[test]
+    fn trusted_environment_uses_the_standard_compose_project_variable() {
+        let manifest: StacksteadManifest =
+            serde_json::from_value(manifest_value(MANIFEST_VERSION)).unwrap();
+        let environment = manifest.trusted_environment(&BTreeMap::new());
+        assert_eq!(
+            environment.get("COMPOSE_PROJECT_NAME"),
+            Some(&manifest.compose_project)
+        );
+        assert!(!environment.contains_key("STACKSTEAD_COMPOSE_PROJECT"));
     }
 
     #[test]
