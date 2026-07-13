@@ -1,8 +1,6 @@
-# Run parallel coding agents against your real app—without sharing ports, services, or databases.
+# Stackstead
 
-Stackstead turns your existing Docker Compose setup into a separate local app
-stack for every agent. Each gets its own worktree, Compose project, URLs,
-volumes, and database state, with validated cleanup when the work is done.
+**Run parallel coding agents against your real app—without sharing ports, services, or databases.**
 
 - **Your real stack:** reuse the existing Compose topology instead of maintaining
   a second agent-specific environment.
@@ -30,11 +28,11 @@ custom install paths, and building from source.
 In a repository already configured for Stackstead:
 
 ```sh
-stackstead launch feature-a -- codex
+stackstead launch feature-a -- claude
 ```
 
 Stackstead creates a worktree and Compose project, allocates ports, starts the
-services, and launches Codex inside that exact environment. Replace `codex` with
+services, and launches Codex inside that exact environment. Replace `claude` with
 any agent or command.
 
 To add Stackstead to a repository, ask your coding agent to follow the
@@ -81,24 +79,12 @@ Worktrunk, workmux, webmux, and generic launchers live in
 [`integrations/`](integrations). See [Manager integrations](docs/integrations.md)
 for the ownership and teardown contract.
 
-## Verified isolation
+## Verified harmony
 
 The [three-agent demo](examples/three-agent-demo/README.md) starts three real
 Nginx/Postgres stacks, proves their ports and databases are isolated, recovers
 one after failure, and tears it down without touching its peers. The same proof
 runs in CI through `scripts/docker-integration.sh`.
-
-## Safety boundary
-
-Stackstead isolates development runtime identity and state; it is not a security
-sandbox, secret manager, hosted environment, CI system, or production deployment
-tool. Processes still run with the launching user's machine and Docker daemon
-permissions.
-
-Compose-managed resources are isolated by project identity. External or globally
-named volumes, host bind mounts, host networking, and services outside Compose
-can still share state. `stackstead doctor` reports common isolation breakers but
-does not rewrite arbitrary application topology.
 
 ## Documentation
 
