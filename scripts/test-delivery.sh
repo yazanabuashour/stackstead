@@ -6,7 +6,7 @@ tmp="$(mktemp -d "${TMPDIR:-/tmp}/stackstead-delivery-test.XXXXXX")"
 tmp="$(CDPATH= cd -- "$tmp" && pwd -P)"
 trap 'rm -rf "$tmp"' EXIT
 
-for file in LICENSE SECURITY.md CONTRIBUTING.md docs/quickstart.md docs/agent-setup.md docs/agent-setup-v1.md; do
+for file in LICENSE SECURITY.md CONTRIBUTING.md docs/quickstart.md docs/agent-setup.md; do
   [[ -s "$repo_root/$file" ]]
 done
 

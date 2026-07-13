@@ -7,13 +7,7 @@ runtime; release binaries do not require Rust.
 ## Install the latest release
 
 ```sh
-install_script="$(mktemp)" &&
-  curl --proto '=https' --tlsv1.2 -fsSLo "$install_script" \
-    https://github.com/yazanabuashour/stackstead/releases/latest/download/install.sh &&
-  sh "$install_script"
-status=$?
-[ -z "${install_script:-}" ] || rm -f "$install_script"
-(exit "$status")
+curl -fsSL https://github.com/yazanabuashour/stackstead/releases/latest/download/install.sh | sh
 ```
 
 The installer downloads the binary and release checksums, verifies the exact

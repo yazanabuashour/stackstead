@@ -15,13 +15,7 @@ worktree managers.
 ## Install
 
 ```sh
-install_script="$(mktemp)" &&
-  curl -fsSLo "$install_script" \
-    https://github.com/yazanabuashour/stackstead/releases/latest/download/install.sh &&
-  sh "$install_script"
-status=$?
-[ -z "${install_script:-}" ] || rm -f "$install_script"
-(exit "$status")
+curl -fsSL https://github.com/yazanabuashour/stackstead/releases/latest/download/install.sh | sh
 ```
 
 This installs the latest checksummed binary to `~/.local/bin`. Stackstead

@@ -1,9 +1,0 @@
-title = "Stackstead gitleaks configuration"
-
-[extend]
-useDefault = true
-
-[[allowlists]]
-description = "Fixed non-secret runtime token used only by test fixtures"
-regexTarget = "secret"
-regexes = ['''^0123456789abcdef0123456789abcdef$''']
