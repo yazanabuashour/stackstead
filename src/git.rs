@@ -258,13 +258,8 @@ pub fn is_registered_worktree(repo_root: &Path, worktree: &Path) -> anyhow::Resu
 }
 
 fn canonicalize_if_exists(path: &Path) -> anyhow::Result<PathBuf> {
-    match std::fs::canonicalize(path) {
-        Ok(path) => Ok(path),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(path.to_owned()),
-        Err(error) => {
-            Err(error).with_context(|| format!("cannot resolve worktree path {}", path.display()))
-        }
-    }
+    crate::paths::resolve_existing_ancestor(path)
+        .with_context(|| format!("cannot resolve worktree path {}", path.display()))
 }
 
 pub fn ensure_worktree_clean(worktree: &Path) -> anyhow::Result<()> {
@@ -361,7 +356,11 @@ mod tests {
     fn registered_worktree_parser_preserves_newlines_in_paths() {
         let directory = tempfile::tempdir().unwrap();
         let repository = directory.path().join("repository");
+        let worktrees = directory.path().join("worktrees");
+        let worktree_alias = directory.path().join("worktree-alias");
         std::fs::create_dir(&repository).unwrap();
+        std::fs::create_dir(&worktrees).unwrap();
+        symlink(&worktrees, &worktree_alias).unwrap();
         git(&repository, &["init", "-q"]);
         git(
             &repository,
@@ -372,7 +371,7 @@ mod tests {
         git(&repository, &["add", "README.md"]);
         git(&repository, &["commit", "-qm", "initial"]);
 
-        let worktree = directory.path().join("line\nbreak");
+        let worktree = worktree_alias.join("line\nbreak");
         let output = Command::new("git")
             .args(["worktree", "add", "-q", "-b", "newline-path"])
             .arg(&worktree)
