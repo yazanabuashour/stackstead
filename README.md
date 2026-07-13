@@ -1,172 +1,116 @@
-# Stackstead
+# Stackstead: a real app stack for every coding agent
 
-**Give every coding agent its own real copy of your application—with separate source, services, ports, and data.**
-
-Stackstead builds on your repository's Docker Compose development setup to give
-every coding agent its own worktree, services, ports, and data. Each copy stays
-tied to one exact checkout and Compose project, so inspection, recovery, and
-cleanup target the right environment.
-
-Stackstead is the runtime substrate under Codex, Claude Code, Cursor, workmux, webmux, Worktrunk, or another manager. It does not replace the agent, terminal, editor, or dashboard.
-
-## Why Stackstead
-
-Starting three application copies is the easy part. The expensive failure is an
-agent connecting to the wrong database or cleanup trusting stale, mutable
-identity. Stackstead binds source, generated environment, Compose project, ports,
-database state, and teardown to one reciprocal manifest and checkout pointer.
-Lifecycle commands refuse to proceed when that identity is ambiguous or
-redirected.
+Run agents in parallel without sharing source, services, ports, or data.
+Stackstead builds isolated environments on top of your existing Docker Compose
+setup and works with Codex, Claude Code, Cursor, and worktree managers.
 
 ## Install
 
-Install v0.1.3 from its immutable release asset:
-
 ```sh
-(
-  install_script="$(mktemp)" &&
-  trap 'rm -f "$install_script"' 0 &&
-  curl --proto '=https' --tlsv1.2 -fsSL \
-    --output "$install_script" \
-    https://github.com/yazanabuashour/stackstead/releases/download/v0.1.3/install.sh &&
-  sh "$install_script" --version 0.1.3
-)
+curl -fsSL https://github.com/yazanabuashour/stackstead/releases/latest/download/install.sh | sh
 ```
 
-The installer verifies the selected binary against the release checksums.
-Supported platform baselines, source installation, and the generated
-Homebrew formula are documented in [Installation](docs/install.md).
+This installs the latest checksummed binary to `~/.local/bin`. Stackstead
+supports macOS and glibc Linux and requires Git plus Docker with the Compose
+plugin. See [Installation](docs/install.md) for platform details, pinned releases,
+custom install paths, and building from source.
 
-Prerequisites are Git and Docker with the Compose plugin. Stackstead v0.1 owns
-Compose runtimes; native host processes must be wrapped in Compose or launched
-separately with `stackstead run` and managed by their caller.
+## Quick start
 
-## Quickstart
-
-### Start an environment
-
-If the repository already contains a reviewed and committed `stackstead.yaml`:
+In a repository already configured for Stackstead:
 
 ```sh
 stackstead launch feature-a -- codex
 ```
 
-`launch` creates and starts a new environment, then runs the command inside it. It
-prints the durable full ID, URLs, and startup timings along the way.
+Stackstead creates a worktree and Compose project, allocates ports, starts the
+services, and launches Codex inside that exact environment. Replace `codex` with
+any agent or command.
 
-### Add Stackstead
+To add Stackstead to a repository, ask your coding agent to follow the
+[agent setup guide](docs/agent-setup-v1.md):
 
-Ask a coding agent to follow the [Stackstead agent setup v1 guide](docs/agent-setup-v1.md):
+> Set up Stackstead in this repository. Follow the Stackstead agent setup v1
+> guide, reuse the existing Compose setup, make the smallest changes needed,
+> and show me the diff before committing.
 
-> Set up Stackstead in this repository. Follow the Stackstead agent setup v1 guide,
-> reuse the existing Compose setup, make the smallest changes needed, and show
-> me the diff before committing.
+Prefer to do it yourself? Follow the [manual quickstart](docs/quickstart.md).
 
-Or [set it up manually](docs/quickstart.md). Once the changes are reviewed and
-committed, start the first environment with `stackstead launch`.
+## Why Stackstead
 
-## What every stackstead owns
+- **No collisions.** Every environment gets its own checkout, Compose project,
+  ports, volumes, and database state.
+- **No guessing.** A durable ID ties the checkout, runtime, generated context,
+  and lifecycle state together.
+- **Safe cleanup.** `stop` preserves source and data; `destroy` validates identity
+  and checkout cleanliness before removing only the selected environment.
+- **Use your existing tools.** Stackstead supplies the runtime beneath your agent,
+  terminal, editor, dashboard, or worktree manager instead of replacing them.
 
-- An exact Git worktree and branch, or an explicitly adopted manager-owned checkout
-- A collision-resistant ID and Docker Compose project name
-- Deterministically allocated host ports and service URLs
-- A generated `.stackstead/.env` with redacted inspection commands
-- Compose-local containers, networks, volumes, and database state
-- A durable, versioned `state/manifest.json`
-- `.stackstead/AGENT_CONTEXT.md` generated from the same identity
-- Source, dependency, runtime, database, and health status
-- An append-only `state/events.jsonl`
-
-The manifest—not a directory name, branch guess, or Docker search—is lifecycle authority. `destroy` validates containment, worktree ownership, Compose identity, and cleanliness before deleting anything. It never performs global Docker pruning.
-
-## Agent-native operation
-
-Create a new environment and enter it in one command:
-
-```sh
-stackstead launch feature-a -- codex
-```
-
-Run another command inside an existing environment by its full ID:
-
-```sh
-stackstead run <full-id> -- npm test
-```
-
-The child starts in the exact worktree with generated environment values plus pinned `STACKSTEAD_*` and `COMPOSE_PROJECT_NAME` identity. Stackstead preserves its exit status. See [Agent integration](docs/agent-integration.md).
-
-When another manager owns worktree creation, bind it explicitly:
-
-```sh
-stackstead adopt feature-a --worktree /absolute/path/to/manager-worktree
-stackstead up feature-a
-stackstead run feature-a -- codex
-stackstead destroy feature-a --yes  # runtime/state removed; external checkout preserved
-```
-
-The manifest records `source_ownership: external`, and its pointer must reciprocally identify that same full environment before any operation, so Stackstead cannot silently redirect or delete another manager-owned checkout. Ready-to-use Worktrunk, workmux, webmux, and generic hooks live in [`integrations/`](integrations); see [Manager integrations](docs/integrations.md).
-
-## Inspect, recover, and clean up
+## Everyday commands
 
 ```sh
 stackstead ps
-stackstead inspect feature-a
-stackstead inspect feature-a --json
-stackstead env feature-a
-stackstead context feature-a --print
-stackstead logs feature-a --tail 200
-stackstead db status feature-a
-stackstead open feature-a web
-stackstead doctor
-stackstead doctor --fail-on-error # CI: exit 1 only for error diagnostics
-stackstead repair feature-a
-stackstead stop feature-a
+stackstead inspect <full-id>
+stackstead logs <full-id> --tail 200
+stackstead run <full-id> -- npm test
+stackstead open <full-id> web
+stackstead db status <full-id>
+stackstead stop <full-id>
+stackstead destroy <full-id> --yes
+```
+
+Use the full ID printed by `launch` in scripts and runtime-sensitive commands.
+Inside an environment, use `$STACKSTEAD_ID` directly. See
+[Agent integration](docs/agent-integration.md) for generated context and JSON
+workflows.
+
+## Existing worktree managers
+
+When another tool owns the checkout, Stackstead can adopt it without taking
+ownership of the source:
+
+```sh
+stackstead adopt feature-a --worktree /absolute/path/to/worktree
+stackstead up feature-a
+stackstead run feature-a -- codex
 stackstead destroy feature-a --yes
 ```
 
-`stop` preserves source and volumes. `repair` conservatively regenerates contract files and refreshes status. `destroy` refuses a dirty checkout before removing runtime data. Every JSON response is a command-owned version 1 object rather than a serialized manifest or internal result type.
+The external checkout is preserved after teardown. Ready-to-use hooks for
+Worktrunk, workmux, webmux, and generic launchers live in
+[`integrations/`](integrations). See [Manager integrations](docs/integrations.md)
+for the ownership and teardown contract.
 
 ## Proof, not promises
 
-The [three-agent proof](examples/three-agent-demo/README.md) starts three real Nginx/Postgres stacks with the same migration ID but different branch payloads, proves six unique ports and three isolated databases, kills only one database, proves its peers survive, recovers the same state, retires a service, and proves exact manifest-led teardown removes its orphan without touching peers:
-
-```sh
-cargo build
-STACKSTEAD_BIN="$PWD/target/debug/stackstead" \
-  examples/three-agent-demo/demo.sh all /tmp/stackstead-three-agent-proof
-```
-
-This proof is a mandatory CI job through `scripts/docker-integration.sh`.
+The [three-agent demo](examples/three-agent-demo/README.md) starts three real
+Nginx/Postgres stacks, proves their ports and databases are isolated, recovers
+one after failure, and tears it down without touching its peers. The same proof
+runs in CI through `scripts/docker-integration.sh`.
 
 ## Safety boundary
 
-Stackstead isolates runtime identity and state, not hostile code. Processes still use the launching user's machine and Docker daemon permissions. Stackstead is not a security sandbox, secret manager, hosted-machine platform, browser controller, CI system, or production deployment tool.
+Stackstead isolates development runtime identity and state; it is not a security
+sandbox, secret manager, hosted environment, CI system, or production deployment
+tool. Processes still run with the launching user's machine and Docker daemon
+permissions.
 
-Normal Compose-managed volumes are isolated by project identity. External or globally named volumes, host bind mounts, host networking, and services outside Compose can still share state; `doctor` reports common isolation breakers but does not rewrite arbitrary application topology.
+Compose-managed resources are isolated by project identity. External or globally
+named volumes, host bind mounts, host networking, and services outside Compose
+can still share state. `stackstead doctor` reports common isolation breakers but
+does not rewrite arbitrary application topology.
 
-## Documentation and gates
+## Documentation
 
-- [Quickstart](docs/quickstart.md)
-- [Coding-agent setup v1](docs/agent-setup-v1.md)
-- [Installation and release packaging](docs/install.md)
-- [Configuration reference](docs/config.md)
-- [Lifecycle and safe cleanup](docs/lifecycle.md)
-- [Agent and manifest contract](docs/agent-contract.md)
-- [Agent integration and run wrapper](docs/agent-integration.md)
-- [Docker Compose requirements](docs/compose.md)
-- [Postgres behavior](docs/database.md)
-- [Existing-manager integrations](docs/integrations.md)
-- [Rust architecture](docs/rust-architecture.md)
-- [Contributing](CONTRIBUTING.md)
-- [Security policy](SECURITY.md)
-
-```sh
-cargo fmt --check
-cargo clippy --locked --all-targets --all-features -- -D warnings
-cargo test --locked
-scripts/test-install.sh
-cargo build --locked --release
-scripts/test-release-install.sh target/release/stackstead
-scripts/test-delivery.sh
-scripts/docker-integration.sh
-```
+- Get started: [Quickstart](docs/quickstart.md) · [Agent setup](docs/agent-setup-v1.md)
+  · [Installation](docs/install.md)
+- Configure and operate: [Configuration](docs/config.md) ·
+  [Lifecycle and cleanup](docs/lifecycle.md) · [Docker Compose](docs/compose.md) ·
+  [Postgres](docs/database.md)
+- Integrate: [Agent integration](docs/agent-integration.md) ·
+  [Manager integrations](docs/integrations.md)
+- Understand the contracts: [Agent and manifest contract](docs/agent-contract.md) ·
+  [Rust architecture](docs/rust-architecture.md)
+- Contribute: [Contributing](CONTRIBUTING.md) · [Security policy](SECURITY.md) ·
+  [CI workflow](.github/workflows/ci.yml)
