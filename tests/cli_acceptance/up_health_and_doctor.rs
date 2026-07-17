@@ -412,7 +412,10 @@ fn inspect_passively_checks_http_health_only_for_a_running_runtime() {
 #[cfg(unix)]
 #[test]
 fn inspect_preserves_passive_health_for_a_static_loopback_url() {
-    use std::{io::Write, thread};
+    use std::{
+        io::{Read, Write},
+        thread,
+    };
 
     let project = Project::initialized();
     let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
@@ -423,11 +426,16 @@ fn inspect_preserves_passive_health_for_a_static_loopback_url() {
     let manifest = project.create("feature-a");
     let server = thread::spawn(move || {
         let (mut stream, _) = listener.accept().unwrap();
-        write!(
-            stream,
-            "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-        )
-        .unwrap();
+        let mut request = Vec::new();
+        while !request.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
+            let mut buffer = [0; 1024];
+            let read = stream.read(&mut buffer).unwrap();
+            assert_ne!(read, 0, "client closed before sending HTTP headers");
+            request.extend_from_slice(&buffer[..read]);
+        }
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+            .unwrap();
     });
     let path = fake_docker_path(
         project.repo.parent().unwrap(),
