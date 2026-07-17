@@ -148,18 +148,15 @@ fn terminate_process_tree(child: &mut std::process::Child) -> std::io::Result<()
 
 #[cfg(unix)]
 fn kill_process_group(child: &std::process::Child) -> std::io::Result<()> {
-    let process_group = i32::try_from(child.id())
-        .map_err(|_| std::io::Error::other("child process ID exceeds i32"))?;
-    // The child was spawned as its own process-group leader above, so a
-    // negative PID targets only this configured command and its descendants.
-    let result = unsafe { libc::kill(-process_group, libc::SIGKILL) };
-    if result != 0 {
-        let error = std::io::Error::last_os_error();
-        if error.raw_os_error() != Some(libc::ESRCH) {
-            return Err(error);
-        }
+    // The child was spawned as its own process-group leader above, so
+    // signaling its group targets only this command and its descendants.
+    match rustix::process::kill_process_group(
+        rustix::process::Pid::from_child(child),
+        rustix::process::Signal::KILL,
+    ) {
+        Ok(()) | Err(rustix::io::Errno::SRCH) => Ok(()),
+        Err(error) => Err(error.into()),
     }
-    Ok(())
 }
 
 #[cfg(windows)]
@@ -595,8 +592,9 @@ mod tests {
             .parse::<i32>()
             .unwrap();
         for _ in 0..50 {
-            // Signal 0 checks existence without sending a signal.
-            if unsafe { libc::kill(pid, 0) } != 0 {
+            if rustix::process::test_kill_process(rustix::process::Pid::from_raw(pid).unwrap())
+                .is_err()
+            {
                 return;
             }
             thread::sleep(Duration::from_millis(10));
@@ -628,7 +626,9 @@ mod tests {
             .parse::<i32>()
             .unwrap();
         for _ in 0..50 {
-            if unsafe { libc::kill(pid, 0) } != 0 {
+            if rustix::process::test_kill_process(rustix::process::Pid::from_raw(pid).unwrap())
+                .is_err()
+            {
                 return;
             }
             thread::sleep(Duration::from_millis(10));

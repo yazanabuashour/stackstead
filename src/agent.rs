@@ -70,7 +70,7 @@ fn run_with_locks(
         use std::os::{fd::AsRawFd, unix::process::CommandExt};
 
         let (control, supervisor_control) = std::os::unix::net::UnixStream::pair()?;
-        crate::supervisor::set_cloexec(supervisor_control.as_raw_fd(), false)?;
+        crate::supervisor::set_cloexec(&supervisor_control, false)?;
         let (lease_fd, lease_dev, lease_ino) = run_lease.inherited_identity()?;
         run_lease.inherit_on_exec()?;
         let executable = std::env::current_exe()?;

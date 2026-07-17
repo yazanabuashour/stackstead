@@ -2,7 +2,7 @@
 use std::{
     ffi::OsString,
     io::Read,
-    os::{fd::FromRawFd, unix::process::CommandExt},
+    os::{fd::AsFd, unix::process::CommandExt},
     process::Command,
     time::{Duration, Instant},
 };
@@ -44,25 +44,20 @@ fn run() -> anyhow::Result<i32> {
         .next()
         .ok_or_else(|| anyhow::anyhow!("private supervisor target is missing"))?;
     let args = arguments.collect::<Vec<OsString>>();
-    validate_lease(lease_fd, lease_dev, lease_ino)?;
-    set_cloexec(lease_fd, true)?;
-    set_cloexec(control_fd, true)?;
+    let control_fd = take_inherited_fd(control_fd)?;
+    let lease_fd = take_inherited_fd(lease_fd)?;
+    validate_lease(&lease_fd, lease_dev, lease_ino)?;
+    set_cloexec(&lease_fd, true)?;
+    set_cloexec(&control_fd, true)?;
     #[cfg(target_os = "linux")]
     set_subreaper()?;
-    let mut control = unsafe { std::os::unix::net::UnixStream::from_raw_fd(control_fd) };
+    let mut control = std::os::unix::net::UnixStream::from(control_fd);
     control.set_nonblocking(true)?;
 
     let mut command = Command::new(program);
     command.args(args).process_group(0);
-    let mut child = command.spawn()?;
-    let group = match i32::try_from(child.id()) {
-        Ok(group) => group,
-        Err(_) => {
-            let _ = child.kill();
-            let _ = child.wait();
-            anyhow::bail!("target PID exceeds the Unix process ID range");
-        }
-    };
+    let child = command.spawn()?;
+    let group = rustix::process::Pid::from_child(&child);
     let mut target = TargetGuard {
         child,
         group,
@@ -110,7 +105,7 @@ where
 #[cfg(unix)]
 struct TargetGuard {
     child: std::process::Child,
-    group: i32,
+    group: rustix::process::Pid,
     armed: bool,
 }
 
@@ -143,17 +138,11 @@ impl Drop for TargetGuard {
 
 #[cfg(unix)]
 fn validate_lease(
-    fd: i32,
+    fd: &impl AsFd,
     expected_dev: libc::dev_t,
     expected_ino: libc::ino_t,
 ) -> anyhow::Result<()> {
-    use std::mem::MaybeUninit;
-
-    let mut metadata = MaybeUninit::<libc::stat>::zeroed();
-    if unsafe { libc::fstat(fd, metadata.as_mut_ptr()) } != 0 {
-        return Err(std::io::Error::last_os_error().into());
-    }
-    let metadata = unsafe { metadata.assume_init() };
+    let metadata = rustix::fs::fstat(fd)?;
     if metadata.st_dev != expected_dev || metadata.st_ino != expected_ino {
         anyhow::bail!("private run lease identity changed during handoff");
     }
@@ -161,43 +150,61 @@ fn validate_lease(
 }
 
 #[cfg(unix)]
-pub(crate) fn set_cloexec(fd: i32, enabled: bool) -> std::io::Result<()> {
-    let flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
-    if flags < 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-    let flags = if enabled {
-        flags | libc::FD_CLOEXEC
+pub(crate) fn set_cloexec(fd: &impl AsFd, enabled: bool) -> std::io::Result<()> {
+    let mut flags = rustix::io::fcntl_getfd(fd)?;
+    if enabled {
+        flags.insert(rustix::io::FdFlags::CLOEXEC);
     } else {
-        flags & !libc::FD_CLOEXEC
-    };
-    if unsafe { libc::fcntl(fd, libc::F_SETFD, flags) } < 0 {
-        return Err(std::io::Error::last_os_error());
+        flags.remove(rustix::io::FdFlags::CLOEXEC);
     }
-    Ok(())
+    rustix::io::fcntl_setfd(fd, flags).map_err(Into::into)
 }
 
 #[cfg(unix)]
-fn signal_group(group: i32, signal: i32) -> std::io::Result<()> {
-    if unsafe { libc::kill(-group, signal) } == 0 {
-        return Ok(());
+#[expect(
+    unsafe_code,
+    reason = "inherited raw descriptors cross exec without a Rust owner"
+)]
+fn take_inherited_fd(raw_fd: std::os::fd::RawFd) -> std::io::Result<std::os::fd::OwnedFd> {
+    use std::os::fd::FromRawFd;
+
+    // SAFETY: F_GETFD only passes the integer descriptor to the kernel and
+    // does not dereference a caller-provided pointer. It is used here to prove
+    // that the untrusted private argument names an open descriptor before the
+    // descriptor is adopted.
+    if unsafe { libc::fcntl(raw_fd, libc::F_GETFD) } < 0 {
+        return Err(std::io::Error::last_os_error());
     }
-    let error = std::io::Error::last_os_error();
-    if error.raw_os_error() == Some(libc::ESRCH) {
-        Ok(())
-    } else {
-        Err(error)
+
+    // SAFETY: The successful F_GETFD above proves the descriptor is open.
+    // Private supervisor descriptors are distinct, at least 3, inherited
+    // across exec, and adopted during single-threaded process startup, so no
+    // other Rust value owns or can concurrently close this descriptor.
+    Ok(unsafe { std::os::fd::OwnedFd::from_raw_fd(raw_fd) })
+}
+
+#[cfg(unix)]
+fn signal_group(
+    group: rustix::process::Pid,
+    signal: rustix::process::Signal,
+) -> std::io::Result<()> {
+    match rustix::process::kill_process_group(group, signal) {
+        Ok(()) | Err(rustix::io::Errno::SRCH) => Ok(()),
+        Err(error) => Err(error.into()),
     }
 }
 
 #[cfg(unix)]
-fn cancel_target(child: &mut std::process::Child, group: i32) -> std::io::Result<()> {
-    signal_group(group, libc::SIGTERM)?;
+fn cancel_target(
+    child: &mut std::process::Child,
+    group: rustix::process::Pid,
+) -> std::io::Result<()> {
+    signal_group(group, rustix::process::Signal::TERM)?;
     let deadline = Instant::now() + GRACE;
     while Instant::now() < deadline {
         match child.try_wait() {
             Ok(Some(_)) => {
-                signal_group(group, libc::SIGKILL)?;
+                signal_group(group, rustix::process::Signal::KILL)?;
                 return Ok(());
             }
             Ok(None) => {}
@@ -205,30 +212,24 @@ fn cancel_target(child: &mut std::process::Child, group: i32) -> std::io::Result
         }
         std::thread::sleep(Duration::from_millis(20));
     }
-    signal_group(group, libc::SIGKILL)?;
+    signal_group(group, rustix::process::Signal::KILL)?;
     child.wait().map(|_| ())
 }
 
 #[cfg(unix)]
-fn cleanup_group(group: i32) -> std::io::Result<()> {
-    if unsafe { libc::kill(-group, 0) } != 0 {
-        let error = std::io::Error::last_os_error();
-        if error.raw_os_error() == Some(libc::ESRCH) {
-            return Ok(());
-        }
-        return Err(error);
+fn cleanup_group(group: rustix::process::Pid) -> std::io::Result<()> {
+    match rustix::process::kill_process_group(group, rustix::process::Signal::TERM) {
+        Ok(()) => {}
+        Err(rustix::io::Errno::SRCH) => return Ok(()),
+        Err(error) => return Err(error.into()),
     }
-    signal_group(group, libc::SIGTERM)?;
     std::thread::sleep(GRACE);
-    signal_group(group, libc::SIGKILL)
+    signal_group(group, rustix::process::Signal::KILL)
 }
 
 #[cfg(target_os = "linux")]
 fn set_subreaper() -> std::io::Result<()> {
-    if unsafe { libc::prctl(libc::PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) } != 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-    Ok(())
+    rustix::process::set_child_subreaper(Some(rustix::process::Pid::INIT)).map_err(Into::into)
 }
 
 #[cfg(target_os = "linux")]
@@ -245,11 +246,11 @@ fn cleanup_adopted_children() -> std::io::Result<()> {
             return Ok(());
         }
         for child in children {
-            if unsafe { libc::kill(child, libc::SIGKILL) } != 0 {
-                let error = std::io::Error::last_os_error();
-                if error.raw_os_error() != Some(libc::ESRCH) {
-                    return Err(error);
-                }
+            let child = rustix::process::Pid::from_raw(child)
+                .ok_or_else(|| std::io::Error::other("adopted child PID is zero"))?;
+            match rustix::process::kill_process(child, rustix::process::Signal::KILL) {
+                Ok(()) | Err(rustix::io::Errno::SRCH) => {}
+                Err(error) => return Err(error.into()),
             }
         }
         std::thread::sleep(Duration::from_millis(20));
@@ -276,18 +277,10 @@ fn cleanup_adopted_children() -> std::io::Result<()> {
 #[cfg(target_os = "linux")]
 fn reap_children() -> std::io::Result<()> {
     loop {
-        let result = unsafe { libc::waitpid(-1, std::ptr::null_mut(), libc::WNOHANG) };
-        if result > 0 {
-            continue;
+        match rustix::process::wait(rustix::process::WaitOptions::NOHANG) {
+            Ok(Some(_)) => continue,
+            Ok(None) | Err(rustix::io::Errno::CHILD) => return Ok(()),
+            Err(error) => return Err(error.into()),
         }
-        if result == 0 {
-            return Ok(());
-        }
-        let error = std::io::Error::last_os_error();
-        return if error.raw_os_error() == Some(libc::ECHILD) {
-            Ok(())
-        } else {
-            Err(error)
-        };
     }
 }

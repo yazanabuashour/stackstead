@@ -59,6 +59,7 @@ fn wait_for_lock(
 
 pub struct LockGuard {
     file: File,
+    unlock_on_drop: bool,
 }
 
 impl LockGuard {
@@ -77,7 +78,10 @@ impl LockGuard {
             chrono::Utc::now()
         )?;
         file.flush()?;
-        Ok(Self { file })
+        Ok(Self {
+            file,
+            unlock_on_drop: true,
+        })
     }
 
     pub fn acquire_existing(path: &Path, kind: &'static str) -> anyhow::Result<Self> {
@@ -107,7 +111,10 @@ impl LockGuard {
             )?;
             file.flush()?;
         }
-        Ok(Self { file })
+        Ok(Self {
+            file,
+            unlock_on_drop: true,
+        })
     }
 
     pub fn can_acquire(path: &Path) -> bool {
@@ -122,15 +129,7 @@ impl LockGuard {
     pub fn inherit_on_exec(&self) -> anyhow::Result<()> {
         #[cfg(unix)]
         {
-            use std::os::fd::AsRawFd;
-
-            let descriptor = self.file.as_raw_fd();
-            let flags = unsafe { libc::fcntl(descriptor, libc::F_GETFD) };
-            if flags < 0
-                || unsafe { libc::fcntl(descriptor, libc::F_SETFD, flags & !libc::FD_CLOEXEC) } < 0
-            {
-                return Err(std::io::Error::last_os_error().into());
-            }
+            crate::supervisor::set_cloexec(&self.file, false)?;
         }
         Ok(())
     }
@@ -144,11 +143,8 @@ impl LockGuard {
     }
 
     #[cfg(unix)]
-    pub(crate) fn close_after_handoff(self) {
-        use std::mem::ManuallyDrop;
-
-        let this = ManuallyDrop::new(self);
-        unsafe { drop(std::ptr::read(&this.file)) };
+    pub(crate) fn close_after_handoff(mut self) {
+        self.unlock_on_drop = false;
     }
 
     pub fn downgrade_to_shared(self) -> anyhow::Result<Self> {
@@ -160,7 +156,9 @@ impl LockGuard {
 
 impl Drop for LockGuard {
     fn drop(&mut self) {
-        let _ = self.file.unlock();
+        if self.unlock_on_drop {
+            let _ = self.file.unlock();
+        }
     }
 }
 
@@ -221,6 +219,26 @@ mod tests {
             .is_err()
         );
         drop(lock);
+        drop(LockGuard::acquire_existing(&path, "stackstead").unwrap());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn handoff_closes_without_unlocking_the_inherited_file_description() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("lock");
+        let lock = LockGuard::acquire(&path, "stackstead").unwrap();
+        let inherited = lock.file.try_clone().unwrap();
+
+        lock.close_after_handoff();
+        assert!(
+            open_lock(&path, false)
+                .unwrap()
+                .try_lock_exclusive()
+                .is_err()
+        );
+
+        drop(inherited);
         drop(LockGuard::acquire_existing(&path, "stackstead").unwrap());
     }
 

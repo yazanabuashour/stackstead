@@ -291,7 +291,8 @@ fn normal_agent_completion_terminates_background_descendants() {
         .parse::<i32>()
         .unwrap();
     for _ in 0..100 {
-        if unsafe { libc::kill(pid, 0) } != 0 {
+        if rustix::process::test_kill_process(rustix::process::Pid::from_raw(pid).unwrap()).is_err()
+        {
             return;
         }
         thread::sleep(Duration::from_millis(10));
@@ -341,7 +342,11 @@ fn killed_run_wrapper_cleans_direct_and_detached_children_before_releasing_destr
         .trim()
         .parse::<i32>()
         .expect("parse detached PID");
-    assert_eq!(unsafe { libc::kill(wrapper.id() as i32, libc::SIGKILL) }, 0);
+    rustix::process::kill_process(
+        rustix::process::Pid::from_child(&wrapper),
+        rustix::process::Signal::KILL,
+    )
+    .expect("kill stackstead wrapper");
     wrapper.wait().expect("reap killed wrapper");
 
     let path = fake_docker_path(parent, "orphan-lease-fake-bin", "#!/bin/sh\nexit 0\n");
@@ -360,12 +365,18 @@ fn killed_run_wrapper_cleans_direct_and_detached_children_before_releasing_destr
     assert!(destroy.wait().expect("wait for destroy").success());
     for pid in [direct_pid, detached_pid] {
         for _ in 0..100 {
-            if unsafe { libc::kill(pid, 0) } != 0 {
+            if rustix::process::test_kill_process(rustix::process::Pid::from_raw(pid).unwrap())
+                .is_err()
+            {
                 break;
             }
             thread::sleep(Duration::from_millis(20));
         }
-        assert_ne!(unsafe { libc::kill(pid, 0) }, 0, "child {pid} survived");
+        assert!(
+            rustix::process::test_kill_process(rustix::process::Pid::from_raw(pid).unwrap())
+                .is_err(),
+            "child {pid} survived"
+        );
     }
     assert!(!manifest.stackstead_root.exists());
 }
