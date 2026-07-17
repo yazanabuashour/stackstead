@@ -1,6 +1,6 @@
 # Agent contract
 
-Stackstead informs coding agents; it does not prompt, schedule, or sandbox them. Its agent-native surface consists of one machine-readable artifact and one human-readable artifact, both tied to the same runtime identity.
+Stackstead's agent-native surface consists of one machine-readable artifact and one human-readable artifact, both tied to the same runtime identity.
 
 ## Manifest JSON
 
@@ -39,14 +39,15 @@ by an HTTP check is live-unhealthy even when another service is running. Service
 rows remain deterministically sorted. Stackstead is pre-release and does not
 emit older inspection versions or provide an output-version switch.
 
-Stackstead also supplies a direct process boundary:
+Stackstead also supplies direct host and service process boundaries:
 
 ```sh
 stackstead run feature-a -- claude
 stackstead run feature-a -- <agent-or-command> [arguments...]
+stackstead exec feature-a api -- <command> [arguments...]
 ```
 
-The child runs in the exact recorded checkout with generated environment plus pinned Stackstead and Compose identity, and Stackstead returns its exit status. See [Agent integration](agent-integration.md).
+`run` starts the child in the exact recorded checkout with generated environment plus pinned Stackstead and Compose identity. `exec` starts the command in the exact configured, owned, running Compose service. Both commands return the child exit status. See [Agent integration](agent-integration.md).
 
 ## Agent context Markdown
 
@@ -82,9 +83,7 @@ The pointer is not the manifest and is not authority to delete a path. Stackstea
 
 `stackstead env feature-a` reports its location and redacted keys. `stackstead env feature-a --print` remains redacted unless the user explicitly adds `--show-secrets`. Agents should not paste its contents into logs or durable knowledge.
 
-## Isolation boundary
-
-The contract prevents accidental identity and state collisions. It does not defend the host against malicious code, isolate Docker daemon access, or provide multi-user permissions. An agent still has the permissions of the process running it.
+## Compose runtime boundary
 
 Normal Compose-managed volumes are separated by Compose project name. Explicitly external volumes, host bind mounts, host networking, and services configured outside Stackstead can still share state. A managed globally named volume fails closed on an ownership collision but cannot provide parallel branch-local storage. Treat those as repository-level decisions and document them in `agent.rules`.
 

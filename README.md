@@ -32,8 +32,8 @@ stackstead launch feature-a -- claude
 ```
 
 Stackstead creates a worktree and Compose project, allocates ports, starts the
-services, and launches Claude inside that exact environment. Replace `claude` with
-any agent or command.
+services, and launches Claude from that exact worktree and runtime contract.
+Replace `claude` with any agent or command.
 
 To add Stackstead to a repository, ask your coding agent to follow the
 [agent setup guide](docs/agent-setup.md):
@@ -51,11 +51,15 @@ stackstead ps
 stackstead inspect <full-id>
 stackstead logs <full-id> --tail 200
 stackstead run <full-id> -- npm test
+stackstead exec <full-id> api -- npm test
 stackstead open <full-id> web
 stackstead db status <full-id>
 stackstead stop <full-id>
 stackstead destroy <full-id> --yes
 ```
+
+`run` executes a host command from the stackstead worktree. `exec` executes a
+command inside one configured, running Compose service.
 
 Use the full ID printed by `launch` in scripts and runtime-sensitive commands.
 Inside an environment, use `$STACKSTEAD_ID` directly. See

@@ -10,32 +10,41 @@ stackstead launch feature-a -- claude
 environment if startup fails and returns the child command's exit code. It does not
 reuse an existing environment.
 
-Run a command inside an existing environment by its full ID:
+Run a host command from an existing environment's worktree by its full ID:
 
 ```sh
 stackstead run <full-id> -- <agent-command> [agent-arguments...]
 ```
 
+Run a command inside one of its configured, running Compose services:
+
+```sh
+stackstead exec <full-id> <service> -- <command> [arguments...]
+```
+
 The `--` ends Stackstead option parsing. Everything after it is passed directly
-to the child process without a shell, so spaces and agent-specific flags retain
-their argument boundaries. The child runs from the manifest-owned source
-checkout with inherited terminal input and output.
+without a shell, so spaces and command-specific flags retain their argument
+boundaries. Both commands inherit terminal input and output and return the child
+command's exit code. `run` starts the child from the manifest-owned source
+checkout. `exec` targets the manifest-owned Compose project and exact service
+after verifying that the service is configured, owned, and running.
 
 The examples use a readable slug for onboarding. Automation should capture the
 full `stackstead_id` from `stackstead --json create` or `adopt` and use that full ID
-for `run` and every destructive command. Inside the wrapper, the authoritative
-value is `$STACKSTEAD_ID`; do not resolve the slug again.
+for `run`, `exec`, and every destructive command. Inside a `run` wrapper, the
+authoritative value is `$STACKSTEAD_ID`; do not resolve the slug again.
 
-`run` and `launch` reject `--json`: stdout and stderr belong directly to the
-child and cannot also be a stable Stackstead JSON document. A shared run lease
-prevents lifecycle mutation from removing or rewriting source or runtime state
-until the child exits. On Unix a small supervisor retains that lease and owns the
-child's exact process group. If the Stackstead wrapper is interrupted, the
-supervisor terminates and reaps that group before releasing the lease. Linux also
-uses child-subreaper support to clean descendants that detach into a new session.
-macOS has no equivalent portable subreaper API: process-group cleanup is exact,
-but cleanup of a child that deliberately calls `setsid` is best effort. Stackstead
-does not generalize this supervision to dependency commands or hooks.
+`run`, `exec`, and `launch` reject `--json`: stdout and stderr belong directly to
+the child and cannot also be a stable Stackstead JSON document. `run` and `exec`
+hold a shared run lease, so lifecycle mutation waits for the active command.
+`exec` keeps the Compose client in the foreground and hands the lease into that
+process. On Unix the `run` wrapper instead uses a small supervisor that retains
+the lease and owns the host child's exact process group. If the wrapper is
+interrupted, the supervisor terminates and reaps that group before releasing the
+lease. Linux also uses child-subreaper support to clean descendants that detach
+into a new session. macOS has no equivalent portable subreaper API: process-group
+cleanup is exact, but cleanup of a child that deliberately calls `setsid` is best
+effort.
 
 ## Runtime contract
 
@@ -56,9 +65,7 @@ the rest support scripts and integrations.
 Read these values; do not invent or override them. `STACKSTEAD_ID` is also
 written to the generated Compose environment, while the wrapper pins it for
 agents, hooks, and other child commands. Stackstead does not print the generated
-environment or child arguments. The child still inherits the launching user's
-host environment and permissions; this is runtime isolation, not a hostile-code
-sandbox.
+environment or child arguments.
 
 ## Repository instructions
 
@@ -75,5 +82,6 @@ The layers have separate responsibilities:
 | Layer | Responsibility |
 | --- | --- |
 | Repository instructions | Decide when this project requires Stackstead and how to enter an environment. |
-| `stackstead run` | Pin the checkout, environment, identity, and run lease mechanically. |
+| `stackstead run` | Pin host execution to the checkout, environment, identity, and run lease. |
+| `stackstead exec` | Pin service execution to the Compose project, service, runtime ownership, and run lease. |
 | Generated context | Supply the exact identity, resources, rules, and commands for one environment. |

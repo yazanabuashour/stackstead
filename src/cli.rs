@@ -49,13 +49,25 @@ enum Commands {
     },
     /// Install dependencies and start the Compose runtime.
     Up { name: String },
-    /// Run a command inside the exact stackstead source and runtime contract.
+    /// Run a host command from the exact stackstead worktree.
     Run {
         name: String,
         #[arg(
             required = true,
             num_args = 1..,
             trailing_var_arg = true,
+            allow_hyphen_values = true
+        )]
+        command: Vec<OsString>,
+    },
+    /// Run a command inside a running Compose service.
+    Exec {
+        name: String,
+        service: String,
+        #[arg(
+            required = true,
+            num_args = 1..,
+            last = true,
             allow_hyphen_values = true
         )]
         command: Vec<OsString>,
@@ -251,6 +263,21 @@ impl Cli {
                     .split_first()
                     .ok_or_else(|| anyhow::anyhow!("run requires a command after `--`"))?;
                 return agent::run(&cwd, name, program, args).map(agent::exit_code);
+            }
+            Commands::Exec {
+                name,
+                service,
+                command,
+            } => {
+                if self.json {
+                    anyhow::bail!(
+                        "--json cannot be combined with exec because child output is inherited"
+                    );
+                }
+                let (program, args) = command
+                    .split_first()
+                    .ok_or_else(|| anyhow::anyhow!("exec requires a command after `--`"))?;
+                return agent::exec(&cwd, name, service, program, args).map(agent::exit_code);
             }
             Commands::Launch { name, command } => {
                 if self.json {
@@ -784,6 +811,15 @@ mod tests {
             ],
             vec!["stackstead", "up", "feature-a"],
             vec!["stackstead", "run", "feature-a", "--", "agent", "--flag"],
+            vec![
+                "stackstead",
+                "exec",
+                "feature-a",
+                "web",
+                "--",
+                "agent",
+                "--flag",
+            ],
             vec!["stackstead", "launch", "feature-a", "--", "agent", "--flag"],
             vec!["stackstead", "ps"],
             vec!["stackstead", "inspect", "feature-a"],

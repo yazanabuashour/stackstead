@@ -21,7 +21,7 @@ pub fn write_agent_context(manifest: &StacksteadManifest, rules: &[String]) -> a
 pub fn render_agent_context(manifest: &StacksteadManifest, rules: &[String]) -> String {
     let mut output = format!(
         "# Stackstead: {}\n\nProject: {}  \nBranch: {}  \nWorktree: {}  \nCompose project: {}\n\n\
-         ## Runtime Contract\n\nThis stackstead owns this source checkout, Compose project, env file, ports, database state, and logs. It isolates runtime identity and state; it is not a security sandbox.\n\n\
+         ## Runtime Contract\n\nThis stackstead owns this source checkout, Compose project, env file, ports, database state, and logs. Its runtime identity and state are isolated from peer stacksteads.\n\n\
          Do not use shared development ports or shared development databases while working in this stackstead.\n\n\
          ## URLs and Ports\n\n",
         manifest.stackstead_id,

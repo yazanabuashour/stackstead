@@ -81,7 +81,7 @@ The pointer file alone is not deletion authority. `--yes` skips an interactive p
 
 A project lock serializes project-local state and index changes. A host-wide per-user lease registry serializes port allocation across repositories and retains exact runtime-token ownership until successful destroy cleanup. A pre-existing stackstead lock serializes lifecycle mutations, and a separate shared/exclusive run lease prevents teardown while an agent child is active. Creation holds the environment lock across first manifest publication and post-create hooks. Contended locks use one bounded 30-second wait. The deterministic allocator checks the lease registry and attempts to bind every candidate port on `127.0.0.1` before committing a slot.
 
-Locks are intentionally simple cross-process file locks. `doctor` diagnoses suspicious lock state rather than implementing automatic lease stealing. Only `stackstead run` has interruption supervision; internal helpers and hooks retain their existing command boundary.
+Locks are intentionally simple cross-process file locks. `doctor` diagnoses suspicious lock state rather than implementing automatic lease stealing. `run` retains the shared lease through a private Unix supervisor that binds host-child cleanup to it. `exec` keeps the Compose client in the foreground and hands the lease into that process.
 
 ## Reliability scope budget
 

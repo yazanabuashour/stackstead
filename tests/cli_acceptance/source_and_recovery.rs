@@ -91,7 +91,7 @@ fn create_generates_the_durable_runtime_contract() -> anyhow::Result<()> {
     )));
     assert!(context.contains("Database: app"));
     assert!(!context.contains("postgres://app:app"));
-    assert!(context.contains("it is not a security sandbox"));
+    assert!(context.contains("runtime identity and state are isolated from peer stacksteads"));
 
     git(
         &manifest.worktree,

@@ -9,8 +9,8 @@ fn help_exposes_the_complete_command_surface() -> anyhow::Result<()> {
         .success();
     let help = String::from_utf8_lossy(&assert.get_output().stdout);
     for command in [
-        "init", "compose", "create", "adopt", "up", "run", "launch", "ps", "inspect", "env",
-        "logs", "context", "open", "db", "stop", "destroy", "doctor", "repair",
+        "init", "compose", "create", "adopt", "up", "run", "exec", "launch", "ps", "inspect",
+        "env", "logs", "context", "open", "db", "stop", "destroy", "doctor", "repair",
     ] {
         assert!(help.contains(command), "top-level help omits {command:?}");
     }
@@ -23,6 +23,7 @@ fn help_exposes_the_complete_command_surface() -> anyhow::Result<()> {
         vec!["adopt", "--help"],
         vec!["up", "--help"],
         vec!["run", "--help"],
+        vec!["exec", "--help"],
         vec!["launch", "--help"],
         vec!["ps", "--help"],
         vec!["inspect", "--help"],

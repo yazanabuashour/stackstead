@@ -759,7 +759,7 @@ fn ownership_override_path(manifest: &StacksteadManifest) -> PathBuf {
     manifest.worktree.join(OWNERSHIP_OVERRIDE)
 }
 
-fn verify_ownership_override(manifest: &StacksteadManifest) -> anyhow::Result<()> {
+pub(crate) fn verify_ownership_override(manifest: &StacksteadManifest) -> anyhow::Result<()> {
     let path = ownership_override_path(manifest);
     let expected = render_ownership_override(manifest)?;
     let actual = std::fs::read_to_string(&path).map_err(|error| {
@@ -778,6 +778,21 @@ fn verify_ownership_override(manifest: &StacksteadManifest) -> anyhow::Result<()
         );
     }
     Ok(())
+}
+
+pub(crate) fn ensure_service_configured(
+    manifest: &StacksteadManifest,
+    service: &str,
+) -> anyhow::Result<()> {
+    let services = ownership_model(&manifest.compose_files)?.services;
+    if services.contains(service) {
+        return Ok(());
+    }
+    anyhow::bail!(
+        "Compose service `{service}` is not configured for {}; available services: {}",
+        manifest.stackstead_id,
+        services.into_iter().collect::<Vec<_>>().join(", ")
+    )
 }
 
 fn render_ownership_override(manifest: &StacksteadManifest) -> anyhow::Result<String> {
@@ -1027,7 +1042,7 @@ fn validate_service_volumes(
     Ok(())
 }
 
-fn docker_environment(
+pub(crate) fn docker_environment(
     manifest: &StacksteadManifest,
 ) -> anyhow::Result<(Vec<String>, BTreeMap<String, String>)> {
     let generated = manifest.validated_environment()?;

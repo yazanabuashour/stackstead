@@ -87,9 +87,11 @@ stackstead env feature-a
 stackstead context feature-a --print
 stackstead open feature-a web
 stackstead logs feature-a --service web --follow
+stackstead run <full-id> -- npm test
+stackstead exec <full-id> web -- nginx -t
 ```
 
-Structured commands accept `--json`; every document has command-owned `kind` and `version` fields and never serializes a persistence type directly. `StacksteadInspection` version 3 separates the recorded manifest status, live observations, and an `effective` status with its basis and observation timestamps. The remaining current documents are version 1. Lifecycle mutations return a `StacksteadChange` envelope with an `action` and a `stackstead` view. `run`, `launch`, and `logs --follow` reject JSON because they own stdout, while `destroy --json` requires `--yes` to prevent prompt output from contaminating JSON. `stackstead open ... --print` returns a configured URL without launching a browser. `stackstead env --print` redacts secret-like values and credential-bearing DSNs unless `--show-secrets` is explicitly supplied.
+Structured commands accept `--json`; every document has command-owned `kind` and `version` fields and never serializes a persistence type directly. `StacksteadInspection` version 3 separates the recorded manifest status, live observations, and an `effective` status with its basis and observation timestamps. The remaining current documents are version 1. Lifecycle mutations return a `StacksteadChange` envelope with an `action` and a `stackstead` view. `run`, `exec`, `launch`, and `logs --follow` reject JSON because they own stdout, while `destroy --json` requires `--yes` to prevent prompt output from contaminating JSON. `stackstead open ... --print` returns a configured URL without launching a browser. `stackstead env --print` redacts secret-like values and credential-bearing DSNs unless `--show-secrets` is explicitly supplied.
 
 ## Stop
 
@@ -142,12 +144,12 @@ Destroy preserves the Git branch because it may contain committed user work and
 retains the project coordination lock as stable concurrency state. These are not
 orphaned environment resources and should not be removed as routine cleanup.
 
-Inspection and cleanup validate the durable manifest independently of later non-destructive config path changes, so a revised `env.file` or context path cannot strand an older runtime. Regenerating operations such as `up`, `repair`, and `stackstead run` additionally require the current config to match the manifest contract.
+Inspection and cleanup validate the durable manifest independently of later non-destructive config path changes, so a revised `env.file` or context path cannot strand an older runtime. Regenerating operations such as `up`, `repair`, `run`, and `exec` additionally require the current config to match the manifest contract.
 
 JSON-mode destruction requires `--yes`; this prevents an interactive prompt from corrupting machine-readable stdout.
 
 ## Concurrency and events
 
-Create uses a project-level file lock for project state and a per-user port-lease lock for allocation across every Stackstead project. State roots are resolved through their deepest existing ancestor and rejected if the physical result is inside the repository; Unix lock opens additionally do not follow the final component. Creation holds the new stackstead lock before persisting its pending manifest and through `post_create`. Mutating operations such as `up`, `repair`, and `destroy` acquire only pre-existing lock files, so a delayed command cannot recreate state after teardown. Missing mutation, run-lease, or port-lease ownership is a contract error and is not reconstructed. Contended file locks wait for at most 30 seconds, allowing ordinary parallel agents to serialize without waiting forever. `stackstead run` holds a shared agent lease through a small Unix supervisor; destructive or mutating lifecycle work waits for that supervisor to finish child cleanup. Destroy requires the lease exclusively.
+Create uses a project-level file lock for project state and a per-user port-lease lock for allocation across every Stackstead project. State roots are resolved through their deepest existing ancestor and rejected if the physical result is inside the repository; Unix lock opens additionally do not follow the final component. Creation holds the new stackstead lock before persisting its pending manifest and through `post_create`. Mutating operations such as `up`, `repair`, and `destroy` acquire only pre-existing lock files, so a delayed command cannot recreate state after teardown. Missing mutation, run-lease, or port-lease ownership is a contract error and is not reconstructed. Contended file locks wait for at most 30 seconds, allowing ordinary parallel agents to serialize without waiting forever. `run` and `exec` hold a shared run lease for the active command, so destructive or mutating lifecycle work waits for it to finish. The Unix `run` supervisor releases that lease only after host-child cleanup; the foreground Compose client inherits the `exec` lease. Destroy requires the lease exclusively.
 
 `state/events.jsonl` contains `StacksteadEvent` version 1 JSON lines. Event type and status are closed enums, each append is one newline-terminated write followed by a data sync, and command output is redacted where appropriate. The log is recovery and diagnostic state, not an audit service.

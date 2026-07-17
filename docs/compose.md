@@ -144,15 +144,20 @@ validation fails before Docker runs. List each file explicitly in
 `runtime.files` instead, keep service declarations direct, and use ordinary
 Compose override mappings for environment-specific changes.
 
-## Applications not already in Compose
+## Host and service commands
 
-Stackstead currently owns Docker Compose runtime lifecycles. A monorepo that normally
-runs Postgres in Docker but starts API and frontend processes on the host has two
-honest options: add a development Compose service that launches those processes,
-or launch them separately with `stackstead run` and manage their process lifetime
-yourself. The first option gives Stackstead health, logs, recovery, and teardown
-coverage for the whole application; the second does not. Stackstead does not yet
-claim PID-aware native host-process supervision.
+Use `run` for a host command rooted in the exact source worktree and `exec` for a
+command inside a configured, running Compose service:
+
+```sh
+stackstead run <full-id> -- npm test
+stackstead exec <full-id> api -- npm test
+```
+
+`exec` uses the manifest's Compose project, env file, configured files, and
+generated ownership override. It verifies the runtime token and service state,
+passes the command arguments directly to Compose, returns the command's exit
+code, and holds the shared run lease for the Compose exec process.
 
 Keep Compose service commands in the foreground. Framework modes that detach or
 daemonize must be disabled in the project's checked-in configuration; detached

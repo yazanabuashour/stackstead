@@ -56,6 +56,310 @@ exit 23
 
 #[cfg(unix)]
 #[test]
+fn exec_targets_one_owned_running_service_and_preserves_command_arguments() -> anyhow::Result<()> {
+    use std::io::Write as _;
+
+    let project = Project::initialized()?;
+    let manifest = project.create("feature-a")?;
+    let parent = project.repo.parent().test()?;
+    let fake_state = parent.join("service-exec-state");
+    let path = service_exec_docker_path(parent, "service-exec-bin")?;
+
+    let missing_boundary = stackstead(&project.repo)
+        .args([
+            "exec",
+            &manifest.stackstead_id,
+            "web",
+            "program-without-boundary",
+        ])
+        .assert()
+        .failure();
+    assert!(
+        output_text(&missing_boundary.get_output().stderr)?.contains("-- <COMMAND>"),
+        "exec accepted a command without the required `--` boundary"
+    );
+
+    let executed = stackstead(&project.repo)
+        .env("PATH", &path)
+        .env("FAKE_STATE", &fake_state)
+        .env("EXPECTED_PROJECT", &manifest.compose_project)
+        .env("EXPECTED_TOKEN", &manifest.runtime_token)
+        .env("EXEC_ASSERT_ENV", "1")
+        .env("EXEC_ASSERT_FOREGROUND", "1")
+        .env("EXEC_EXIT_CODE", "23")
+        .env("WEB_PORT", "inherited-spoof")
+        .arg("exec")
+        .arg(&manifest.stackstead_id)
+        .arg("web")
+        .arg("--")
+        .arg("program with spaces")
+        .arg("--flag")
+        .arg("two words")
+        .assert()
+        .code(23);
+    assert_eq!(
+        output_text(&executed.get_output().stdout)?,
+        "service=<web>\nargument=<program with spaces>\nargument=<--flag>\nargument=<two words>\n"
+    );
+    assert!(fake_state.join("exec-ran").is_file());
+    fs::remove_file(fake_state.join("exec-ran")).test()?;
+
+    let rejected_json = stackstead(&project.repo)
+        .args([
+            "--json",
+            "exec",
+            &manifest.stackstead_id,
+            "web",
+            "--",
+            "true",
+        ])
+        .assert()
+        .failure();
+    assert!(
+        output_text(&rejected_json.get_output().stderr)?
+            .contains("--json cannot be combined with exec")
+    );
+
+    let unknown = stackstead(&project.repo)
+        .env("PATH", &path)
+        .env("FAKE_STATE", &fake_state)
+        .env("EXPECTED_PROJECT", &manifest.compose_project)
+        .env("EXPECTED_TOKEN", &manifest.runtime_token)
+        .args(["exec", &manifest.stackstead_id, "missing", "--", "true"])
+        .assert()
+        .failure();
+    let stderr = output_text(&unknown.get_output().stderr)?;
+    assert!(stderr.contains("is not configured") && stderr.contains("postgres, web"));
+    assert!(!fake_state.join("exec-ran").exists());
+
+    let stopped = stackstead(&project.repo)
+        .env("PATH", &path)
+        .env("FAKE_STATE", &fake_state)
+        .env("EXPECTED_PROJECT", &manifest.compose_project)
+        .env("EXPECTED_TOKEN", &manifest.runtime_token)
+        .env("SERVICE_RUNNING", "0")
+        .args(["exec", &manifest.stackstead_id, "web", "--", "true"])
+        .assert()
+        .failure();
+    assert!(output_text(&stopped.get_output().stderr)?.contains("is not running"));
+    assert!(!fake_state.join("exec-ran").exists());
+
+    let foreign = stackstead(&project.repo)
+        .env("PATH", &path)
+        .env("FAKE_STATE", &fake_state)
+        .env("EXPECTED_PROJECT", &manifest.compose_project)
+        .env("EXPECTED_TOKEN", &manifest.runtime_token)
+        .env("DOCKER_TOKEN", "foreign-runtime-token")
+        .args(["exec", &manifest.stackstead_id, "web", "--", "true"])
+        .assert()
+        .failure();
+    assert!(output_text(&foreign.get_output().stderr)?.contains("ownership label"));
+    assert!(!fake_state.join("exec-ran").exists());
+
+    fs::OpenOptions::new()
+        .append(true)
+        .open(manifest.worktree.join(".stackstead/compose-ownership.yaml"))
+        .test()?
+        .write_all(b"# tampered\n")
+        .test()?;
+    let tampered = stackstead(&project.repo)
+        .env("PATH", path)
+        .env("FAKE_STATE", &fake_state)
+        .env("EXPECTED_PROJECT", &manifest.compose_project)
+        .env("EXPECTED_TOKEN", &manifest.runtime_token)
+        .args(["exec", &manifest.stackstead_id, "web", "--", "true"])
+        .assert()
+        .failure();
+    assert!(
+        output_text(&tampered.get_output().stderr)?
+            .contains("generated Compose ownership override")
+    );
+    assert!(!fake_state.join("exec-ran").exists());
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn exec_holds_the_run_lease_until_the_compose_client_finishes() -> anyhow::Result<()> {
+    use std::{thread, time::Duration};
+
+    let project = Project::initialized()?;
+    let manifest = project.create("feature-a")?;
+    let parent = project.repo.parent().test()?;
+    let fake_state = parent.join("service-exec-lease-state");
+    let ready = fake_state.join("ready");
+    let release = fake_state.join("release");
+    fs::create_dir_all(&fake_state).test()?;
+    fs::write(&release, "wait\n").test()?;
+    let path = service_exec_docker_path(parent, "service-exec-lease-bin")?;
+
+    let mut executing = ProcessCommand::new(assert_cmd::cargo::cargo_bin!("stackstead"))
+        .current_dir(&project.repo)
+        .env("XDG_STATE_HOME", test_state_home(&project.repo))
+        .env("PATH", &path)
+        .env("FAKE_STATE", &fake_state)
+        .env("EXPECTED_PROJECT", &manifest.compose_project)
+        .env("EXPECTED_TOKEN", &manifest.runtime_token)
+        .env("EXEC_READY", &ready)
+        .env("EXEC_RELEASE", &release)
+        .args([
+            "exec",
+            &manifest.stackstead_id,
+            "web",
+            "--",
+            "long-running-command",
+        ])
+        .spawn()
+        .test_context("start service command")?;
+    assert!(
+        wait_for_file(&ready, 100, Duration::from_millis(20)),
+        "service command did not start"
+    );
+
+    let mut stopping = ProcessCommand::new(assert_cmd::cargo::cargo_bin!("stackstead"))
+        .current_dir(&project.repo)
+        .env("XDG_STATE_HOME", test_state_home(&project.repo))
+        .env("PATH", &path)
+        .env("FAKE_STATE", &fake_state)
+        .env("EXPECTED_PROJECT", &manifest.compose_project)
+        .env("EXPECTED_TOKEN", &manifest.runtime_token)
+        .args(["stop", &manifest.stackstead_id])
+        .spawn()
+        .test_context("start waiting stop")?;
+    thread::sleep(Duration::from_millis(150));
+    assert!(
+        stopping.try_wait().test()?.is_none(),
+        "stop did not wait for service exec"
+    );
+
+    fs::remove_file(&release).test_context("release service command")?;
+    assert!(
+        executing
+            .wait()
+            .test_context("wait for service command")?
+            .success()
+    );
+    assert!(stopping.wait().test_context("wait for stop")?.success());
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn killed_exec_wrapper_leaves_the_run_lease_with_the_compose_client() -> anyhow::Result<()> {
+    use std::{thread, time::Duration};
+
+    let project = Project::initialized()?;
+    let manifest = project.create("feature-a")?;
+    let parent = project.repo.parent().test()?;
+    let fake_state = parent.join("interrupted-service-exec-state");
+    let ready = fake_state.join("ready");
+    let release = fake_state.join("release");
+    fs::create_dir_all(&fake_state).test()?;
+    fs::write(&release, "wait\n").test()?;
+    let path = service_exec_docker_path(parent, "interrupted-service-exec-bin")?;
+
+    let mut wrapper = ProcessCommand::new(assert_cmd::cargo::cargo_bin!("stackstead"))
+        .current_dir(&project.repo)
+        .env("XDG_STATE_HOME", test_state_home(&project.repo))
+        .env("PATH", &path)
+        .env("FAKE_STATE", &fake_state)
+        .env("EXPECTED_PROJECT", &manifest.compose_project)
+        .env("EXPECTED_TOKEN", &manifest.runtime_token)
+        .env("EXEC_READY", &ready)
+        .env("EXEC_RELEASE", &release)
+        .args([
+            "exec",
+            &manifest.stackstead_id,
+            "web",
+            "--",
+            "long-running-command",
+        ])
+        .spawn()
+        .test_context("start service exec wrapper")?;
+    assert!(
+        wait_for_file(&ready, 100, Duration::from_millis(20)),
+        "Compose client did not start"
+    );
+    rustix::process::kill_process(
+        rustix::process::Pid::from_child(&wrapper),
+        rustix::process::Signal::KILL,
+    )
+    .test_context("kill service exec wrapper")?;
+    wrapper.wait().test_context("reap service exec wrapper")?;
+
+    let mut stopping = ProcessCommand::new(assert_cmd::cargo::cargo_bin!("stackstead"))
+        .current_dir(&project.repo)
+        .env("XDG_STATE_HOME", test_state_home(&project.repo))
+        .env("PATH", &path)
+        .env("FAKE_STATE", &fake_state)
+        .env("EXPECTED_PROJECT", &manifest.compose_project)
+        .env("EXPECTED_TOKEN", &manifest.runtime_token)
+        .args(["stop", &manifest.stackstead_id])
+        .spawn()
+        .test_context("start stop behind inherited service exec lease")?;
+    thread::sleep(Duration::from_millis(150));
+    assert!(
+        stopping.try_wait().test()?.is_none(),
+        "stop overtook the surviving Compose client"
+    );
+
+    fs::remove_file(&release).test_context("release Compose client")?;
+    assert!(stopping.wait().test_context("wait for stop")?.success());
+    Ok(())
+}
+
+#[cfg(unix)]
+fn service_exec_docker_path(parent: &Path, directory: &str) -> anyhow::Result<OsString> {
+    fake_docker_path(
+        parent,
+        directory,
+        r#"#!/bin/sh
+set -eu
+mkdir -p "$FAKE_STATE"
+printf '%s\n' "$*" >> "$FAKE_STATE/commands"
+claim="$COMPOSE_PROJECT_NAME-stackstead-claim"
+case "$1 $2" in
+  "container ls"|"network ls") exit 0 ;;
+  "volume ls") printf '%s\n' "$claim"; exit 0 ;;
+  "volume inspect")
+    printf '{"io.stackstead.runtime-token":"%s"}\n' "${DOCKER_TOKEN:-$EXPECTED_TOKEN}"
+    exit 0
+    ;;
+  "compose -p")
+    case " $* " in
+      *" ps --status running --quiet "*)
+        test "${SERVICE_RUNNING:-1}" = 0 || printf '%s\n' fake-container-id
+        exit 0
+        ;;
+      *" exec "*)
+        test "$COMPOSE_PROJECT_NAME" = "$EXPECTED_PROJECT"
+        if test -n "${EXEC_ASSERT_ENV-}"; then
+          test "${WEB_PORT+x}" != x
+        fi
+        if test -n "${EXEC_ASSERT_FOREGROUND-}"; then
+          test "$(ps -o pgid= -p $$ | tr -d ' ')" = "$(ps -o pgid= -p $PPID | tr -d ' ')"
+        fi
+        while test "$1" != exec; do shift; done
+        shift
+        test "${1-}" != -T || shift
+        printf 'service=<%s>\n' "$1"
+        shift
+        for argument in "$@"; do printf 'argument=<%s>\n' "$argument"; done
+        : > "$FAKE_STATE/exec-ran"
+        test -z "${EXEC_READY-}" || : > "$EXEC_READY"
+        while test -n "${EXEC_RELEASE-}" && test -e "$EXEC_RELEASE"; do sleep 0.02; done
+        exit "${EXEC_EXIT_CODE:-0}"
+        ;;
+    esac
+    ;;
+esac
+exit 0
+"#,
+    )
+}
+
+#[cfg(unix)]
+#[test]
 fn launch_creates_starts_and_runs_with_the_full_stackstead_identity() -> anyhow::Result<()> {
     let project = Project::initialized()?;
     let mut config = load_config(&project.repo.join("stackstead.yaml"))?;
@@ -418,6 +722,10 @@ fn missing_lock_contract_is_rejected_without_recreation() -> anyhow::Result<()> 
         .args(["run", "run-legacy", "--", "true"])
         .assert()
         .failure();
+    stackstead(&project.repo)
+        .args(["exec", "run-legacy", "web", "--", "true"])
+        .assert()
+        .failure();
     assert!(!run_cell.state_dir.join("lock").exists());
     assert!(!run_cell.state_dir.join("run.lock").exists());
 
@@ -466,6 +774,7 @@ fn changed_worktree_branch_is_reported_and_rejected_before_agent_or_teardown() -
 
     for args in [
         vec!["run", "feature-a", "--", "true"],
+        vec!["exec", "feature-a", "web", "--", "true"],
         vec!["up", "feature-a"],
         vec!["stop", "feature-a"],
         vec!["repair", "feature-a"],
@@ -590,6 +899,7 @@ fn adopted_manifests_cannot_cross_bind_or_delete_another_checkout() -> anyhow::R
 
     for args in [
         vec!["run", &first.stackstead_id, "--", "true"],
+        vec!["exec", &first.stackstead_id, "web", "--", "true"],
         vec!["repair", &first.stackstead_id],
         vec!["destroy", &first.stackstead_id, "--yes"],
     ] {

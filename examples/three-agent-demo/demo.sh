@@ -144,9 +144,10 @@ assert_project_ports_loopback() {
 
 query_contract() {
   manifest="$1"
-  compose_for "$manifest" exec -T postgres \
+  id="$(jq -er '.stackstead_id' "$manifest")"
+  (cd "$example_root" && "$stackstead_bin" exec "$id" postgres -- \
     psql -XAt -U app -d app \
-    -c "SELECT migration_id || '|' || agent || '|' || payload FROM schema_migrations;"
+    -c "SELECT migration_id || '|' || agent || '|' || payload FROM schema_migrations;")
 }
 
 ledger_field() {
@@ -182,7 +183,7 @@ verify_three() {
     result="$(query_contract "$manifest")"
     expected="202607090001|$agent|$(payload_for_agent "$agent")"
     [ "$result" = "$expected" ] || die "database contract mismatch for $id: $result"
-    owner="$(compose_for "$manifest" exec -T postgres psql -XAt -U app -d app -c 'SELECT owner FROM seeded_accounts WHERE account_id = 1;')"
+    owner="$(cd "$example_root" && "$stackstead_bin" exec "$id" postgres -- psql -XAt -U app -d app -c 'SELECT owner FROM seeded_accounts WHERE account_id = 1;')"
     [ "$owner" = "$agent" ] || die "seed leaked or is missing for $id: $owner"
     url="$(jq -er '.urls.web' "$manifest")"
     page="$(curl --fail --silent --show-error --retry 10 --retry-connrefused --retry-delay 1 "$url")"
