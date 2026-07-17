@@ -138,48 +138,94 @@ where
 
 #[cfg(test)]
 mod tests {
+    use crate::test_support::TestResultExt as _;
+    use std::cell::Cell;
     use std::net::TcpListener;
 
     use super::*;
 
     #[test]
-    fn postgres_readiness_requires_the_recorded_host_port() {
-        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
-        let port = listener.local_addr().unwrap().port();
+    fn postgres_readiness_requires_the_recorded_host_port() -> anyhow::Result<()> {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).test()?;
+        let port = listener.local_addr().test()?.port();
         assert!(
             wait_until_postgres_ready("127.0.0.1", port, Duration::from_millis(10), || true)
                 .is_ok()
         );
 
+        let probed = Cell::new(false);
         assert!(!wait_until_ready(
             Duration::from_millis(10),
             || false,
-            || panic!("Postgres probe ran without a reachable host port")
+            || {
+                probed.set(true);
+                false
+            }
         ));
+        assert!(
+            !probed.get(),
+            "Postgres probe ran without a reachable host port"
+        );
+        Ok(())
     }
 
     #[test]
-    fn live_status_requires_runtime_publication_and_tcp_reachability() {
+    fn live_status_requires_runtime_publication_and_tcp_reachability() -> anyhow::Result<()> {
+        let invoked = Cell::new(false);
         assert_eq!(
-            classify_live_status(ComponentStatus::Stopped, || panic!(), || panic!()),
+            classify_live_status(
+                ComponentStatus::Stopped,
+                || {
+                    invoked.set(true);
+                    Ok(false)
+                },
+                || {
+                    invoked.set(true);
+                    false
+                },
+            ),
             ComponentStatus::Unreachable
         );
+        assert!(!invoked.replace(false));
         assert_eq!(
-            classify_live_status(ComponentStatus::Unknown, || panic!(), || panic!()),
+            classify_live_status(
+                ComponentStatus::Unknown,
+                || {
+                    invoked.set(true);
+                    Ok(false)
+                },
+                || {
+                    invoked.set(true);
+                    false
+                },
+            ),
             ComponentStatus::Unknown
         );
+        assert!(!invoked.replace(false));
         assert_eq!(
-            classify_live_status(ComponentStatus::Running, || Ok(false), || panic!()),
+            classify_live_status(
+                ComponentStatus::Running,
+                || Ok(false),
+                || {
+                    invoked.set(true);
+                    false
+                }
+            ),
             ComponentStatus::Unreachable
         );
+        assert!(!invoked.replace(false));
         assert_eq!(
             classify_live_status(
                 ComponentStatus::Running,
                 || Err(anyhow::anyhow!("Docker unavailable")),
-                || panic!()
+                || {
+                    invoked.set(true);
+                    false
+                }
             ),
             ComponentStatus::Unknown
         );
+        assert!(!invoked.get());
         assert_eq!(
             classify_live_status(ComponentStatus::Running, || Ok(true), || false),
             ComponentStatus::Unreachable
@@ -188,5 +234,6 @@ mod tests {
             classify_live_status(ComponentStatus::Running, || Ok(true), || true),
             ComponentStatus::Reachable
         );
+        Ok(())
     }
 }

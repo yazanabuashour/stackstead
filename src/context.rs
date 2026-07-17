@@ -104,10 +104,11 @@ pub fn render_agent_context(manifest: &StacksteadManifest, rules: &[String]) -> 
 #[cfg(test)]
 mod tests {
     use crate::manifest::StacksteadManifest;
+    use crate::test_support::TestResultExt as _;
 
     use super::*;
 
-    fn manifest(database: bool, urls: serde_json::Value) -> StacksteadManifest {
+    fn manifest(database: bool, urls: serde_json::Value) -> anyhow::Result<StacksteadManifest> {
         let mut value = serde_json::json!({
             "kind":"StacksteadManifest","version":"2","stackstead_id":"a-b123","slug":"a","short_id":"b123",
             "runtime_token":"0123456789abcdef0123456789abcdef",
@@ -126,13 +127,13 @@ mod tests {
                 "database":"app","seed_status":"unknown"
             });
         }
-        serde_json::from_value(value).unwrap()
+        serde_json::from_value(value).test_context("parse manifest fixture")
     }
 
     #[test]
-    fn useful_commands_follow_the_manifest_services() {
+    fn useful_commands_follow_the_manifest_services() -> anyhow::Result<()> {
         let without_database = render_agent_context(
-            &manifest(false, serde_json::json!({})),
+            &manifest(false, serde_json::json!({}))?,
             &["Run stackstead db status before migrations.".into()],
         );
         assert!(!without_database.contains("db status"));
@@ -145,7 +146,7 @@ mod tests {
                     "api":"http://127.0.0.1:39001",
                     "dashboard":"http://127.0.0.1:39000"
                 }),
-            ),
+            )?,
             &[],
         );
         assert!(configured.contains("stackstead db status a-b123\n```"));
@@ -162,5 +163,6 @@ mod tests {
         assert!(configured.contains("stackstead destroy a-b123 --yes"));
         assert!(!configured.contains("stackstead inspect a\n"));
         assert!(!configured.contains("postgres://"));
+        Ok(())
     }
 }

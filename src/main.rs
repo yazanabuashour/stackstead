@@ -1,6 +1,3 @@
-#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
-#![deny(unsafe_code)]
-
 mod agent;
 mod cli;
 mod command;
@@ -29,6 +26,8 @@ mod slug;
 mod state;
 mod supervisor;
 mod template;
+#[cfg(test)]
+mod test_support;
 
 use clap::Parser;
 

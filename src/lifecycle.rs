@@ -2028,8 +2028,12 @@ fn default_config(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::{TestResultErrorExt as _, TestResultExt as _};
 
-    fn cleanup_manifest(root: &Path, ownership: SourceOwnership) -> StacksteadManifest {
+    fn cleanup_manifest(
+        root: &Path,
+        ownership: SourceOwnership,
+    ) -> anyhow::Result<StacksteadManifest> {
         let short_id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
         let stackstead_id = format!("feature-a-{short_id}");
         let stackstead_root = root.join("state/demo").join(&stackstead_id);
@@ -2038,9 +2042,9 @@ mod tests {
             SourceOwnership::External => root.join("manager-source"),
         };
         let state_dir = stackstead_root.join("state");
-        std::fs::create_dir_all(&state_dir).unwrap();
+        std::fs::create_dir_all(&state_dir).test()?;
         if ownership == SourceOwnership::External {
-            std::fs::create_dir_all(&worktree).unwrap();
+            std::fs::create_dir_all(&worktree).test()?;
         }
         let event_log = state_dir.join("events.jsonl");
         for (event_type, status) in [
@@ -2058,9 +2062,9 @@ mod tests {
                 events::EventStatus::Succeeded,
             ),
         ] {
-            events::append(&event_log, event_type, status, None).unwrap();
+            events::append(&event_log, event_type, status, None).test()?;
         }
-        StacksteadManifest {
+        Ok(StacksteadManifest {
             kind: "StacksteadManifest".into(),
             version: crate::manifest::MANIFEST_VERSION.into(),
             stackstead_id: stackstead_id.clone(),
@@ -2091,11 +2095,11 @@ mod tests {
             database: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
-        }
+        })
     }
 
     #[test]
-    fn generated_config_parses() {
+    fn generated_config_parses() -> anyhow::Result<()> {
         let plan = compose::ComposePlan {
             file: "compose.yaml".into(),
             ports: vec![
@@ -2120,23 +2124,25 @@ mod tests {
             ],
             warnings: vec![],
         };
-        let yaml = default_config("demo", "main", &plan).unwrap();
-        let config = StacksteadConfig::from_yaml(&yaml).unwrap();
+        let yaml = default_config("demo", "main", &plan).test()?;
+        let config = StacksteadConfig::from_yaml(&yaml).test()?;
         assert_eq!(config.project.name, "demo");
         assert_eq!(config.resources.ports.expose.len(), 2);
+        Ok(())
     }
 
     #[test]
-    fn compose_project_identity_is_docker_safe() {
+    fn compose_project_identity_is_docker_safe() -> anyhow::Result<()> {
         assert!(validate_compose_project("demo-feature-a17c").is_ok());
         assert!(validate_compose_project("Demo-feature").is_err());
         assert!(validate_compose_project("../demo").is_err());
+        Ok(())
     }
 
     #[test]
-    fn manifest_binding_rejects_mismatched_port_service_sets() {
-        let directory = tempfile::tempdir().unwrap();
-        let mut manifest = cleanup_manifest(directory.path(), SourceOwnership::Stackstead);
+    fn manifest_binding_rejects_mismatched_port_service_sets() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir().test()?;
+        let mut manifest = cleanup_manifest(directory.path(), SourceOwnership::Stackstead)?;
         manifest.ports.insert("web".into(), 39000);
         let mut config = StacksteadConfig::default();
         config.project.name = "demo".into();
@@ -2150,30 +2156,32 @@ mod tests {
         };
 
         let error = validate_manifest_binding(&runtime, &manifest)
-            .unwrap_err()
+            .test_err()?
             .to_string();
 
         assert_eq!(
             error,
             "manifest host and container port service sets differ"
         );
+        Ok(())
     }
 
     #[test]
-    fn partial_destroy_retry_requires_truthful_source_cleanup_state() {
-        let directory = tempfile::tempdir().unwrap();
-        let external = cleanup_manifest(directory.path(), SourceOwnership::External);
+    fn partial_destroy_retry_requires_truthful_source_cleanup_state() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir().test()?;
+        let external = cleanup_manifest(directory.path(), SourceOwnership::External)?;
         assert!(validate_completed_source_cleanup(&external).is_err());
-        write_teardown(&external, TeardownPhase::Finalize, None).unwrap();
-        validate_completed_source_cleanup(&external).unwrap();
-        std::fs::create_dir(external.worktree.join(".stackstead")).unwrap();
+        write_teardown(&external, TeardownPhase::Finalize, None).test()?;
+        validate_completed_source_cleanup(&external).test()?;
+        std::fs::create_dir(external.worktree.join(".stackstead")).test()?;
         assert!(validate_completed_source_cleanup(&external).is_err());
 
-        std::fs::remove_dir(external.worktree.join(".stackstead")).unwrap();
-        let owned = cleanup_manifest(directory.path(), SourceOwnership::Stackstead);
-        write_teardown(&owned, TeardownPhase::Finalize, None).unwrap();
-        validate_completed_source_cleanup(&owned).unwrap();
-        std::fs::create_dir_all(&owned.worktree).unwrap();
+        std::fs::remove_dir(external.worktree.join(".stackstead")).test()?;
+        let owned = cleanup_manifest(directory.path(), SourceOwnership::Stackstead)?;
+        write_teardown(&owned, TeardownPhase::Finalize, None).test()?;
+        validate_completed_source_cleanup(&owned).test()?;
+        std::fs::create_dir_all(&owned.worktree).test()?;
         assert!(validate_completed_source_cleanup(&owned).is_err());
+        Ok(())
     }
 }

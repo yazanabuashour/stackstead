@@ -453,6 +453,7 @@ fn display_ports(ports: &BTreeSet<u16>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::{TestResultErrorExt as _, TestResultExt as _};
 
     fn store(directory: &tempfile::TempDir) -> PortLeaseStore {
         PortLeaseStore::at(directory.path().join("state"))
@@ -467,50 +468,52 @@ mod tests {
     }
 
     #[test]
-    fn resolves_per_user_state_paths_without_mutating_the_environment() {
+    fn resolves_per_user_state_paths_without_mutating_the_environment() -> anyhow::Result<()> {
         let xdg = PortLeaseStore::from_environment(Some("/state".into()), Some("/home/me".into()))
-            .unwrap();
+            .test()?;
         assert_eq!(xdg.state_dir, Path::new("/state/stackstead"));
 
         let home =
             PortLeaseStore::from_environment(Some("relative".into()), Some("/home/me".into()))
-                .unwrap();
+                .test()?;
         assert_eq!(
             home.state_dir,
             Path::new("/home/me/.local/state/stackstead")
         );
         assert!(PortLeaseStore::from_environment(None, Some("relative".into())).is_err());
         assert!(PortLeaseStore::from_environment(None, None).is_err());
+        Ok(())
     }
 
     #[test]
-    fn independent_owners_conflict_but_disjoint_ports_succeed() {
-        let directory = tempfile::tempdir().unwrap();
+    fn independent_owners_conflict_but_disjoint_ports_succeed() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir().test()?;
         let store = store(&directory);
-        let mut transaction = store.transaction().unwrap();
+        let mut transaction = store.transaction().test()?;
         transaction
             .reserve("owner-a", &identity("alpha"), &ports(&[39000, 39001]))
-            .unwrap();
+            .test()?;
 
         let error = transaction
             .reserve("owner-b", &identity("beta"), &ports(&[39001]))
-            .unwrap_err();
+            .test_err()?;
         assert!(error.to_string().contains("alpha"));
         transaction
             .reserve("owner-b", &identity("beta"), &ports(&[39002]))
-            .unwrap();
+            .test()?;
         assert_eq!(transaction.used_ports(), ports(&[39000, 39001, 39002]));
+        Ok(())
     }
 
     #[test]
-    fn destroy_release_is_idempotent_only_after_the_exact_owner_is_gone() {
-        let directory = tempfile::tempdir().unwrap();
+    fn destroy_release_is_idempotent_only_after_the_exact_owner_is_gone() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir().test()?;
         let store = store(&directory);
         let leased = ports(&[39000, 39001]);
-        let mut transaction = store.transaction().unwrap();
+        let mut transaction = store.transaction().test()?;
         transaction
             .reserve("owner-a", &identity("alpha"), &leased)
-            .unwrap();
+            .test()?;
         assert!(
             transaction
                 .release_if_owned_or_absent("owner-a", &identity("alpha"), &ports(&[39000]))
@@ -518,38 +521,40 @@ mod tests {
         );
         transaction
             .release_if_owned_or_absent("owner-a", &identity("alpha"), &leased)
-            .unwrap();
+            .test()?;
         transaction
             .release_if_owned_or_absent("owner-a", &identity("alpha"), &leased)
-            .unwrap();
+            .test()?;
+        Ok(())
     }
 
     #[test]
-    fn transaction_holds_the_global_lock_for_its_lifetime() {
-        let directory = tempfile::tempdir().unwrap();
+    fn transaction_holds_the_global_lock_for_its_lifetime() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir().test()?;
         let store = store(&directory);
-        let transaction = store.transaction().unwrap();
+        let transaction = store.transaction().test()?;
         assert!(store.transaction().is_err());
         drop(transaction);
         assert!(store.transaction().is_ok());
+        Ok(())
     }
 
     #[test]
-    fn leases_persist_across_reopen_until_exact_release() {
-        let directory = tempfile::tempdir().unwrap();
+    fn leases_persist_across_reopen_until_exact_release() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir().test()?;
         let store = store(&directory);
         {
-            let mut transaction = store.transaction().unwrap();
+            let mut transaction = store.transaction().test()?;
             transaction
                 .reserve("owner-a", &identity("alpha"), &ports(&[39000, 39001]))
-                .unwrap();
+                .test()?;
         }
 
-        let mut transaction = store.transaction().unwrap();
+        let mut transaction = store.transaction().test()?;
         assert_eq!(transaction.used_ports(), ports(&[39000, 39001]));
         transaction
             .verify("owner-a", &identity("alpha"), &ports(&[39000, 39001]))
-            .unwrap();
+            .test()?;
         assert!(
             transaction
                 .release("owner-a", &identity("alpha"), &ports(&[39000]))
@@ -558,18 +563,19 @@ mod tests {
         assert_eq!(transaction.used_ports(), ports(&[39000, 39001]));
         transaction
             .release("owner-a", &identity("alpha"), &ports(&[39000, 39001]))
-            .unwrap();
+            .test()?;
         assert!(transaction.used_ports().is_empty());
+        Ok(())
     }
 
     #[test]
-    fn verify_and_release_reject_wrong_owner_or_mismatched_sets() {
-        let directory = tempfile::tempdir().unwrap();
+    fn verify_and_release_reject_wrong_owner_or_mismatched_sets() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir().test()?;
         let store = store(&directory);
-        let mut transaction = store.transaction().unwrap();
+        let mut transaction = store.transaction().test()?;
         transaction
             .reserve("owner-a", &identity("alpha"), &ports(&[39000, 39001]))
-            .unwrap();
+            .test()?;
 
         assert!(
             transaction
@@ -597,26 +603,26 @@ mod tests {
                 .is_err()
         );
         assert_eq!(transaction.used_ports(), ports(&[39000, 39001]));
+        Ok(())
     }
 
     #[test]
-    fn malformed_duplicate_and_ambiguous_registries_fail_closed() {
-        let directory = tempfile::tempdir().unwrap();
+    fn malformed_duplicate_and_ambiguous_registries_fail_closed() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir().test()?;
         let store = store(&directory);
-        std::fs::create_dir_all(&store.state_dir).unwrap();
+        std::fs::create_dir_all(&store.state_dir).test()?;
         let path = store.state_dir.join(REGISTRY_FILE);
 
-        std::fs::write(&path, b"not json").unwrap();
+        std::fs::write(&path, b"not json").test()?;
         assert!(store.transaction().is_err());
 
         std::fs::write(
             &path,
             br#"{"kind":"StacksteadPortLeaseRegistry","version":"1","leases":[{"port":39000,"owner":"a","stackstead_id":"alpha","project":"demo"},{"port":39000,"owner":"b","stackstead_id":"beta","project":"demo"}]}"#,
         )
-        .unwrap();
-        let error = match store.transaction() {
-            Ok(_) => panic!("duplicate registry was accepted"),
-            Err(error) => error,
+        .test()?;
+        let Err(error) = store.transaction() else {
+            anyhow::bail!("duplicate registry was accepted");
         };
         assert!(error.to_string().contains("duplicate"));
 
@@ -624,10 +630,9 @@ mod tests {
             &path,
             br#"{"kind":"StacksteadPortLeaseRegistry","version":"1","leases":[{"port":39000,"owner":"a","stackstead_id":"alpha","project":"demo"},{"port":39001,"owner":"a","stackstead_id":"other","project":"demo"}]}"#,
         )
-        .unwrap();
-        let error = match store.transaction() {
-            Ok(_) => panic!("ambiguous registry was accepted"),
-            Err(error) => error,
+        .test()?;
+        let Err(error) = store.transaction() else {
+            anyhow::bail!("ambiguous registry was accepted");
         };
         assert!(error.to_string().contains("ambiguous"));
 
@@ -635,43 +640,44 @@ mod tests {
             &path,
             br#"{"kind":"StacksteadPortLeaseRegistry","version":"2","leases":[]}"#,
         )
-        .unwrap();
+        .test()?;
         assert!(store.transaction().is_err());
 
         std::fs::write(
             &path,
             br#"{"kind":"StacksteadPortLeaseRegistry","version":"1","leases":[],"extra":true}"#,
         )
-        .unwrap();
+        .test()?;
         assert!(store.transaction().is_err());
+        Ok(())
     }
 
     #[cfg(unix)]
     #[test]
-    fn symlinked_registry_fails_closed_without_reading_its_target() {
+    fn symlinked_registry_fails_closed_without_reading_its_target() -> anyhow::Result<()> {
         use std::os::unix::fs::symlink;
 
-        let directory = tempfile::tempdir().unwrap();
+        let directory = tempfile::tempdir().test()?;
         let store = store(&directory);
-        std::fs::create_dir_all(&store.state_dir).unwrap();
+        std::fs::create_dir_all(&store.state_dir).test()?;
         let target = directory.path().join("target.json");
-        std::fs::write(&target, b"not json").unwrap();
-        symlink(&target, store.state_dir.join(REGISTRY_FILE)).unwrap();
+        std::fs::write(&target, b"not json").test()?;
+        symlink(&target, store.state_dir.join(REGISTRY_FILE)).test()?;
 
-        let error = match store.transaction() {
-            Ok(_) => panic!("symlinked registry was accepted"),
-            Err(error) => error,
+        let Err(error) = store.transaction() else {
+            anyhow::bail!("symlinked registry was accepted");
         };
         assert!(error.to_string().contains("symlink"));
-        assert_eq!(std::fs::read(&target).unwrap(), b"not json");
+        assert_eq!(std::fs::read(&target).test()?, b"not json");
+        Ok(())
     }
 
     #[test]
-    fn first_transaction_initializes_a_durable_empty_registry() {
-        let directory = tempfile::tempdir().unwrap();
+    fn first_transaction_initializes_a_durable_empty_registry() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir().test()?;
         let store = store(&directory);
         let path = store.state_dir.join(REGISTRY_FILE);
-        let mut transaction = store.transaction().unwrap();
+        let mut transaction = store.transaction().test()?;
         assert!(transaction.used_ports().is_empty());
         assert!(path.is_file());
 
@@ -684,40 +690,42 @@ mod tests {
 
         transaction
             .reserve("owner-a", &identity("alpha"), &ports(&[39000]))
-            .unwrap();
+            .test()?;
         assert!(path.is_file());
         assert!(store.state_dir.join(INITIALIZED_FILE).is_file());
         transaction
             .verify("owner-a", &identity("alpha"), &ports(&[39000]))
-            .unwrap();
+            .test()?;
+        Ok(())
     }
 
     #[test]
-    fn interrupted_lock_creation_does_not_wedge_first_initialization() {
-        let directory = tempfile::tempdir().unwrap();
+    fn interrupted_lock_creation_does_not_wedge_first_initialization() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir().test()?;
         let store = store(&directory);
-        std::fs::create_dir_all(&store.state_dir).unwrap();
-        std::fs::write(store.state_dir.join(LOCK_FILE), b"").unwrap();
+        std::fs::create_dir_all(&store.state_dir).test()?;
+        std::fs::write(store.state_dir.join(LOCK_FILE), b"").test()?;
 
-        let transaction = store.transaction().unwrap();
+        let transaction = store.transaction().test()?;
         assert!(transaction.registry_path.is_file());
         assert!(store.state_dir.join(INITIALIZED_FILE).is_file());
+        Ok(())
     }
 
     #[test]
-    fn initialized_registry_cannot_silently_reinitialize_after_deletion() {
-        let directory = tempfile::tempdir().unwrap();
+    fn initialized_registry_cannot_silently_reinitialize_after_deletion() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir().test()?;
         let store = store(&directory);
-        drop(store.transaction().unwrap());
-        std::fs::remove_file(store.state_dir.join(REGISTRY_FILE)).unwrap();
-        let error = match store.transaction() {
-            Ok(_) => panic!("missing initialized registry was recreated"),
-            Err(error) => error,
+        drop(store.transaction().test()?);
+        std::fs::remove_file(store.state_dir.join(REGISTRY_FILE)).test()?;
+        let Err(error) = store.transaction() else {
+            anyhow::bail!("missing initialized registry was recreated");
         };
         assert!(
             error
                 .to_string()
                 .contains("initialized port lease registry")
         );
+        Ok(())
     }
 }

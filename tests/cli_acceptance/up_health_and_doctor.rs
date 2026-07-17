@@ -1,37 +1,40 @@
 use super::*;
 
 #[test]
-fn dependency_failure_is_persisted_without_starting_compose() {
-    let project = Project::initialized();
+fn dependency_failure_is_persisted_without_starting_compose() -> anyhow::Result<()> {
+    let project = Project::initialized()?;
     project.replace_config(
         "    command: ''\n    shell: false\n",
         "    command: stackstead-command-that-does-not-exist\n    shell: false\n",
-    );
-    let manifest = project.create("feature-a");
+    )?;
+    let manifest = project.create("feature-a")?;
 
     let assert = stackstead(&project.repo)
         .args(["up", "feature-a", "--json"])
         .assert()
         .failure();
     assert!(
-        output_text(&assert.get_output().stderr).contains("stackstead-command-that-does-not-exist")
+        output_text(&assert.get_output().stderr)?
+            .contains("stackstead-command-that-does-not-exist")
     );
 
-    let persisted = StacksteadManifest::read(&manifest.manifest_path()).expect("read failed state");
+    let persisted =
+        StacksteadManifest::read(&manifest.manifest_path()).test_context("read failed state")?;
     assert_eq!(
-        serde_json::to_value(persisted.status.dependencies).expect("serialize status"),
+        serde_json::to_value(persisted.status.dependencies).test_context("serialize status")?,
         Value::String("failed".into())
     );
-    let events = event_types(&persisted.event_log);
+    let events = event_types(&persisted.event_log)?;
     assert!(events.contains(&"dependencies_install".into()));
     assert!(!events.contains(&"runtime_start".into()));
+    Ok(())
 }
 
 #[cfg(unix)]
 #[test]
-fn dependency_and_yarn_logs_redact_structured_and_environment_secrets() {
-    let project = Project::initialized();
-    let mut config = load_config(&project.repo.join("stackstead.yaml"));
+fn dependency_and_yarn_logs_redact_structured_and_environment_secrets() -> anyhow::Result<()> {
+    let project = Project::initialized()?;
+    let mut config = load_config(&project.repo.join("stackstead.yaml"))?;
     config["dependencies"]["provider"] = "yarn-classic".into();
     config["dependencies"]["install"]["command"] = "printf 'Authorization: Bearer dependency-header-marker\\nhttps://user:dependency-url-marker@example.invalid/repo\\n%s\\nordinary dependency output\\n' \"$API_TOKEN\"".into();
     config["dependencies"]["install"]["shell"] = true.into();
@@ -41,15 +44,15 @@ fn dependency_and_yarn_logs_redact_structured_and_environment_secrets() {
         "command": "printf 'Proxy-Authorization: Basic yarn-header-marker\\nhttps://user:yarn-url-marker@example.invalid/repo\\n%s\\nordinary yarn output\\n' \"$API_TOKEN\"",
         "shell": true,
     }))
-    .unwrap();
+    .test()?;
     config["env"]["generate"]["API_TOKEN"] = "known-environment-marker".into();
-    project.write_config(&config, "configure secret-emitting dependency fixtures");
-    let manifest = project.create("feature-a");
+    project.write_config(&config, "configure secret-emitting dependency fixtures")?;
+    let manifest = project.create("feature-a")?;
     let path = fake_docker_path(
-        project.repo.parent().unwrap(),
+        project.repo.parent().test()?,
         "redaction-fake-docker-bin",
         "#!/bin/sh\nexit 19\n",
-    );
+    )?;
 
     stackstead(&project.repo)
         .env("PATH", path)
@@ -60,7 +63,7 @@ fn dependency_and_yarn_logs_redact_structured_and_environment_secrets() {
         ("dependencies.log", "ordinary dependency output"),
         ("yarn-link.log", "ordinary yarn output"),
     ] {
-        let log = fs::read_to_string(manifest.state_dir.join("logs").join(name)).unwrap();
+        let log = fs::read_to_string(manifest.state_dir.join("logs").join(name)).test()?;
         assert!(log.contains(ordinary));
         assert!(log.contains("[REDACTED]"));
         for marker in [
@@ -73,57 +76,61 @@ fn dependency_and_yarn_logs_redact_structured_and_environment_secrets() {
             assert!(!log.contains(marker), "{name} leaked {marker}");
         }
     }
+    Ok(())
 }
 
 #[test]
-fn failed_dependency_diagnostics_and_events_share_structured_redaction() {
-    let project = Project::initialized();
+fn failed_dependency_diagnostics_and_events_share_structured_redaction() -> anyhow::Result<()> {
+    let project = Project::initialized()?;
     project.replace_config(
         "    command: ''\n    shell: false\n",
         "    command: \"printf 'Authorization: Bearer event-header-marker\\\\n' >&2; exit 7\"\n    shell: true\n",
-    );
-    let manifest = project.create("feature-a");
+    )?;
+    let manifest = project.create("feature-a")?;
 
     let rejected = stackstead(&project.repo)
         .args(["up", &manifest.stackstead_id])
         .assert()
         .failure();
-    assert!(!output_text(&rejected.get_output().stderr).contains("event-header-marker"));
-    let events = fs::read_to_string(&manifest.event_log).unwrap();
+    assert!(!output_text(&rejected.get_output().stderr)?.contains("event-header-marker"));
+    let events = fs::read_to_string(&manifest.event_log).test()?;
     assert!(events.contains("[REDACTED]"));
     assert!(!events.contains("event-header-marker"));
+    Ok(())
 }
 
 #[test]
-fn pre_up_failure_preserves_completed_dependency_status() {
-    let project = Project::initialized();
+fn pre_up_failure_preserves_completed_dependency_status() -> anyhow::Result<()> {
+    let project = Project::initialized()?;
     project.replace_config(
         "  pre_up: []\n",
         "  pre_up:\n  - command: stackstead-pre-up-command-that-does-not-exist\n    shell: false\n",
-    );
-    let mut manifest = project.create("feature-a");
+    )?;
+    let mut manifest = project.create("feature-a")?;
     manifest.status.database = ComponentStatus::Reachable;
     manifest.status.health = ComponentStatus::Ready;
-    manifest.save_atomic().unwrap();
+    manifest.save_atomic().test()?;
 
     stackstead(&project.repo)
         .args(["up", "feature-a", "--json"])
         .assert()
         .failure();
 
-    let persisted = StacksteadManifest::read(&manifest.manifest_path()).expect("read failed state");
+    let persisted =
+        StacksteadManifest::read(&manifest.manifest_path()).test_context("read failed state")?;
     assert_eq!(persisted.status.dependencies, ComponentStatus::Ready);
     assert_eq!(persisted.status.database, ComponentStatus::Unknown);
     assert_eq!(persisted.status.health, ComponentStatus::Unknown);
-    assert!(!event_types(&persisted.event_log).contains(&"runtime_start".into()));
+    assert!(!event_types(&persisted.event_log)?.contains(&"runtime_start".into()));
+    Ok(())
 }
 
 #[cfg(unix)]
 #[test]
-fn up_revalidates_contract_mutations_after_pre_and_post_hooks() {
+fn up_revalidates_contract_mutations_after_pre_and_post_hooks() -> anyhow::Result<()> {
     for post_up in [false, true] {
-        let project = Project::initialized();
-        let mut config = load_config(&project.repo.join("stackstead.yaml"));
+        let project = Project::initialized()?;
+        let mut config = load_config(&project.repo.join("stackstead.yaml"))?;
         config["database"]["postgres"] = serde_yaml::Value::Null;
         config["health"]["checks"] = serde_yaml::Value::Sequence(vec![]);
         let mutation = serde_json::json!({
@@ -131,13 +138,13 @@ fn up_revalidates_contract_mutations_after_pre_and_post_hooks() {
             "shell": true,
         });
         if post_up {
-            config["hooks"]["post_up"] = serde_yaml::to_value([mutation]).unwrap();
+            config["hooks"]["post_up"] = serde_yaml::to_value([mutation]).test()?;
         } else {
-            config["hooks"]["pre_up"] = serde_yaml::to_value([mutation]).unwrap();
+            config["hooks"]["pre_up"] = serde_yaml::to_value([mutation]).test()?;
         }
-        project.write_config(&config, "configure contract mutation hook");
-        let manifest = project.create("feature-a");
-        let marker = project.repo.parent().unwrap().join(if post_up {
+        project.write_config(&config, "configure contract mutation hook")?;
+        let manifest = project.create("feature-a")?;
+        let marker = project.repo.parent().test()?.join(if post_up {
             "post-up-docker-ran"
         } else {
             "pre-up-docker-ran"
@@ -145,7 +152,7 @@ fn up_revalidates_contract_mutations_after_pre_and_post_hooks() {
         let fake_state = project
             .repo
             .parent()
-            .unwrap()
+            .test()?
             .join("contract-hook-docker-state");
         let docker_script = format!(
             r#"#!/bin/sh
@@ -164,14 +171,14 @@ exit 0
             marker.display()
         );
         let path = fake_docker_path(
-            project.repo.parent().unwrap(),
+            project.repo.parent().test()?,
             if post_up {
                 "post-up-contract-fake-bin"
             } else {
                 "pre-up-contract-fake-bin"
             },
             &docker_script,
-        );
+        )?;
         let rejected = stackstead(&project.repo)
             .env("PATH", path)
             .env("FAKE_STATE", fake_state)
@@ -179,28 +186,29 @@ exit 0
             .args(["up", &manifest.stackstead_id])
             .assert()
             .failure();
-        assert!(output_text(&rejected.get_output().stderr).contains("deterministic host binding"));
+        assert!(output_text(&rejected.get_output().stderr)?.contains("deterministic host binding"));
         assert_eq!(marker.exists(), post_up, "Docker stage ordering changed");
     }
+    Ok(())
 }
 
 #[cfg(unix)]
 #[test]
-fn command_health_persists_ready_failed_and_stop_reset_states() {
-    let project = Project::git_repo();
+fn command_health_persists_ready_failed_and_stop_reset_states() -> anyhow::Result<()> {
+    let project = Project::git_repo()?;
     fs::write(
         project.repo.join("docker-compose.yml"),
         "services:\n  web:\n    image: nginx:alpine\n    ports:\n      - \"127.0.0.1:${WEB_PORT}:80\"\n",
     )
-    .expect("write web-only Compose fixture");
-    git(&project.repo, &["add", "docker-compose.yml"]);
+    .test_context("write web-only Compose fixture")?;
+    git(&project.repo, &["add", "docker-compose.yml"])?;
     git(
         &project.repo,
         &["commit", "-m", "use web-only health fixture"],
-    );
+    )?;
     stackstead(&project.repo).arg("init").assert().success();
 
-    let mut config = load_config(&project.repo.join("stackstead.yaml"));
+    let mut config = load_config(&project.repo.join("stackstead.yaml"))?;
     config["health"]["timeout_seconds"] = 1.into();
     config["health"]["interval_millis"] = 10.into();
     config["health"]["checks"] = serde_yaml::to_value([serde_json::json!({
@@ -212,21 +220,21 @@ fn command_health_persists_ready_failed_and_stop_reset_states() {
             "shell": true,
         },
     })])
-    .unwrap();
+    .test()?;
     config["hooks"]["pre_up"] = serde_yaml::to_value([serde_json::json!({
         "command": "true",
         "shell": false,
     })])
-    .unwrap();
+    .test()?;
     config["hooks"]["post_up"] = serde_yaml::to_value([serde_json::json!({
         "command": "true",
         "shell": false,
     })])
-    .unwrap();
-    project.write_config(&config, "configure command health fixture");
-    let manifest = project.create("feature-a");
+    .test()?;
+    project.write_config(&config, "configure command health fixture")?;
+    let manifest = project.create("feature-a")?;
 
-    let fake_state = project.repo.parent().unwrap().join("health-docker-state");
+    let fake_state = project.repo.parent().test()?.join("health-docker-state");
     let docker_script = format!(
         r#"#!/bin/sh
 set -eu
@@ -251,11 +259,11 @@ exit 0
         manifest.compose_project, manifest.ports["web"]
     );
     let path = fake_docker_path(
-        project.repo.parent().unwrap(),
+        project.repo.parent().test()?,
         "health-fake-docker-bin",
         &docker_script,
-    );
-    let docker = std::env::split_paths(&path).next().unwrap().join("docker");
+    )?;
+    let docker = std::env::split_paths(&path).next().test()?.join("docker");
 
     let ready = stackstead(&project.repo)
         .env("PATH", &path)
@@ -267,8 +275,8 @@ exit 0
         .args(["--json", "up", "feature-a"])
         .assert()
         .success();
-    assert!(!output_text(&ready.get_output().stdout).contains("Timings"));
-    let ready = changed_manifest(&ready.get_output().stdout, "started");
+    assert!(!output_text(&ready.get_output().stdout)?.contains("Timings"));
+    let ready = changed_manifest(&ready.get_output().stdout, "started")?;
     assert_eq!(ready.status.health, ComponentStatus::Ready);
     let human = stackstead(&project.repo)
         .env("PATH", &path)
@@ -277,7 +285,7 @@ exit 0
         .args(["up", "feature-a"])
         .assert()
         .success();
-    let human = output_text(&human.get_output().stdout);
+    let human = output_text(&human.get_output().stdout)?;
     for phase in [
         "Timings:",
         "Dependencies",
@@ -304,12 +312,12 @@ exit 0
         .args(["--json", "inspect", "feature-a"])
         .assert()
         .success();
-    let inspected: Value =
-        serde_json::from_slice(&inspected.get_output().stdout).expect("parse inspect output");
+    let inspected: Value = serde_json::from_slice(&inspected.get_output().stdout)
+        .test_context("parse inspect output")?;
     assert!(inspected["live"]["health"].is_null());
     assert_eq!(inspected["stackstead"]["status"]["health"], "ready");
 
-    fs::write(&docker, "#!/bin/sh\nexit 19\n").expect("make Compose fail");
+    fs::write(&docker, "#!/bin/sh\nexit 19\n").test_context("make Compose fail")?;
     stackstead(&project.repo)
         .env("PATH", &path)
         .env("FAKE_STATE", &fake_state)
@@ -317,10 +325,10 @@ exit 0
         .args(["up", "feature-a"])
         .assert()
         .failure();
-    let compose_failed =
-        StacksteadManifest::read(&manifest.manifest_path()).expect("read Compose failure state");
+    let compose_failed = StacksteadManifest::read(&manifest.manifest_path())
+        .test_context("read Compose failure state")?;
     assert_eq!(compose_failed.status.health, ComponentStatus::Unknown);
-    fs::write(&docker, &docker_script).expect("restore fake Docker");
+    fs::write(&docker, &docker_script).test_context("restore fake Docker")?;
 
     let stopped = stackstead(&project.repo)
         .env("PATH", &path)
@@ -329,11 +337,11 @@ exit 0
         .args(["--json", "stop", "feature-a"])
         .assert()
         .success();
-    let stopped = changed_manifest(&stopped.get_output().stdout, "stopped");
+    let stopped = changed_manifest(&stopped.get_output().stdout, "stopped")?;
     assert_eq!(stopped.status.health, ComponentStatus::Unknown);
 
     config["health"]["checks"][0]["command"]["command"] = "false".into();
-    project.write_config(&config, "make command health fail");
+    project.write_config(&config, "make command health fail")?;
     stackstead(&project.repo)
         .env("PATH", &path)
         .env("FAKE_STATE", fake_state)
@@ -341,39 +349,44 @@ exit 0
         .args(["up", "feature-a"])
         .assert()
         .failure();
-    let failed = StacksteadManifest::read(&manifest.manifest_path()).expect("read failed manifest");
+    let failed =
+        StacksteadManifest::read(&manifest.manifest_path()).test_context("read failed manifest")?;
     assert_eq!(failed.status.health, ComponentStatus::Failed);
-    let health_error = fs::read_to_string(&failed.event_log)
-        .expect("read health events")
+    let mut health_error = false;
+    for line in fs::read_to_string(&failed.event_log)
+        .test_context("read health events")?
         .lines()
-        .map(|line| serde_json::from_str::<Value>(line).expect("parse health event"))
-        .any(|event| event["type"] == "health_wait" && event["status"] == "failed");
+    {
+        let event: Value = serde_json::from_str(line).test_context("parse health event")?;
+        health_error |= event["type"] == "health_wait" && event["status"] == "failed";
+    }
     assert!(health_error);
+    Ok(())
 }
 
 #[cfg(unix)]
 #[test]
-fn inspect_passively_checks_http_health_only_for_a_running_runtime() {
+fn inspect_passively_checks_http_health_only_for_a_running_runtime() -> anyhow::Result<()> {
     use std::{
         io::{Read, Write},
         net::TcpListener,
         thread,
     };
 
-    let project = Project::initialized();
-    let mut config = load_config(&project.repo.join("stackstead.yaml"));
+    let project = Project::initialized()?;
+    let mut config = load_config(&project.repo.join("stackstead.yaml"))?;
     config["resources"]["ports"]["base"] = serde_yaml::Value::Number(50_000.into());
-    project.write_config(&config, "isolate passive health test ports");
-    let manifest = project.create("feature-a");
-    let listener =
-        TcpListener::bind(("127.0.0.1", manifest.ports["web"])).expect("bind allocated web port");
-    let server = thread::spawn(move || {
+    project.write_config(&config, "isolate passive health test ports")?;
+    let manifest = project.create("feature-a")?;
+    let listener = TcpListener::bind(("127.0.0.1", manifest.ports["web"]))
+        .test_context("bind allocated web port")?;
+    let server = thread::spawn(move || -> anyhow::Result<()> {
         for status in ["200 OK", "500 Internal Server Error"] {
-            let (mut stream, _) = listener.accept().unwrap();
+            let (mut stream, _) = listener.accept().test()?;
             let mut request = Vec::new();
             while !request.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
                 let mut buffer = [0; 1024];
-                let read = stream.read(&mut buffer).unwrap();
+                let read = stream.read(&mut buffer).test()?;
                 assert_ne!(read, 0, "client closed before sending HTTP headers");
                 request.extend_from_slice(&buffer[..read]);
             }
@@ -381,18 +394,19 @@ fn inspect_passively_checks_http_health_only_for_a_running_runtime() {
                 stream,
                 "HTTP/1.1 {status}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
             )
-            .unwrap();
-            stream.flush().unwrap();
+            .test()?;
+            stream.flush().test()?;
         }
+        Ok(())
     });
     let path = fake_docker_path(
-        project.repo.parent().unwrap(),
+        project.repo.parent().test()?,
         "inspect-health-fake-bin",
         &format!(
             "#!/bin/sh\ncase \" $* \" in\n  *\" ps --all --format json \"*) printf '%s\\n' '[{{\"Name\":\"demo-web-1\",\"Service\":\"web\",\"State\":\"running\",\"ExitCode\":0}}]' ;;\n  *\" port web 80 \"*) printf '127.0.0.1:{}\\n' ;;\nesac\n",
             manifest.ports["web"]
         ),
-    );
+    )?;
 
     for expected in [true, false] {
         let inspected = stackstead(&project.repo)
@@ -400,70 +414,74 @@ fn inspect_passively_checks_http_health_only_for_a_running_runtime() {
             .args(["inspect", "feature-a", "--json"])
             .assert()
             .success();
-        let value: Value = serde_json::from_slice(&inspected.get_output().stdout).unwrap();
+        let value: Value = serde_json::from_slice(&inspected.get_output().stdout).test()?;
         assert_eq!(value["version"], "3");
         assert_eq!(value["live"]["runtime"]["running"], true);
         assert_eq!(value["live"]["health"]["healthy"], expected);
         assert_eq!(value["effective"]["health"]["basis"], "live");
     }
-    server.join().unwrap();
+    server.join().test()??;
+    Ok(())
 }
 
 #[cfg(unix)]
 #[test]
-fn inspect_preserves_passive_health_for_a_static_loopback_url() {
+fn inspect_preserves_passive_health_for_a_static_loopback_url() -> anyhow::Result<()> {
     use std::{
         io::{Read, Write},
         thread,
     };
 
-    let project = Project::initialized();
-    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
-    let port = listener.local_addr().unwrap().port();
-    let mut config = load_config(&project.repo.join("stackstead.yaml"));
+    let project = Project::initialized()?;
+    let listener = TcpListener::bind(("127.0.0.1", 0)).test()?;
+    let port = listener.local_addr().test()?.port();
+    let mut config = load_config(&project.repo.join("stackstead.yaml"))?;
     config["health"]["checks"][0]["url"] = format!("http://127.0.0.1:{port}").into();
-    project.write_config(&config, "use a static loopback health target");
-    let manifest = project.create("feature-a");
-    let server = thread::spawn(move || {
-        let (mut stream, _) = listener.accept().unwrap();
+    project.write_config(&config, "use a static loopback health target")?;
+    let manifest = project.create("feature-a")?;
+    let server = thread::spawn(move || -> anyhow::Result<()> {
+        let (mut stream, _) = listener.accept().test()?;
         let mut request = Vec::new();
         while !request.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
             let mut buffer = [0; 1024];
-            let read = stream.read(&mut buffer).unwrap();
+            let read = stream.read(&mut buffer).test()?;
             assert_ne!(read, 0, "client closed before sending HTTP headers");
             request.extend_from_slice(&buffer[..read]);
         }
         stream
             .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
-            .unwrap();
+            .test()?;
+        Ok(())
     });
     let path = fake_docker_path(
-        project.repo.parent().unwrap(),
+        project.repo.parent().test()?,
         "inspect-static-health-bin",
         "#!/bin/sh\ncase \" $* \" in *\" ps --all --format json \"*) printf '%s\\n' '[{\"Name\":\"demo-web-1\",\"Service\":\"web\",\"State\":\"running\",\"ExitCode\":0}]';; esac\n",
-    );
+    )?;
 
     let inspected = stackstead(&project.repo)
         .env("PATH", path)
         .args(["inspect", &manifest.stackstead_id, "--json"])
         .assert()
         .success();
-    let inspected: Value = serde_json::from_slice(&inspected.get_output().stdout).unwrap();
+    let inspected: Value = serde_json::from_slice(&inspected.get_output().stdout).test()?;
     assert_eq!(inspected["live"]["health"]["healthy"], true);
     assert_eq!(inspected["effective"]["health"]["basis"], "live");
-    server.join().unwrap();
+    server.join().test()??;
+    Ok(())
 }
 
 #[cfg(unix)]
 #[test]
-fn inspect_reports_recorded_ready_but_live_failed_for_a_stopped_health_target() {
-    let project = Project::initialized();
-    let mut manifest = project.create("feature-a");
+fn inspect_reports_recorded_ready_but_live_failed_for_a_stopped_health_target() -> anyhow::Result<()>
+{
+    let project = Project::initialized()?;
+    let mut manifest = project.create("feature-a")?;
     manifest.status.runtime = ComponentStatus::Running;
     manifest.status.health = ComponentStatus::Ready;
-    manifest.save_atomic().unwrap();
+    manifest.save_atomic().test()?;
     let path = fake_docker_path(
-        project.repo.parent().unwrap(),
+        project.repo.parent().test()?,
         "inspect-stopped-target-bin",
         r#"#!/bin/sh
 case " $* " in
@@ -472,18 +490,18 @@ case " $* " in
     ;;
 esac
 "#,
-    );
-    let inspect = || {
+    )?;
+    let inspect = || -> anyhow::Result<Value> {
         let output = stackstead(&project.repo)
             .env("PATH", &path)
             .args(["inspect", &manifest.stackstead_id, "--json"])
             .assert()
             .success();
-        serde_json::from_slice::<Value>(&output.get_output().stdout).unwrap()
+        serde_json::from_slice(&output.get_output().stdout).test()
     };
 
-    let mut first = inspect();
-    let mut second = inspect();
+    let mut first = inspect()?;
+    let mut second = inspect()?;
     assert_eq!(first["version"], "3");
     assert_eq!(first["stackstead"]["status"]["health"], "ready");
     assert_eq!(first["live"]["health"]["healthy"], false);
@@ -499,78 +517,74 @@ esac
     first["effective"]["observed_at"] = Value::Null;
     second["effective"]["observed_at"] = Value::Null;
     assert_eq!(first, second);
+    Ok(())
 }
 
 #[test]
-fn in_repo_state_is_rejected_before_creating_state() {
-    let project = Project::initialized();
-    project.replace_config("root: ../.stacksteads", "root: .stacksteads");
+fn in_repo_state_is_rejected_before_creating_state() -> anyhow::Result<()> {
+    let project = Project::initialized()?;
+    project.replace_config("root: ../.stacksteads", "root: .stacksteads")?;
     let rejected = stackstead(&project.repo)
         .args(["create", "feature-a"])
         .assert()
         .failure();
     assert!(
-        output_text(&rejected.get_output().stderr)
+        output_text(&rejected.get_output().stderr)?
             .contains("state.root must resolve outside the repository")
     );
     assert!(!project.repo.join(".stacksteads").exists());
+    Ok(())
 }
 
 #[cfg(unix)]
 #[test]
-fn create_rejects_a_project_lock_symlink_without_touching_its_target() {
+fn create_rejects_a_project_lock_symlink_without_touching_its_target() -> anyhow::Result<()> {
     use std::os::unix::fs::symlink;
 
-    let project = Project::initialized();
-    let marker = project.repo.parent().unwrap().join("lock-marker");
-    fs::write(&marker, "unchanged\n").unwrap();
+    let project = Project::initialized()?;
+    let marker = project.repo.parent().test()?.join("lock-marker");
+    fs::write(&marker, "unchanged\n").test()?;
     let lock = project
         .repo
         .parent()
-        .unwrap()
+        .test()?
         .join(".stacksteads/demo-project/project.lock");
-    fs::create_dir_all(lock.parent().unwrap()).unwrap();
-    symlink(&marker, &lock).unwrap();
+    fs::create_dir_all(lock.parent().test()?).test()?;
+    symlink(&marker, &lock).test()?;
 
     stackstead(&project.repo)
         .args(["create", "feature-a"])
         .assert()
         .failure();
-    assert_eq!(fs::read_to_string(&marker).unwrap(), "unchanged\n");
-    assert!(
-        fs::symlink_metadata(&lock)
-            .unwrap()
-            .file_type()
-            .is_symlink()
-    );
-    assert!(
-        fs::read_dir(lock.parent().unwrap())
-            .unwrap()
-            .all(|entry| !entry.unwrap().file_type().unwrap().is_dir())
-    );
+    assert_eq!(fs::read_to_string(&marker).test()?, "unchanged\n");
+    assert!(fs::symlink_metadata(&lock).test()?.file_type().is_symlink());
+    for entry in fs::read_dir(lock.parent().test()?).test()? {
+        assert!(!entry.test()?.file_type().test()?.is_dir());
+    }
 
-    fs::remove_file(&lock).unwrap();
-    let manifest = project.create("feature-a");
+    fs::remove_file(&lock).test()?;
+    let manifest = project.create("feature-a")?;
     assert!(manifest.manifest_path().is_file());
-    assert_eq!(fs::read_to_string(marker).unwrap(), "unchanged\n");
+    assert_eq!(fs::read_to_string(marker).test()?, "unchanged\n");
+    Ok(())
 }
 
 #[cfg(unix)]
 #[test]
-fn state_parent_symlinks_are_resolved_to_safe_external_targets() {
+fn state_parent_symlinks_are_resolved_to_safe_external_targets() -> anyhow::Result<()> {
     use std::os::unix::fs::symlink;
 
-    let project = Project::initialized();
-    project.replace_config("root: ../.stacksteads", "root: .stacksteads");
-    let outside = project.repo.parent().unwrap().join("outside-state-root");
+    let project = Project::initialized()?;
+    project.replace_config("root: ../.stacksteads", "root: .stacksteads")?;
+    let outside = project.repo.parent().test()?.join("outside-state-root");
     let project_target = outside.join("demo-project");
-    fs::create_dir_all(&project_target).unwrap();
+    fs::create_dir_all(&project_target).test()?;
     let link = project.repo.join(".stacksteads");
     let lock_target = project_target.join("project.lock");
-    fs::write(&lock_target, "unchanged\n").unwrap();
-    symlink(&outside, &link).unwrap();
-    git(&project.repo, &["add", ".stacksteads"]);
-    git(&project.repo, &["commit", "-m", "add external state alias"]);
+    fs::write(&lock_target, "unchanged\n").test()?;
+    symlink(&outside, &link).test()?;
+    git(&project.repo, &["add", ".stacksteads"])?;
+    git(&project.repo, &["commit", "-m", "add external state alias"])?;
 
     let created = stackstead(&project.repo)
         .args(["create", "feature-a"])
@@ -579,27 +593,28 @@ fn state_parent_symlinks_are_resolved_to_safe_external_targets() {
     assert!(!created.get_output().stdout.is_empty());
     assert!(
         fs::read_to_string(lock_target)
-            .unwrap()
+            .test()?
             .contains("acquired_at=")
     );
+    Ok(())
 }
 
 #[test]
-fn doctor_scans_branch_local_compose_files_for_fixed_ports() {
-    let project = Project::initialized();
-    let manifest = project.create("feature-a");
+fn doctor_scans_branch_local_compose_files_for_fixed_ports() -> anyhow::Result<()> {
+    let project = Project::initialized()?;
+    let manifest = project.create("feature-a")?;
     fs::write(
         &manifest.compose_files[0],
         "services:\n  web:\n    image: nginx:alpine\n    ports:\n      - \"3000:80\"\n",
     )
-    .expect("write branch-local Compose change");
+    .test_context("write branch-local Compose change")?;
 
     let assert = stackstead(&project.repo)
         .args(["doctor", "--json"])
         .assert()
         .success();
     let diagnostics: Value =
-        serde_json::from_slice(&assert.get_output().stdout).expect("parse diagnostics");
+        serde_json::from_slice(&assert.get_output().stdout).test_context("parse diagnostics")?;
     assert!(
         diagnostics["diagnostics"]
             .as_array()
@@ -628,50 +643,51 @@ fn doctor_scans_branch_local_compose_files_for_fixed_ports() {
         &manifest.compose_files[0],
         "services:\n  web:\n    image: nginx:alpine\n    ports:\n      - \"127.0.0.1:${WEB_PORT}:80\"\n",
     )
-    .unwrap();
+    .test()?;
     let loopback = stackstead(&project.repo)
         .args(["doctor", "--json"])
         .assert()
         .success();
-    let loopback: Value = serde_json::from_slice(&loopback.get_output().stdout).unwrap();
+    let loopback: Value = serde_json::from_slice(&loopback.get_output().stdout).test()?;
     assert!(loopback["diagnostics"].as_array().is_some_and(|items| {
         items
             .iter()
             .all(|item| item["code"] != "compose.worktree_all_interfaces_host_port")
     }));
+    Ok(())
 }
 
 #[test]
-fn doctor_reports_project_worktree_and_pointer_contract_failures_together() {
-    let project = Project::initialized();
-    let manifest = project.create("feature-a");
+fn doctor_reports_project_worktree_and_pointer_contract_failures_together() -> anyhow::Result<()> {
+    let project = Project::initialized()?;
+    let manifest = project.create("feature-a")?;
     fs::write(
         project.repo.join("docker-compose.yml"),
         "services:\n  web:\n    ports: [\"80\"]\n",
     )
-    .unwrap();
+    .test()?;
     fs::write(
         &manifest.compose_files[0],
         "services:\n  web:\n    ports: [\"${APP_PORT}:80\"]\n",
     )
-    .unwrap();
-    let mut pointer: Value =
-        serde_json::from_slice(&fs::read(&manifest.pointer_file).unwrap()).expect("parse pointer");
+    .test()?;
+    let mut pointer: Value = serde_json::from_slice(&fs::read(&manifest.pointer_file).test()?)
+        .test_context("parse pointer")?;
     pointer["stackstead_id"] = Value::String("copied-pointer-a123".into());
     fs::write(
         &manifest.pointer_file,
-        serde_json::to_vec_pretty(&pointer).unwrap(),
+        serde_json::to_vec_pretty(&pointer).test()?,
     )
-    .unwrap();
+    .test()?;
 
     let output = stackstead(&project.repo)
         .args(["doctor", "--json"])
         .assert()
         .success();
-    let diagnostics: Value = serde_json::from_slice(&output.get_output().stdout).unwrap();
+    let diagnostics: Value = serde_json::from_slice(&output.get_output().stdout).test()?;
     let codes = diagnostics["diagnostics"]
         .as_array()
-        .unwrap()
+        .test()?
         .iter()
         .filter_map(|item| item["code"].as_str())
         .collect::<BTreeSet<_>>();
@@ -686,34 +702,35 @@ fn doctor_reports_project_worktree_and_pointer_contract_failures_together() {
             "missing diagnostic {expected}: {codes:?}"
         );
     }
+    Ok(())
 }
 
 #[cfg(unix)]
 #[test]
-fn doctor_fail_on_error_keeps_complete_json_and_ignores_warnings() {
-    let project = Project::initialized();
+fn doctor_fail_on_error_keeps_complete_json_and_ignores_warnings() -> anyhow::Result<()> {
+    let project = Project::initialized()?;
     let path = fake_docker_path(
-        project.repo.parent().unwrap(),
+        project.repo.parent().test()?,
         "doctor-ci-fake-bin",
         "#!/bin/sh\ntest \"${1-}\" != info\n",
-    );
+    )?;
 
     let warning_only = stackstead(&project.repo)
         .env("PATH", &path)
         .args(["doctor", "--json", "--fail-on-error"])
         .assert()
         .success();
-    let warning_report: Value = serde_json::from_slice(&warning_only.get_output().stdout).unwrap();
+    let warning_report: Value = serde_json::from_slice(&warning_only.get_output().stdout).test()?;
     assert_eq!(warning_report["kind"], "DoctorReport");
     assert_eq!(warning_report["version"], "1");
     assert_eq!(warning_report["error_count"], 0);
-    assert!(warning_report["warning_count"].as_u64().unwrap() > 0);
+    assert!(warning_report["warning_count"].as_u64().test()? > 0);
 
     fs::write(
         project.repo.join("docker-compose.yml"),
         "services:\n  web:\n    ports: [\"80\"]\n",
     )
-    .unwrap();
+    .test()?;
     stackstead(&project.repo)
         .env("PATH", &path)
         .args(["doctor", "--json"])
@@ -724,29 +741,30 @@ fn doctor_fail_on_error_keeps_complete_json_and_ignores_warnings() {
         .args(["doctor", "--json", "--fail-on-error"])
         .assert()
         .code(1);
-    let error_report: Value = serde_json::from_slice(&failed.get_output().stdout).unwrap();
+    let error_report: Value = serde_json::from_slice(&failed.get_output().stdout).test()?;
     assert_eq!(error_report["ok"], false);
-    assert!(error_report["error_count"].as_u64().unwrap() > 0);
-    assert!(!error_report["diagnostics"].as_array().unwrap().is_empty());
+    assert!(error_report["error_count"].as_u64().test()? > 0);
+    assert!(!error_report["diagnostics"].as_array().test()?.is_empty());
+    Ok(())
 }
 
 #[cfg(unix)]
 #[test]
-fn doctor_reports_repository_policy_freshness_without_failing() {
-    let project = Project::initialized();
+fn doctor_reports_repository_policy_freshness_without_failing() -> anyhow::Result<()> {
+    let project = Project::initialized()?;
     let instructions = project.repo.join("AGENTS.md");
     let path = fake_docker_path(
-        project.repo.parent().unwrap(),
+        project.repo.parent().test()?,
         "policy-doctor-fake-bin",
         "#!/bin/sh\nexit 0\n",
-    );
+    )?;
 
     let report = stackstead(&project.repo)
         .env("PATH", &path)
         .args(["doctor", "--json", "--fail-on-error"])
         .assert()
         .success();
-    let report: Value = serde_json::from_slice(&report.get_output().stdout).unwrap();
+    let report: Value = serde_json::from_slice(&report.get_output().stdout).test()?;
     assert!(has_diagnostic(
         &report,
         "repository_policy.missing",
@@ -775,13 +793,13 @@ fn doctor_reports_repository_policy_freshness_without_failing() {
             "info",
         ),
     ] {
-        fs::write(&instructions, contents).unwrap();
+        fs::write(&instructions, contents).test()?;
         let report = stackstead(&project.repo)
             .env("PATH", &path)
             .args(["doctor", "--json", "--fail-on-error"])
             .assert()
             .success();
-        let report: Value = serde_json::from_slice(&report.get_output().stdout).unwrap();
+        let report: Value = serde_json::from_slice(&report.get_output().stdout).test()?;
         assert!(has_diagnostic(&report, code, severity), "{report:#}");
         assert!(!has_diagnostic(
             &report,
@@ -789,25 +807,30 @@ fn doctor_reports_repository_policy_freshness_without_failing() {
             "warning"
         ));
     }
+    Ok(())
 }
 
 #[test]
-fn env_outputs_redact_credentials_and_generation_is_deterministic() {
-    let project = Project::initialized();
+fn env_outputs_redact_credentials_and_generation_is_deterministic() -> anyhow::Result<()> {
+    let project = Project::initialized()?;
     project.replace_config(
         "    DATABASE_URL: postgres://app:app@127.0.0.1:{{ ports.postgres }}/app\n",
         "    Z_LAST: \"value#hash\"\n    SERVICE_DSN: postgresql://worker:dnspass@127.0.0.1:{{ ports.postgres }}/app\n    DATABASE_URL: postgres://app:app@127.0.0.1:{{ ports.postgres }}/app\n    A_FIRST: \"hello world\"\n",
-    );
-    let manifest = project.create("feature-a");
+    )?;
+    let manifest = project.create("feature-a")?;
 
-    let env = fs::read_to_string(&manifest.env_file).expect("read generated env");
+    let env = fs::read_to_string(&manifest.env_file).test_context("read generated env")?;
     assert!(env.contains("A_FIRST=\"hello world\""));
     assert!(env.contains("Z_LAST=\"value#hash\""));
     let keys = env
         .lines()
         .filter(|line| !line.is_empty() && !line.starts_with('#'))
-        .map(|line| line.split_once('=').expect("env assignment").0)
-        .collect::<Vec<_>>();
+        .map(|line| {
+            line.split_once('=')
+                .test_context("env assignment")
+                .map(|assignment| assignment.0)
+        })
+        .collect::<anyhow::Result<Vec<_>>>()?;
     let mut sorted = keys.clone();
     sorted.sort_unstable();
     assert_eq!(keys, sorted, "generated env assignments are not sorted");
@@ -818,7 +841,7 @@ fn env_outputs_redact_credentials_and_generation_is_deterministic() {
         vec!["env", "feature-a", "--print"],
     ] {
         let assert = stackstead(&project.repo).args(args).assert().success();
-        let stdout = output_text(&assert.get_output().stdout);
+        let stdout = output_text(&assert.get_output().stdout)?;
         assert!(
             !stdout.contains("postgres://app:app@"),
             "DATABASE_URL leaked: {stdout}"
@@ -831,4 +854,5 @@ fn env_outputs_redact_credentials_and_generation_is_deterministic() {
         assert!(stdout.contains("SERVICE_DSN"));
         assert!(stdout.contains("[REDACTED]"));
     }
+    Ok(())
 }

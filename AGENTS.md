@@ -26,10 +26,10 @@
 - `stackstead compose plan` is read-only. Use `stackstead compose apply --yes` to
   make supported edits, inspect the diff, and commit `stackstead.yaml` plus its
   Compose file before `create`, `adopt`, or `up`; environments pin committed `source.base`.
-- Stackstead is intentionally a binary-only product. Do not add a Rust library,
-  public module surface, plugin abstraction, compatibility layer, or migration
-  path without a concrete current use case. This pre-release codebase prefers
-  explicit breaking cleanup over silent inference or backward compatibility.
+- Stackstead is binary-only; `scripts/check-policy.sh` enforces its crate shape.
+  Do not add a public module surface, plugin abstraction, compatibility layer,
+  or migration path without a concrete current use case. This pre-release
+  codebase prefers explicit breaking cleanup over silent inference.
 - CLI JSON is a versioned transport contract, not a serialized manifest or
   internal type. Prefer `stackstead --json <subcommand> ...`, keep command-owned
   DTOs, validate `kind` and `version` (and mutation `action`), and wrap lists.
@@ -40,20 +40,8 @@
 
 ## Verification
 
-- Treat `.github/workflows/ci.yml` as authoritative. Its current full local
-  sequence is:
-
-  ```sh
-  cargo fmt --check
-  cargo clippy --locked --all-targets --all-features -- -D warnings
-  cargo test --locked
-  scripts/test-install.sh
-  cargo build --locked --release
-  scripts/test-release-install.sh target/release/stackstead
-  scripts/test-delivery.sh
-  cargo build --locked
-  scripts/docker-integration.sh
-  ```
+- Run `scripts/ci.sh` for the full local Linux sequence used by CI. Use its
+  `rust`, `docker`, or `macos` mode for the corresponding focused job.
 
 - For `scripts/docker-integration.sh`, the preceding debug build may instead be
   replaced by setting `STACKSTEAD_BIN` to an explicit executable. Docker and the

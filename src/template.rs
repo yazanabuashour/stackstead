@@ -131,6 +131,7 @@ fn valid_key(key: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::TestResultExt as _;
 
     fn context() -> TemplateContext {
         BTreeMap::from([
@@ -140,48 +141,52 @@ mod tests {
     }
 
     #[test]
-    fn renders_normal_and_repeated_keys_with_whitespace() {
+    fn renders_normal_and_repeated_keys_with_whitespace() -> anyhow::Result<()> {
         assert_eq!(
             render_template(
                 "{{ project.name }}:{{ports.web}}/{{ project.name }}",
                 &context()
             )
-            .unwrap(),
+            .test()?,
             "loan-platform:39100/loan-platform"
         );
+        Ok(())
     }
 
     #[test]
-    fn leaves_plain_text_unchanged() {
+    fn leaves_plain_text_unchanged() -> anyhow::Result<()> {
         assert_eq!(
-            render_template("plain text", &context()).unwrap(),
+            render_template("plain text", &context()).test()?,
             "plain text"
         );
-        assert_eq!(render_template("", &context()).unwrap(), "");
+        assert_eq!(render_template("", &context()).test()?, "");
+        Ok(())
     }
 
     #[test]
-    fn renders_url_and_env_values() {
+    fn renders_url_and_env_values() -> anyhow::Result<()> {
         assert_eq!(
-            render_template("http://127.0.0.1:{{ ports.web }}", &context()).unwrap(),
+            render_template("http://127.0.0.1:{{ ports.web }}", &context()).test()?,
             "http://127.0.0.1:39100"
         );
         assert_eq!(
-            render_template("WEB_PORT={{ ports.web }}", &context()).unwrap(),
+            render_template("WEB_PORT={{ ports.web }}", &context()).test()?,
             "WEB_PORT=39100"
         );
+        Ok(())
     }
 
     #[test]
-    fn rejects_unknown_keys() {
+    fn rejects_unknown_keys() -> anyhow::Result<()> {
         assert_eq!(
             render_template("{{ ports.api }}", &context()),
             Err(TemplateError::UnknownKey("ports.api".to_owned()))
         );
+        Ok(())
     }
 
     #[test]
-    fn rejects_malformed_expressions() {
+    fn rejects_malformed_expressions() -> anyhow::Result<()> {
         assert_eq!(
             render_template("{{ ports.web", &context()),
             Err(TemplateError::UnclosedExpression)
@@ -198,10 +203,11 @@ mod tests {
             render_template("{{ ports web }}", &context()),
             Err(TemplateError::InvalidKey("ports web".to_owned()))
         );
+        Ok(())
     }
 
     #[test]
-    fn validates_keys_without_rendering() {
+    fn validates_keys_without_rendering() -> anyhow::Result<()> {
         assert!(
             validate_template_keys(
                 "{{ project.name }}-{{ ports.web }}",
@@ -213,5 +219,6 @@ mod tests {
             validate_template_keys("{{ paths.unknown }}", ["project.name"]),
             Err(TemplateError::UnknownKey("paths.unknown".to_owned()))
         );
+        Ok(())
     }
 }

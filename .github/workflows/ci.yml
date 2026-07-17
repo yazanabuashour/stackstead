@@ -30,13 +30,7 @@ jobs:
         with:
           toolchain: 1.91.1
           components: clippy,rustfmt
-      - run: cargo fmt --check
-      - run: cargo clippy --locked --all-targets --all-features -- -D warnings
-      - run: cargo test --locked
-      - run: scripts/test-install.sh
-      - run: cargo build --locked --release
-      - run: scripts/test-release-install.sh target/release/stackstead
-      - run: scripts/test-delivery.sh
+      - run: scripts/ci.sh rust
 
   docker-integration:
     runs-on: ubuntu-24.04
@@ -49,8 +43,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # 2026-07-09
         with:
           toolchain: 1.91.1
-      - run: cargo build --locked
-      - run: scripts/docker-integration.sh
+      - run: scripts/ci.sh docker
 
   macos:
     if: github.event_name == 'pull_request' || inputs.revision != '' || github.ref == 'refs/heads/main'
@@ -64,6 +57,4 @@ jobs:
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # 2026-07-09
         with:
           toolchain: 1.91.1
-      - run: cargo test --locked
-      - run: scripts/test-install.sh
-      - run: scripts/test-delivery.sh
+      - run: scripts/ci.sh macos

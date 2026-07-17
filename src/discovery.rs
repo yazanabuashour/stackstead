@@ -70,6 +70,7 @@ pub fn project_root(discovery: &Discovery) -> &Path {
 
 #[cfg(test)]
 mod tests {
+    use crate::test_support::{TestResultErrorExt as _, TestResultExt as _};
     use std::collections::BTreeMap;
 
     use chrono::Utc;
@@ -77,15 +78,15 @@ mod tests {
     use super::*;
     use crate::manifest::{ManifestStatus, SourceOwnership, write_json_atomic, write_pointer};
 
-    fn write_stackstead(root: &Path) -> StacksteadManifest {
+    fn write_stackstead(root: &Path) -> anyhow::Result<StacksteadManifest> {
         let repo_root = root.join("repo");
         let project_state_root = root.join("state-root");
         let stackstead_root = project_state_root.join("demo/cell-a");
         let worktree = stackstead_root.join("source");
         let state_dir = stackstead_root.join("state");
         let pointer_file = worktree.join(".stackstead/stackstead.json");
-        std::fs::create_dir_all(pointer_file.parent().unwrap()).unwrap();
-        std::fs::create_dir_all(&state_dir).unwrap();
+        std::fs::create_dir_all(pointer_file.parent().test()?).test()?;
+        std::fs::create_dir_all(&state_dir).test()?;
         let manifest = StacksteadManifest {
             kind: "StacksteadManifest".into(),
             version: crate::manifest::MANIFEST_VERSION.into(),
@@ -118,7 +119,7 @@ mod tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };
-        write_json_atomic(&manifest.manifest_path(), &manifest).unwrap();
+        write_json_atomic(&manifest.manifest_path(), &manifest).test()?;
         write_pointer(
             &manifest.pointer_file,
             &StacksteadPointer {
@@ -132,47 +133,49 @@ mod tests {
                 stackstead_root: manifest.stackstead_root.clone(),
             },
         )
-        .unwrap();
-        manifest
+        .test()?;
+        Ok(manifest)
     }
 
     #[test]
-    fn climbs_to_project_config() {
-        let directory = tempfile::tempdir().unwrap();
-        std::fs::write(directory.path().join("stackstead.yaml"), "version: '1'").unwrap();
+    fn climbs_to_project_config() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir().test()?;
+        std::fs::write(directory.path().join("stackstead.yaml"), "version: '1'").test()?;
         let nested = directory.path().join("a/b");
-        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::create_dir_all(&nested).test()?;
         assert!(matches!(
-            discover(&nested).unwrap(),
+            discover(&nested).test()?,
             Discovery::Project { .. }
         ));
+        Ok(())
     }
 
     #[test]
-    fn rejects_pointer_copied_outside_its_manifest_location() {
-        let directory = tempfile::tempdir().unwrap();
-        let manifest = write_stackstead(&directory.path().join("canonical"));
+    fn rejects_pointer_copied_outside_its_manifest_location() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir().test()?;
+        let manifest = write_stackstead(&directory.path().join("canonical"))?;
         let copied_root = directory.path().join("copied");
         let copied_pointer = copied_root.join(".stackstead/stackstead.json");
-        std::fs::create_dir_all(copied_pointer.parent().unwrap()).unwrap();
-        std::fs::copy(&manifest.pointer_file, copied_pointer).unwrap();
+        std::fs::create_dir_all(copied_pointer.parent().test()?).test()?;
+        std::fs::copy(&manifest.pointer_file, copied_pointer).test()?;
 
         assert!(
             discover(&copied_root)
-                .unwrap_err()
+                .test_err()?
                 .to_string()
                 .contains("does not match its manifest")
         );
+        Ok(())
     }
 
     #[test]
-    fn discovers_canonical_pointer_from_nested_worktree_path() {
-        let directory = tempfile::tempdir().unwrap();
-        let manifest = write_stackstead(directory.path());
+    fn discovers_canonical_pointer_from_nested_worktree_path() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir().test()?;
+        let manifest = write_stackstead(directory.path())?;
         let nested = manifest.worktree.join("a/b");
-        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::create_dir_all(&nested).test()?;
 
-        match discover(&nested).unwrap() {
+        match discover(&nested).test()? {
             Discovery::Stackstead {
                 pointer_path,
                 manifest: discovered,
@@ -181,7 +184,8 @@ mod tests {
                 assert_eq!(pointer_path, manifest.pointer_file);
                 assert_eq!(discovered.stackstead_id, manifest.stackstead_id);
             }
-            Discovery::Project { .. } => panic!("expected stackstead discovery"),
+            Discovery::Project { .. } => anyhow::bail!("expected stackstead discovery"),
         }
+        Ok(())
     }
 }

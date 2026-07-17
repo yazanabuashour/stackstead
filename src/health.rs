@@ -117,6 +117,7 @@ fn check_passes(
 
 #[cfg(test)]
 mod tests {
+    use crate::test_support::TestResultExt as _;
     use std::{
         io::{Read, Write},
         net::{TcpListener, TcpStream},
@@ -167,28 +168,29 @@ mod tests {
         }
     }
 
-    fn respond(mut stream: TcpStream, response: &[u8]) {
+    fn respond(mut stream: TcpStream, response: &[u8]) -> anyhow::Result<()> {
         let mut request = Vec::new();
         while !request.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
             let mut buffer = [0; 1024];
-            let read = stream.read(&mut buffer).unwrap();
+            let read = stream.read(&mut buffer).test()?;
             assert_ne!(read, 0, "client closed before sending HTTP headers");
             request.extend_from_slice(&buffer[..read]);
         }
-        stream.write_all(response).unwrap();
-        stream.flush().unwrap();
+        stream.write_all(response).test()?;
+        stream.flush().test()?;
+        Ok(())
     }
 
     #[test]
-    fn checks_loopback_http_status() {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = listener.local_addr().unwrap().port();
-        let server = thread::spawn(move || {
-            let (stream, _) = listener.accept().unwrap();
+    fn checks_loopback_http_status() -> anyhow::Result<()> {
+        let listener = TcpListener::bind("127.0.0.1:0").test()?;
+        let port = listener.local_addr().test()?.port();
+        let server = thread::spawn(move || -> anyhow::Result<()> {
+            let (stream, _) = listener.accept().test()?;
             respond(
                 stream,
                 b"HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n",
-            );
+            )
         });
         let config = HealthConfig {
             checks: vec![HealthCheckConfig {
@@ -203,19 +205,20 @@ mod tests {
             healthy_passive(&config, &manifest(port), &BTreeMap::new()),
             Some(true)
         );
-        server.join().unwrap();
+        server.join().test()??;
+        Ok(())
     }
 
     #[test]
-    fn checks_the_direct_redirect_status_without_following_it() {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = listener.local_addr().unwrap().port();
-        let server = thread::spawn(move || {
-            let (stream, _) = listener.accept().unwrap();
+    fn checks_the_direct_redirect_status_without_following_it() -> anyhow::Result<()> {
+        let listener = TcpListener::bind("127.0.0.1:0").test()?;
+        let port = listener.local_addr().test()?.port();
+        let server = thread::spawn(move || -> anyhow::Result<()> {
+            let (stream, _) = listener.accept().test()?;
             respond(
                 stream,
                 b"HTTP/1.1 302 Found\r\nLocation: https://example.invalid/\r\nContent-Length: 0\r\n\r\n",
-            );
+            )
         });
         let config = HealthConfig {
             checks: vec![HealthCheckConfig {
@@ -230,11 +233,12 @@ mod tests {
             healthy_passive(&config, &manifest(port), &BTreeMap::new()),
             Some(true)
         );
-        server.join().unwrap();
+        server.join().test()??;
+        Ok(())
     }
 
     #[test]
-    fn passive_health_never_executes_command_checks() {
+    fn passive_health_never_executes_command_checks() -> anyhow::Result<()> {
         let config = HealthConfig {
             checks: vec![HealthCheckConfig {
                 name: "worker".into(),
@@ -251,11 +255,12 @@ mod tests {
             healthy_passive(&config, &manifest(1), &BTreeMap::new()),
             None
         );
+        Ok(())
     }
 
     #[cfg(unix)]
     #[test]
-    fn polling_interval_is_clamped_to_the_overall_deadline() {
+    fn polling_interval_is_clamped_to_the_overall_deadline() -> anyhow::Result<()> {
         let config = HealthConfig {
             timeout_seconds: 1,
             interval_millis: 60_000,
@@ -272,5 +277,6 @@ mod tests {
         let started = Instant::now();
         assert!(wait(&config, &manifest(1), &BTreeMap::new()).is_err());
         assert!(started.elapsed() < Duration::from_secs(2));
+        Ok(())
     }
 }

@@ -72,6 +72,7 @@ pub fn resolve_manifest(
 
 #[cfg(test)]
 mod tests {
+    use crate::test_support::{TestResultErrorExt as _, TestResultExt as _};
     use std::collections::BTreeMap;
 
     use chrono::Utc;
@@ -79,14 +80,14 @@ mod tests {
     use super::*;
     use crate::manifest::{ManifestStatus, SourceOwnership};
 
-    fn manifest(id: &str, slug: &str) -> StacksteadManifest {
+    fn manifest(id: &str, slug: &str) -> anyhow::Result<StacksteadManifest> {
         let root = PathBuf::from(format!("/tmp/{id}"));
-        StacksteadManifest {
+        Ok(StacksteadManifest {
             kind: "StacksteadManifest".into(),
             version: crate::manifest::MANIFEST_VERSION.into(),
             stackstead_id: id.into(),
             slug: slug.into(),
-            short_id: id.rsplit('-').next().unwrap().into(),
+            short_id: id.rsplit('-').next().test()?.into(),
             runtime_token: "0123456789abcdef0123456789abcdef".into(),
             project: "demo".into(),
             branch: slug.into(),
@@ -112,48 +113,51 @@ mod tests {
             database: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
-        }
+        })
     }
 
     #[test]
-    fn exact_id_and_unique_slug_resolve() {
-        let manifests = vec![manifest("feature-a-a17c", "feature-a")];
+    fn exact_id_and_unique_slug_resolve() -> anyhow::Result<()> {
+        let manifests = vec![manifest("feature-a-a17c", "feature-a")?];
         assert_eq!(
             resolve_manifest(&manifests, "feature-a-a17c")
-                .unwrap()
+                .test()?
                 .short_id,
             "a17c"
         );
         assert_eq!(
-            resolve_manifest(&manifests, "feature-a").unwrap().short_id,
+            resolve_manifest(&manifests, "feature-a").test()?.short_id,
             "a17c"
         );
+        Ok(())
     }
 
     #[test]
-    fn ambiguous_slug_lists_candidates() {
+    fn ambiguous_slug_lists_candidates() -> anyhow::Result<()> {
         let manifests = vec![
-            manifest("feature-a-a17c", "feature-a"),
-            manifest("feature-a-b92d", "feature-a"),
+            manifest("feature-a-a17c", "feature-a")?,
+            manifest("feature-a-b92d", "feature-a")?,
         ];
         let error = resolve_manifest(&manifests, "feature-a")
-            .unwrap_err()
+            .test_err()?
             .to_string();
         assert!(error.contains("feature-a-a17c"));
         assert!(error.contains("feature-a-b92d"));
+        Ok(())
     }
 
     #[test]
-    fn exact_id_that_is_another_slug_is_ambiguous() {
+    fn exact_id_that_is_another_slug_is_ambiguous() -> anyhow::Result<()> {
         let manifests = vec![
-            manifest("feature-a-a17c", "feature-a"),
-            manifest("other-b92d", "feature-a-a17c"),
+            manifest("feature-a-a17c", "feature-a")?,
+            manifest("other-b92d", "feature-a-a17c")?,
         ];
         let error = resolve_manifest(&manifests, "feature-a-a17c")
-            .unwrap_err()
+            .test_err()?
             .to_string();
         assert!(error.contains("ambiguous"));
         assert!(error.contains("feature-a-a17c"));
         assert!(error.contains("other-b92d"));
+        Ok(())
     }
 }

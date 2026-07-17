@@ -766,9 +766,10 @@ fn print_json<T: output::CliOutput>(value: &T) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::TestResultExt as _;
 
     #[test]
-    fn parses_required_command_surface() {
+    fn parses_required_command_surface() -> anyhow::Result<()> {
         for command in [
             vec!["stackstead", "init"],
             vec!["stackstead", "compose", "plan"],
@@ -796,21 +797,23 @@ mod tests {
             vec!["stackstead", "doctor"],
             vec!["stackstead", "repair", "feature-a"],
         ] {
-            Cli::try_parse_from(command).unwrap();
+            Cli::try_parse_from(command).test()?;
         }
+        Ok(())
     }
 
     #[test]
-    fn json_is_global_after_subcommand() {
+    fn json_is_global_after_subcommand() -> anyhow::Result<()> {
         assert!(
             Cli::try_parse_from(["stackstead", "ps", "--json"])
-                .unwrap()
+                .test()?
                 .json
         );
+        Ok(())
     }
 
     #[test]
-    fn inspect_actions_use_the_full_id_and_runtime_state() {
+    fn inspect_actions_use_the_full_id_and_runtime_state() -> anyhow::Result<()> {
         for (status, runtime_action) in [
             (
                 ComponentStatus::Stopped,
@@ -830,5 +833,6 @@ mod tests {
                 ]
             );
         }
+        Ok(())
     }
 }

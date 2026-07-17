@@ -203,10 +203,11 @@ fn redact_message(message: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::TestResultExt as _;
 
     #[test]
-    fn appends_typed_synced_lines_and_redacts() {
-        let directory = tempfile::tempdir().unwrap();
+    fn appends_typed_synced_lines_and_redacts() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir().test()?;
         let path = directory.path().join("events.jsonl");
         append(
             &path,
@@ -214,18 +215,19 @@ mod tests {
             EventStatus::Succeeded,
             Some("TOKEN=private done"),
         )
-        .unwrap();
-        let bytes = std::fs::read(&path).unwrap();
+        .test()?;
+        let bytes = std::fs::read(&path).test()?;
         assert_eq!(bytes.last(), Some(&b'\n'));
-        let log = read(&path).unwrap();
+        let log = read(&path).test()?;
         assert_eq!(log.events.len(), 1);
         assert_eq!(log.events[0].event_type, EventType::Create);
-        assert!(!String::from_utf8(bytes).unwrap().contains("private"));
+        assert!(!String::from_utf8(bytes).test()?.contains("private"));
+        Ok(())
     }
 
     #[test]
-    fn event_messages_use_the_shared_redaction_policy() {
-        let directory = tempfile::tempdir().unwrap();
+    fn event_messages_use_the_shared_redaction_policy() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir().test()?;
         let path = directory.path().join("events.jsonl");
         append(
             &path,
@@ -235,9 +237,9 @@ mod tests {
                 "Authorization: Bearer header-secret\nAUTH_TOKEN=\"quoted secret\"\nfatal: https://user:password@example.invalid/repo\nordinary  detail",
             ),
         )
-        .unwrap();
+        .test()?;
 
-        let message = read(&path).unwrap().events[0].message.clone().unwrap();
+        let message = read(&path).test()?.events[0].message.clone().test()?;
         assert_eq!(
             message,
             "Authorization: [REDACTED]\nAUTH_TOKEN=[REDACTED]\nfatal: https://[REDACTED]@example.invalid/repo\nordinary  detail"
@@ -245,51 +247,54 @@ mod tests {
         for secret in ["header-secret", "quoted secret", "user:password"] {
             assert!(!message.contains(secret));
         }
+        Ok(())
     }
 
     #[test]
-    fn ignores_only_an_unterminated_tail() {
-        let directory = tempfile::tempdir().unwrap();
+    fn ignores_only_an_unterminated_tail() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir().test()?;
         let path = directory.path().join("events.jsonl");
-        append(&path, EventType::Destroy, EventStatus::Started, None).unwrap();
+        append(&path, EventType::Destroy, EventStatus::Started, None).test()?;
         std::fs::OpenOptions::new()
             .append(true)
             .open(&path)
-            .unwrap()
+            .test()?
             .write_all(b"{\"kind\":\"StacksteadEvent\"")
-            .unwrap();
-        let log = read(&path).unwrap();
+            .test()?;
+        let log = read(&path).test()?;
         assert!(log.truncated_tail);
         assert_eq!(log.events.len(), 1);
+        Ok(())
     }
 
     #[test]
-    fn appending_discards_a_torn_tail() {
-        let directory = tempfile::tempdir().unwrap();
+    fn appending_discards_a_torn_tail() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir().test()?;
         let path = directory.path().join("events.jsonl");
-        append(&path, EventType::Destroy, EventStatus::Started, None).unwrap();
+        append(&path, EventType::Destroy, EventStatus::Started, None).test()?;
         std::fs::OpenOptions::new()
             .append(true)
             .open(&path)
-            .unwrap()
+            .test()?
             .write_all(b"{\"kind\":\"StacksteadEvent\"")
-            .unwrap();
+            .test()?;
         append(
             &path,
             EventType::RuntimeRemove,
             EventStatus::Succeeded,
             None,
         )
-        .unwrap();
-        let log = read(&path).unwrap();
+        .test()?;
+        let log = read(&path).test()?;
         assert!(!log.truncated_tail);
         assert_eq!(log.events.len(), 2);
         assert_eq!(log.events[1].event_type, EventType::RuntimeRemove);
+        Ok(())
     }
 
     #[test]
-    fn oversized_messages_are_bounded_before_writing() {
-        let directory = tempfile::tempdir().unwrap();
+    fn oversized_messages_are_bounded_before_writing() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir().test()?;
         let path = directory.path().join("events.jsonl");
         append(
             &path,
@@ -297,20 +302,22 @@ mod tests {
             EventStatus::Failed,
             Some(&"x".repeat(MAX_EVENT_BYTES * 2)),
         )
-        .unwrap();
-        let log = read(&path).unwrap();
-        let message = log.events[0].message.as_deref().unwrap();
+        .test()?;
+        let log = read(&path).test()?;
+        let message = log.events[0].message.as_deref().test()?;
         assert!(message.ends_with(" [truncated]"));
         assert!(message.len() < MAX_EVENT_BYTES);
+        Ok(())
     }
 
     #[test]
-    fn rejects_malformed_completed_records() {
-        let directory = tempfile::tempdir().unwrap();
+    fn rejects_malformed_completed_records() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir().test()?;
         let path = directory.path().join("events.jsonl");
-        std::fs::write(&path, b"not-json\n").unwrap();
+        std::fs::write(&path, b"not-json\n").test()?;
         assert!(read(&path).is_err());
-        std::fs::write(&path, b"\n").unwrap();
+        std::fs::write(&path, b"\n").test()?;
         assert!(read(&path).is_err());
+        Ok(())
     }
 }

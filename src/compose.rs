@@ -1980,8 +1980,9 @@ pub fn all_interface_ports_in_file(path: &Path) -> anyhow::Result<Vec<(String, u
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::{TestResultErrorExt as _, TestResultExt as _};
 
-    fn manifest() -> StacksteadManifest {
+    fn manifest() -> anyhow::Result<StacksteadManifest> {
         serde_json::from_value(serde_json::json!({
             "kind":"StacksteadManifest","version":"2","stackstead_id":"a-b123","slug":"a","short_id":"b123",
             "runtime_token":"0123456789abcdef0123456789abcdef",
@@ -1993,12 +1994,13 @@ mod tests {
             "agent_context":"/x","pointer_file":"/y","event_log":"/z","env_keys":[],
             "status":{"source":"created","dependencies":"unknown","runtime":"stopped","database":"unknown","health":"unknown"},
             "created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:00Z"
-        })).unwrap()
+        }))
+        .test_context("parse manifest fixture")
     }
 
     #[test]
-    fn compose_arguments_use_manifest_contract() {
-        let manifest = manifest();
+    fn compose_arguments_use_manifest_contract() -> anyhow::Result<()> {
+        let manifest = manifest()?;
         let args = base_args(&manifest);
         assert_eq!(args[0], "compose");
         assert!(args.contains(&"demo-a-b123".to_string()));
@@ -2008,24 +2010,26 @@ mod tests {
                 &"/state/demo/a-b123/source/.stackstead/compose-ownership.yaml".to_string()
             )
         );
+        Ok(())
     }
 
     #[test]
-    fn ownership_mount_quotes_valid_commas_and_quotes() {
+    fn ownership_mount_quotes_valid_commas_and_quotes() -> anyhow::Result<()> {
         assert_eq!(
             ownership_bind_mount("/tmp/source,\"quoted\""),
             "type=bind,\"src=/tmp/source,\"\"quoted\"\"\",dst=/stackstead-source"
         );
+        Ok(())
     }
 
     #[test]
-    fn parses_array_and_line_delimited_service_observations() {
+    fn parses_array_and_line_delimited_service_observations() -> anyhow::Result<()> {
         let array = br#"[
           {"Name":"demo-web-1","Service":"web","State":"running","ExitCode":0},
           {"Name":"demo-init-1","Service":"init","State":"exited","ExitCode":0},
           {"Name":"demo-migrate-1","Service":"migrate","State":"exited","ExitCode":7}
         ]"#;
-        let observations = parse_service_observations(array).unwrap();
+        let observations = parse_service_observations(array).test()?;
         assert_eq!(
             observations
                 .iter()
@@ -2040,12 +2044,13 @@ mod tests {
 
         let lines = br#"{"Name":"demo-web-1","Service":"web","State":"running","ExitCode":0}
 {"Name":"demo-init-1","Service":"init","State":"exited","ExitCode":0}"#;
-        assert_eq!(parse_service_observations(lines).unwrap().len(), 2);
+        assert_eq!(parse_service_observations(lines).test()?.len(), 2);
+        Ok(())
     }
 
     #[test]
-    fn ownership_override_attests_every_direct_managed_resource() {
-        let directory = tempfile::tempdir().unwrap();
+    fn ownership_override_attests_every_direct_managed_resource() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir().test()?;
         let compose = directory.path().join("compose.yaml");
         std::fs::write(
             &compose,
@@ -2064,12 +2069,12 @@ volumes:
     external: true
 "#,
         )
-        .unwrap();
-        let mut manifest = manifest();
+        .test()?;
+        let mut manifest = manifest()?;
         manifest.worktree = directory.path().into();
         manifest.compose_files = vec![compose];
-        let rendered = render_ownership_override(&manifest).unwrap();
-        let document: serde_yaml::Value = serde_yaml::from_str(&rendered).unwrap();
+        let rendered = render_ownership_override(&manifest).test()?;
+        let document: serde_yaml::Value = serde_yaml::from_str(&rendered).test()?;
         for (field, names) in [
             ("services", &["web"][..]),
             ("networks", &["backend", "default"][..]),
@@ -2077,7 +2082,7 @@ volumes:
         ] {
             let values = yaml_field(&document, field)
                 .and_then(serde_yaml::Value::as_mapping)
-                .unwrap();
+                .test()?;
             assert_eq!(values.len(), names.len());
             for name in names {
                 let token = values
@@ -2090,13 +2095,14 @@ volumes:
         }
         assert!(!rendered.contains("upstream:"));
         assert!(!rendered.contains("external-data:"));
+        Ok(())
     }
 
     #[test]
-    fn ownership_override_rejects_unattestable_compose_shapes() {
-        let directory = tempfile::tempdir().unwrap();
+    fn ownership_override_rejects_unattestable_compose_shapes() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir().test()?;
         let compose = directory.path().join("compose.yaml");
-        let mut manifest = manifest();
+        let mut manifest = manifest()?;
         manifest.compose_files = vec![compose.clone()];
         for (contents, expected) in [
             (
@@ -2113,19 +2119,18 @@ volumes:
                 "without a top-level declaration",
             ),
         ] {
-            std::fs::write(&compose, contents).unwrap();
-            let error = render_ownership_override(&manifest)
-                .unwrap_err()
-                .to_string();
+            std::fs::write(&compose, contents).test()?;
+            let error = render_ownership_override(&manifest).test_err()?.to_string();
             assert!(error.contains(expected), "unexpected error: {error}");
         }
+        Ok(())
     }
 
     #[test]
-    fn ownership_override_rejects_non_string_optional_fields() {
-        let directory = tempfile::tempdir().unwrap();
+    fn ownership_override_rejects_non_string_optional_fields() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir().test()?;
         let compose = directory.path().join("compose.yaml");
-        let mut manifest = manifest();
+        let mut manifest = manifest()?;
         manifest.compose_files = vec![compose.clone()];
         for (contents, subject, expected) in [
             (
@@ -2144,10 +2149,8 @@ volumes:
                 "non-string name",
             ),
         ] {
-            std::fs::write(&compose, contents).unwrap();
-            let error = render_ownership_override(&manifest)
-                .unwrap_err()
-                .to_string();
+            std::fs::write(&compose, contents).test()?;
+            let error = render_ownership_override(&manifest).test_err()?.to_string();
             assert!(error.contains(subject), "unexpected error: {error}");
             assert!(error.contains(expected), "unexpected error: {error}");
             assert!(
@@ -2155,116 +2158,119 @@ volumes:
                 "unexpected error: {error}"
             );
         }
+        Ok(())
     }
 
     #[test]
-    fn ownership_and_runtime_names_accept_null_name_resets() {
-        let directory = tempfile::tempdir().unwrap();
+    fn ownership_and_runtime_names_accept_null_name_resets() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir().test()?;
         let primary = directory.path().join("compose.yaml");
         let overlay = directory.path().join("compose.reset.yaml");
         std::fs::write(
             &primary,
             "services:\n  web:\n    container_name: custom-web\n",
         )
-        .unwrap();
+        .test()?;
         std::fs::write(
             &overlay,
             "services:\n  web:\n    container_name: !reset null\nvolumes:\n  data:\n    name: null\nnetworks:\n  backend:\n    name: !reset null\n",
         )
-        .unwrap();
-        let mut manifest = manifest();
+        .test()?;
+        let mut manifest = manifest()?;
         manifest.compose_files = vec![primary, overlay];
 
         assert!(render_ownership_override(&manifest).is_ok());
-        let runtime_names = expected_runtime_names(&manifest).unwrap();
+        let runtime_names = expected_runtime_names(&manifest).test()?;
         let names = |kind: &str| {
             runtime_names
                 .iter()
                 .find(|(candidate, ..)| candidate == kind)
                 .map(|(_, _, _, names)| names)
-                .unwrap()
+                .test()
         };
-        assert!(names("container").contains("demo-a-b123-web-1"));
-        assert!(!names("container").contains("custom-web"));
-        assert!(names("volume").contains("demo-a-b123_data"));
-        assert!(names("network").contains("demo-a-b123_backend"));
+        assert!(names("container")?.contains("demo-a-b123-web-1"));
+        assert!(!names("container")?.contains("custom-web"));
+        assert!(names("volume")?.contains("demo-a-b123_data"));
+        assert!(names("network")?.contains("demo-a-b123_backend"));
+        Ok(())
     }
 
     #[test]
-    fn ownership_override_defaults_an_omitted_volume_type() {
-        let directory = tempfile::tempdir().unwrap();
+    fn ownership_override_defaults_an_omitted_volume_type() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir().test()?;
         let compose = directory.path().join("compose.yaml");
         std::fs::write(
             &compose,
             "services:\n  web:\n    volumes:\n      - source: data\n        target: /data\nvolumes:\n  data: {}\n",
         )
-        .unwrap();
-        let mut manifest = manifest();
+        .test()?;
+        let mut manifest = manifest()?;
         manifest.compose_files = vec![compose];
 
         assert!(render_ownership_override(&manifest).is_ok());
+        Ok(())
     }
 
     #[test]
-    fn ownership_override_supports_later_volume_overlays_and_external_volumes() {
-        let directory = tempfile::tempdir().unwrap();
+    fn ownership_override_supports_later_volume_overlays_and_external_volumes() -> anyhow::Result<()>
+    {
+        let directory = tempfile::tempdir().test()?;
         let primary = directory.path().join("compose.yaml");
         let overlay = directory.path().join("compose.volumes.yaml");
         std::fs::write(
             &primary,
             "services:\n  web:\n    volumes: [cache:/cache, shared:/shared]\n",
         )
-        .unwrap();
+        .test()?;
         std::fs::write(
             &overlay,
             "volumes:\n  cache:\n  shared:\n    external: true\nnetworks:\n  default:\n    external: true\n",
         )
-        .unwrap();
-        let mut manifest = manifest();
+        .test()?;
+        let mut manifest = manifest()?;
         manifest.compose_files = vec![primary, overlay];
-        let rendered = render_ownership_override(&manifest).unwrap();
+        let rendered = render_ownership_override(&manifest).test()?;
         assert!(rendered.contains("cache:"));
         assert!(!rendered.contains("shared:"));
         assert!(!rendered.contains("default:"));
+        Ok(())
     }
 
     #[test]
-    fn ownership_override_rejects_interpolated_and_redeclared_resource_names() {
-        let directory = tempfile::tempdir().unwrap();
+    fn ownership_override_rejects_interpolated_and_redeclared_resource_names() -> anyhow::Result<()>
+    {
+        let directory = tempfile::tempdir().test()?;
         let primary = directory.path().join("compose.yaml");
         let overlay = directory.path().join("compose.overlay.yaml");
-        let mut manifest = manifest();
+        let mut manifest = manifest()?;
         manifest.compose_files = vec![primary.clone()];
 
         std::fs::write(
             &primary,
             "services:\n  web: {image: nginx}\nvolumes:\n  data:\n    name: ${GLOBAL_DATA}\n",
         )
-        .unwrap();
-        let error = render_ownership_override(&manifest)
-            .unwrap_err()
-            .to_string();
+        .test()?;
+        let error = render_ownership_override(&manifest).test_err()?.to_string();
         assert!(error.contains("requires a literal name"), "{error}");
 
         std::fs::write(
             &primary,
             "services:\n  web: {image: nginx}\nvolumes:\n  data: {}\n",
         )
-        .unwrap();
-        std::fs::write(&overlay, "volumes:\n  data:\n    driver: local\n").unwrap();
+        .test()?;
+        std::fs::write(&overlay, "volumes:\n  data:\n    driver: local\n").test()?;
         manifest.compose_files.push(overlay);
-        let error = render_ownership_override(&manifest)
-            .unwrap_err()
-            .to_string();
+        let error = render_ownership_override(&manifest).test_err()?.to_string();
         assert!(
             error.contains("declared in multiple Compose files"),
             "{error}"
         );
+        Ok(())
     }
 
     #[test]
-    fn selected_service_running_check_is_manifest_scoped() {
-        let manifest = manifest();
+    fn selected_service_running_check_is_manifest_scoped() -> anyhow::Result<()> {
+        let manifest = manifest()?;
         let args = service_running_args(&manifest, "frontend");
         assert_eq!(
             &args[args.len() - 5..],
@@ -2277,24 +2283,25 @@ volumes:
         );
         assert!(running_service_output(b"frontend-container\n"));
         assert!(!running_service_output(b" \n\t"));
+        Ok(())
     }
 
     #[test]
-    fn resolves_contract_key_to_its_actual_compose_service() {
-        let directory = tempfile::tempdir().unwrap();
+    fn resolves_contract_key_to_its_actual_compose_service() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir().test()?;
         let file = directory.path().join("compose.yaml");
         std::fs::write(
             &file,
             "services:\n  frontend:\n    image: nginx\n    ports: [\"127.0.0.1:${WEB_PORT}:3000\"]\n",
         )
-        .unwrap();
+        .test()?;
         let target = resolve_port_target(
             &[file],
             &BTreeMap::from([("dashboard".into(), 3000)]),
             &BTreeMap::from([("WEB_PORT".into(), "{{ ports.dashboard }}".into())]),
             "dashboard",
         )
-        .unwrap();
+        .test()?;
         assert_eq!(
             target,
             ComposePortTarget {
@@ -2302,10 +2309,11 @@ volumes:
                 container_port: 3000
             }
         );
+        Ok(())
     }
 
     #[test]
-    fn finds_common_fixed_port_forms_but_not_variables() {
+    fn finds_common_fixed_port_forms_but_not_variables() -> anyhow::Result<()> {
         let ports = detect_fixed_host_ports(
             r#"
               - "3000:3000"
@@ -2321,10 +2329,11 @@ volumes:
             ports.iter().map(|port| port.host_port).collect::<Vec<_>>(),
             [3000, 4000, 5000, 6000]
         );
+        Ok(())
     }
 
     #[test]
-    fn parses_compose_port_endpoints() {
+    fn parses_compose_port_endpoints() -> anyhow::Result<()> {
         assert_eq!(endpoint_port("0.0.0.0:39000"), Some(39000));
         assert_eq!(endpoint_port("[::]:39001"), Some(39001));
         assert_eq!(endpoint_port("not-an-endpoint"), None);
@@ -2336,11 +2345,12 @@ volumes:
         assert!(endpoint_matches("[::1]:39000", "localhost", 39000));
         assert!(!endpoint_matches("127.0.0.2:39000", "localhost", 39000));
         assert!(!endpoint_matches("127.0.0.1:39001", "localhost", 39000));
+        Ok(())
     }
 
     #[test]
-    fn plans_isolation_from_common_compose_ports() {
-        let directory = tempfile::tempdir().unwrap();
+    fn plans_isolation_from_common_compose_ports() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir().test()?;
         let file = directory.path().join("compose.yaml");
         std::fs::write(
             &file,
@@ -2358,9 +2368,9 @@ services:
       - "127.0.0.1:${POSTGRES_PORT}:5432"
 "#,
         )
-        .unwrap();
+        .test()?;
 
-        let plan = plan(directory.path()).unwrap();
+        let plan = plan(directory.path()).test()?;
         assert_eq!(plan.file, Path::new("compose.yaml"));
         assert_eq!(plan.ports.len(), 3);
         assert_eq!(plan.ports[0].env, "WEB_PORT");
@@ -2376,21 +2386,22 @@ services:
                 .iter()
                 .all(|warning| warning.contains("compose apply"))
         );
+        Ok(())
     }
 
     #[test]
-    fn explicit_compose_paths_cannot_escape_the_repository() {
-        let directory = tempfile::tempdir().unwrap();
+    fn explicit_compose_paths_cannot_escape_the_repository() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir().test()?;
         let repo = directory.path().join("repo");
-        std::fs::create_dir(&repo).unwrap();
+        std::fs::create_dir(&repo).test()?;
         let contents = "services:\n  web:\n    ports:\n      - \"3000:80\"\n";
-        std::fs::write(repo.join("inside.yml"), contents).unwrap();
+        std::fs::write(repo.join("inside.yml"), contents).test()?;
         let outside = directory.path().join("outside-compose.yml");
-        std::fs::write(&outside, contents).unwrap();
+        std::fs::write(&outside, contents).test()?;
 
         assert_eq!(
             plan_at(&repo.join("."), Some(Path::new("inside.yml")))
-                .unwrap()
+                .test()?
                 .file,
             Path::new("inside.yml")
         );
@@ -2398,33 +2409,35 @@ services:
         assert!(plan_at(&repo, Some(&outside)).is_err());
         assert!(plan_at(&repo, Some(Path::new("../outside-compose.yml"))).is_err());
         assert!(apply_at(&repo, Some(Path::new("../outside-compose.yml"))).is_err());
-        assert_eq!(std::fs::read_to_string(&outside).unwrap(), contents);
+        assert_eq!(std::fs::read_to_string(&outside).test()?, contents);
 
         #[cfg(unix)]
         {
-            std::os::unix::fs::symlink(&outside, repo.join("compose.yml")).unwrap();
+            std::os::unix::fs::symlink(&outside, repo.join("compose.yml")).test()?;
             assert!(apply_at(&repo, Some(Path::new("compose.yml"))).is_err());
-            assert_eq!(std::fs::read_to_string(&outside).unwrap(), contents);
+            assert_eq!(std::fs::read_to_string(&outside).test()?, contents);
         }
+        Ok(())
     }
 
     #[test]
-    fn reuses_the_variable_already_consumed_by_compose() {
-        let directory = tempfile::tempdir().unwrap();
+    fn reuses_the_variable_already_consumed_by_compose() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir().test()?;
         std::fs::write(
             directory.path().join("compose.yaml"),
             "services:\n  web:\n    ports: [\"127.0.0.1:${APP_PORT:-3000}:80\", \"127.0.0.1:$ADMIN_PORT:81\"]\n",
         )
-        .unwrap();
-        let plan = plan(directory.path()).unwrap();
+        .test()?;
+        let plan = plan(directory.path()).test()?;
         assert_eq!(plan.ports[0].env, "APP_PORT");
         assert_eq!(plan.ports[0].current_host_port, None);
         assert_eq!(plan.ports[1].env, "ADMIN_PORT");
+        Ok(())
     }
 
     #[test]
-    fn rejects_generated_ports_on_non_loopback_interfaces() {
-        let directory = tempfile::tempdir().unwrap();
+    fn rejects_generated_ports_on_non_loopback_interfaces() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir().test()?;
         let file = directory.path().join("compose.yaml");
         for mapping in [
             "${MISSING_PORT}:80",
@@ -2435,40 +2448,41 @@ services:
                 &file,
                 format!("services:\n  web:\n    ports: [\"{mapping}\"]\n"),
             )
-            .unwrap();
+            .test()?;
             assert!(plan(directory.path()).is_err(), "accepted {mapping}");
         }
         std::fs::write(
             &file,
             "services:\n  web:\n    ports: [\"127.0.0.1:${WEB_PORT}:80\"]\n",
         )
-        .unwrap();
-        assert!(plan(directory.path()).unwrap().warnings.is_empty());
+        .test()?;
+        assert!(plan(directory.path()).test()?.warnings.is_empty());
+        Ok(())
     }
 
     #[test]
-    fn applies_only_unambiguous_fixed_port_edits() {
+    fn applies_only_unambiguous_fixed_port_edits() -> anyhow::Result<()> {
         #[cfg(unix)]
         use std::os::unix::fs::PermissionsExt;
 
-        let directory = tempfile::tempdir().unwrap();
+        let directory = tempfile::tempdir().test()?;
         let file = directory.path().join("compose.yaml");
         std::fs::write(
             &file,
             "services:\n  web:\n    ports:\n      - \"127.0.0.1:3000:80/tcp\"\n  postgres:\n    ports:\n      - target: 5432\n        published: \"5432\"\n",
         )
-        .unwrap();
+        .test()?;
         #[cfg(unix)]
-        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o640)).unwrap();
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o640)).test()?;
 
-        let output = apply(directory.path()).unwrap();
+        let output = apply(directory.path()).test()?;
         assert_eq!(output.changed_lines, 2);
-        let updated = std::fs::read_to_string(file).unwrap();
+        let updated = std::fs::read_to_string(file).test()?;
         assert!(updated.contains("\"127.0.0.1:${WEB_PORT}:80/tcp\""));
         assert!(updated.contains("published: \"${POSTGRES_PORT}\""));
         assert!(updated.contains("host_ip: \"127.0.0.1\""));
-        assert!(plan(directory.path()).unwrap().warnings.is_empty());
-        let document: serde_yaml::Value = serde_yaml::from_str(&updated).unwrap();
+        assert!(plan(directory.path()).test()?.warnings.is_empty());
+        let document: serde_yaml::Value = serde_yaml::from_str(&updated).test()?;
         let postgres = yaml_field(&document, "services")
             .and_then(serde_yaml::Value::as_mapping)
             .and_then(|services| services.get(serde_yaml::Value::String("postgres".into())))
@@ -2476,7 +2490,7 @@ services:
             .and_then(serde_yaml::Value::as_sequence)
             .and_then(|ports| ports.first())
             .and_then(serde_yaml::Value::as_mapping)
-            .unwrap();
+            .test()?;
         assert_eq!(
             postgres
                 .get(serde_yaml::Value::String("host_ip".into()))
@@ -2486,72 +2500,76 @@ services:
         #[cfg(unix)]
         assert_eq!(
             std::fs::metadata(directory.path().join("compose.yaml"))
-                .unwrap()
+                .test()?
                 .permissions()
                 .mode()
                 & 0o777,
             0o640
         );
+        Ok(())
     }
 
     #[test]
-    fn apply_rejects_an_explicit_all_interface_binding() {
-        let directory = tempfile::tempdir().unwrap();
+    fn apply_rejects_an_explicit_all_interface_binding() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir().test()?;
         let file = directory.path().join("compose.yaml");
         std::fs::write(
             &file,
             "services:\n  web:\n    ports:\n      - \"0.0.0.0:3000:80\"\n",
         )
-        .unwrap();
+        .test()?;
         assert!(plan(directory.path()).is_err());
         assert!(apply(directory.path()).is_err());
         assert!(
             std::fs::read_to_string(file)
-                .unwrap()
+                .test()?
                 .contains("0.0.0.0:3000:80")
         );
+        Ok(())
     }
 
     #[test]
-    fn reports_ports_exposed_on_all_host_interfaces() {
-        let directory = tempfile::tempdir().unwrap();
+    fn reports_ports_exposed_on_all_host_interfaces() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir().test()?;
         let file = directory.path().join("compose.yaml");
         std::fs::write(
             &file,
             "services:\n  web:\n    ports: [\"${WEB_PORT}:80\", \"127.0.0.1:${ADMIN_PORT}:81\"]\n  db:\n    ports:\n      - target: 5432\n        published: ${DB_PORT}\n        host_ip: 0.0.0.0\n",
         )
-        .unwrap();
+        .test()?;
         assert_eq!(
-            all_interface_ports_in_file(&file).unwrap(),
+            all_interface_ports_in_file(&file).test()?,
             [("web".into(), 80), ("db".into(), 5432)]
         );
+        Ok(())
     }
 
     #[test]
-    fn rejects_container_only_ports_instead_of_inventing_a_host_url() {
-        let directory = tempfile::tempdir().unwrap();
+    fn rejects_container_only_ports_instead_of_inventing_a_host_url() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir().test()?;
         std::fs::write(
             directory.path().join("compose.yaml"),
             "services:\n  web:\n    image: nginx\n    ports: [\"80\"]\n",
         )
-        .unwrap();
-        let error = plan(directory.path()).unwrap_err().to_string();
+        .test()?;
+        let error = plan(directory.path()).test_err()?.to_string();
         assert!(error.contains("without a deterministic host binding"));
         assert!(error.contains("${WEB_PORT}:80"));
+        Ok(())
     }
 
     #[test]
-    fn rejects_unsupported_ports_and_generated_environment_collisions() {
-        let directory = tempfile::tempdir().unwrap();
+    fn rejects_unsupported_ports_and_generated_environment_collisions() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir().test()?;
         let file = directory.path().join("compose.yaml");
         std::fs::write(
             &file,
             "services:\n  web:\n    image: nginx\n    ports: [3000]\n",
         )
-        .unwrap();
+        .test()?;
         assert!(
             plan_file(directory.path(), &file)
-                .unwrap_err()
+                .test_err()?
                 .to_string()
                 .contains("unsupported")
         );
@@ -2560,10 +2578,10 @@ services:
             &file,
             "services:\n  web:\n    image: nginx\n    ports: [\"3000-3002:80-82\"]\n",
         )
-        .unwrap();
+        .test()?;
         assert!(
             plan_file(directory.path(), &file)
-                .unwrap_err()
+                .test_err()?
                 .to_string()
                 .contains("unsupported")
         );
@@ -2572,10 +2590,10 @@ services:
             &file,
             "services:\n  foo-bar:\n    image: nginx\n    ports: [\"3000:80\"]\n  foo_bar:\n    image: nginx\n    ports: [\"4000:80\"]\n",
         )
-        .unwrap();
+        .test()?;
         assert!(
             plan_file(directory.path(), &file)
-                .unwrap_err()
+                .test_err()?
                 .to_string()
                 .contains("FOO_BAR_PORT")
         );
@@ -2587,31 +2605,32 @@ services:
             "services:\n  web:\n    ports:\n      - target: 80\n        published: ${WEB_PORT}\n        protocol: udp\n",
             "services:\n  web:\n    ports: [\"${WEB_PORT:+3000}:80\"]\n",
         ] {
-            std::fs::write(&file, compose).unwrap();
+            std::fs::write(&file, compose).test()?;
             assert!(
                 plan_file(directory.path(), &file).is_err(),
                 "accepted {compose}"
             );
         }
+        Ok(())
     }
 
     #[test]
-    fn validates_the_exact_structural_port_environment_contract() {
-        let directory = tempfile::tempdir().unwrap();
+    fn validates_the_exact_structural_port_environment_contract() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir().test()?;
         let file = directory.path().join("compose.yaml");
         std::fs::write(
             &file,
             "services:\n  web:\n    image: nginx\n    ports: [\"127.0.0.1:${APP_PORT:-3000}:80\"]\n",
         )
-        .unwrap();
+        .test()?;
         let containers = BTreeMap::from([("web".into(), 80)]);
         let environment = BTreeMap::from([("APP_PORT".into(), "{{ ports.web }}".into())]);
-        validate_port_contract(std::slice::from_ref(&file), &containers, &environment).unwrap();
+        validate_port_contract(std::slice::from_ref(&file), &containers, &environment).test()?;
 
         let wrong_environment = BTreeMap::from([("WORKER_PORT".into(), "{{ ports.web }}".into())]);
         assert!(
             validate_port_contract(std::slice::from_ref(&file), &containers, &wrong_environment)
-                .unwrap_err()
+                .test_err()?
                 .to_string()
                 .contains("APP_PORT")
         );
@@ -2620,105 +2639,112 @@ services:
             &file,
             "services:\n  web:\n    image: nginx\n    ports: [\"3000:80\"]\n",
         )
-        .unwrap();
+        .test()?;
         assert!(
             validate_port_contract(&[file], &containers, &environment)
-                .unwrap_err()
+                .test_err()?
                 .to_string()
                 .contains("fixed host port")
         );
+        Ok(())
     }
 
     #[test]
-    fn validates_port_names_from_generated_contract_across_override_files() {
-        let directory = tempfile::tempdir().unwrap();
+    fn validates_port_names_from_generated_contract_across_override_files() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir().test()?;
         let primary = directory.path().join("compose.yaml");
         let override_file = directory.path().join("compose.override.yaml");
         std::fs::write(
             &primary,
             "services:\n  frontend:\n    ports: [\"127.0.0.1:${WEB_PORT}:80\"]\n",
         )
-        .unwrap();
-        std::fs::write(&override_file, "volumes:\n  cache: {}\n").unwrap();
+        .test()?;
+        std::fs::write(&override_file, "volumes:\n  cache: {}\n").test()?;
         validate_port_contract(
             &[primary, override_file],
             &BTreeMap::from([("web".into(), 80)]),
             &BTreeMap::from([("WEB_PORT".into(), "{{ ports.web }}".into())]),
         )
-        .unwrap();
+        .test()?;
+        Ok(())
     }
 
     #[test]
-    fn rejects_direct_and_merge_hidden_compose_includes() {
+    fn rejects_direct_and_merge_hidden_compose_includes() -> anyhow::Result<()> {
         let file = Path::new("compose.yaml");
         for contents in [
             "include: compose.shared.yaml\nservices: {}\n",
             "x-root: &root\n  include: compose.shared.yaml\n<<: *root\nservices: {}\n",
         ] {
-            let document: serde_yaml::Value = serde_yaml::from_str(contents).unwrap();
-            let error = port_declarations(&document, file).unwrap_err().to_string();
+            let document: serde_yaml::Value = serde_yaml::from_str(contents).test()?;
+            let error = port_declarations(&document, file).test_err()?.to_string();
             assert!(error.contains("`include`"), "unexpected error: {error}");
             assert!(error.contains("explicitly"), "unexpected error: {error}");
         }
+        Ok(())
     }
 
     #[test]
-    fn rejects_direct_and_merge_hidden_compose_extends() {
+    fn rejects_direct_and_merge_hidden_compose_extends() -> anyhow::Result<()> {
         let file = Path::new("compose.yaml");
         for contents in [
             "services:\n  web:\n    extends:\n      file: compose.shared.yaml\n      service: web\n",
             "x-service: &base\n  extends:\n    file: compose.shared.yaml\n    service: web\nservices:\n  web:\n    <<: *base\n",
         ] {
-            let document: serde_yaml::Value = serde_yaml::from_str(contents).unwrap();
-            let error = port_declarations(&document, file).unwrap_err().to_string();
+            let document: serde_yaml::Value = serde_yaml::from_str(contents).test()?;
+            let error = port_declarations(&document, file).test_err()?.to_string();
             assert!(error.contains("`extends`"), "unexpected error: {error}");
             assert!(error.contains("web"), "unexpected error: {error}");
         }
+        Ok(())
     }
 
     #[test]
-    fn explicit_runtime_file_overlays_remain_supported() {
-        let directory = tempfile::tempdir().unwrap();
+    fn explicit_runtime_file_overlays_remain_supported() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir().test()?;
         let primary = directory.path().join("compose.yaml");
         let overlay = directory.path().join("compose.stackstead.yaml");
         std::fs::write(
             &primary,
             "services:\n  web:\n    image: nginx\n    ports: [\"127.0.0.1:${WEB_PORT}:80\"]\n",
         )
-        .unwrap();
+        .test()?;
         std::fs::write(
             &overlay,
             "services:\n  web:\n    environment:\n      STACKSTEAD: \"true\"\n",
         )
-        .unwrap();
+        .test()?;
 
         validate_port_contract(
             &[primary, overlay],
             &BTreeMap::from([("web".into(), 80)]),
             &BTreeMap::from([("WEB_PORT".into(), "{{ ports.web }}".into())]),
         )
-        .unwrap();
+        .test()?;
+        Ok(())
     }
 
     #[test]
-    fn duplicate_fixed_host_ports_fail_before_the_file_is_written() {
-        let directory = tempfile::tempdir().unwrap();
+    fn duplicate_fixed_host_ports_fail_before_the_file_is_written() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir().test()?;
         let file = directory.path().join("compose.yaml");
         let original = "services:\n  web:\n    ports:\n      - \"3000:80\"\n  api:\n    ports:\n      - \"3000:8080\"\n";
-        std::fs::write(&file, original).unwrap();
-        let error = apply(directory.path()).unwrap_err().to_string();
+        std::fs::write(&file, original).test()?;
+        let error = apply(directory.path()).test_err()?.to_string();
         assert!(error.contains("cannot safely rewrite host port 3000"));
-        assert_eq!(std::fs::read_to_string(file).unwrap(), original);
+        assert_eq!(std::fs::read_to_string(file).test()?, original);
+        Ok(())
     }
 
     #[test]
-    fn inline_fixed_mapping_is_never_rewritten() {
-        let directory = tempfile::tempdir().unwrap();
+    fn inline_fixed_mapping_is_never_rewritten() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir().test()?;
         let file = directory.path().join("compose.yaml");
         let original = "services:\n  web:\n    ports: [\"3000:80\"]\n";
-        std::fs::write(&file, original).unwrap();
-        let error = apply(directory.path()).unwrap_err().to_string();
+        std::fs::write(&file, original).test()?;
+        let error = apply(directory.path()).test_err()?.to_string();
         assert!(error.contains("one port mapping per YAML line"));
-        assert_eq!(std::fs::read_to_string(file).unwrap(), original);
+        assert_eq!(std::fs::read_to_string(file).test()?, original);
+        Ok(())
     }
 }

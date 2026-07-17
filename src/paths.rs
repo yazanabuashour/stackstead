@@ -200,6 +200,7 @@ pub fn resolve_existing_ancestor(path: &Path) -> anyhow::Result<PathBuf> {
 
 #[cfg(test)]
 mod tests {
+    use crate::test_support::TestResultExt as _;
     use std::collections::BTreeMap;
 
     use chrono::Utc;
@@ -208,33 +209,35 @@ mod tests {
     use crate::manifest::{ManifestStatus, SourceOwnership, StacksteadManifest};
 
     #[test]
-    fn generated_paths_cannot_escape() {
+    fn generated_paths_cannot_escape() -> anyhow::Result<()> {
         assert!(safe_generated_path(Path::new("/tmp/cell/source"), Path::new("../other")).is_err());
         assert_eq!(
             safe_generated_path(Path::new("/tmp/cell/source"), Path::new(".stackstead/.env"))
-                .unwrap(),
+                .test()?,
             Path::new("/tmp/cell/source/.stackstead/.env")
         );
+        Ok(())
     }
 
     #[cfg(unix)]
     #[test]
-    fn generated_paths_cannot_traverse_symlinks() {
-        let directory = tempfile::tempdir().unwrap();
+    fn generated_paths_cannot_traverse_symlinks() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir().test()?;
         let worktree = directory.path().join("source");
         let outside = directory.path().join("outside");
-        std::fs::create_dir_all(&worktree).unwrap();
-        std::fs::create_dir_all(&outside).unwrap();
-        std::os::unix::fs::symlink(&outside, worktree.join(".stackstead")).unwrap();
+        std::fs::create_dir_all(&worktree).test()?;
+        std::fs::create_dir_all(&outside).test()?;
+        std::os::unix::fs::symlink(&outside, worktree.join(".stackstead")).test()?;
         assert!(safe_generated_path(&worktree, Path::new(".stackstead/.env")).is_err());
 
-        std::fs::remove_dir_all(&worktree).unwrap();
-        std::os::unix::fs::symlink(&outside, &worktree).unwrap();
+        std::fs::remove_dir_all(&worktree).test()?;
+        std::os::unix::fs::symlink(&outside, &worktree).test()?;
         assert!(safe_generated_path(&worktree, Path::new(".stackstead/.env")).is_err());
+        Ok(())
     }
 
     #[test]
-    fn destroy_requires_exact_layout() {
+    fn destroy_requires_exact_layout() -> anyhow::Result<()> {
         let root = PathBuf::from("/tmp/state/demo/cell-a");
         let manifest = StacksteadManifest {
             kind: "StacksteadManifest".into(),
@@ -268,25 +271,26 @@ mod tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };
-        validate_destroy_target(&manifest, Path::new("/tmp/state")).unwrap();
+        validate_destroy_target(&manifest, Path::new("/tmp/state")).test()?;
         let mut unsafe_manifest = manifest;
         unsafe_manifest.stackstead_root = PathBuf::from("/tmp");
         assert!(validate_destroy_target(&unsafe_manifest, Path::new("/tmp/state")).is_err());
+        Ok(())
     }
 
     #[cfg(unix)]
     #[test]
-    fn destroy_rejects_a_symlinked_project_state_directory() {
-        let directory = tempfile::tempdir().unwrap();
+    fn destroy_rejects_a_symlinked_project_state_directory() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir().test()?;
         let state_root = directory.path().join("state");
         let outside_parent = directory.path().join("outside/demo");
         let root = state_root.join("demo/cell-a");
-        std::fs::create_dir_all(root.join("source")).unwrap();
-        std::fs::create_dir_all(root.join("state")).unwrap();
-        std::fs::create_dir_all(&state_root).unwrap();
-        std::fs::create_dir_all(&outside_parent).unwrap();
-        std::fs::remove_dir_all(state_root.join("demo")).unwrap();
-        std::os::unix::fs::symlink(&outside_parent, state_root.join("demo")).unwrap();
+        std::fs::create_dir_all(root.join("source")).test()?;
+        std::fs::create_dir_all(root.join("state")).test()?;
+        std::fs::create_dir_all(&state_root).test()?;
+        std::fs::create_dir_all(&outside_parent).test()?;
+        std::fs::remove_dir_all(state_root.join("demo")).test()?;
+        std::os::unix::fs::symlink(&outside_parent, state_root.join("demo")).test()?;
 
         let manifest = StacksteadManifest {
             kind: "StacksteadManifest".into(),
@@ -322,5 +326,6 @@ mod tests {
         };
 
         assert!(validate_destroy_target(&manifest, &state_root).is_err());
+        Ok(())
     }
 }

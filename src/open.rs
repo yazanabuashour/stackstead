@@ -141,6 +141,7 @@ fn parse_loopback_endpoint(url: &str) -> Option<LoopbackEndpoint> {
 
 #[cfg(test)]
 mod tests {
+    use crate::test_support::{TestResultErrorExt as _, TestResultExt as _};
     use std::collections::BTreeMap;
 
     use chrono::Utc;
@@ -185,23 +186,24 @@ mod tests {
     }
 
     #[test]
-    fn resolution_retains_the_contract_key_and_value() {
+    fn resolution_retains_the_contract_key_and_value() -> anyhow::Result<()> {
         let manifest = manifest();
         assert_eq!(
-            resolve(&manifest, None).unwrap(),
+            resolve(&manifest, None).test()?,
             OpenTarget {
                 contract_key: "dashboard".into(),
                 value: "http://127.0.0.1:39000".into()
             }
         );
         assert_eq!(
-            resolve(&manifest, Some("dashboard")).unwrap().contract_key,
+            resolve(&manifest, Some("dashboard")).test()?.contract_key,
             "dashboard"
         );
+        Ok(())
     }
 
     #[test]
-    fn parses_only_loopback_http_endpoints_with_effective_ports() {
+    fn parses_only_loopback_http_endpoints_with_effective_ports() -> anyhow::Result<()> {
         for (url, host, port) in [
             ("http://127.0.0.1:3000/path", "127.0.0.1", 3000),
             ("https://LOCALHOST/path", "localhost", 443),
@@ -226,16 +228,17 @@ mod tests {
         ] {
             assert_eq!(parse_loopback_endpoint(url), None, "accepted {url}");
         }
+        Ok(())
     }
 
     #[test]
-    fn launcher_requires_the_url_port_to_match_its_contract_key() {
+    fn launcher_requires_the_url_port_to_match_its_contract_key() -> anyhow::Result<()> {
         let mut manifest = manifest();
-        let good = resolve(&manifest, Some("dashboard")).unwrap();
+        let good = resolve(&manifest, Some("dashboard")).test()?;
         assert_eq!(
             launch_endpoint(&good, &manifest)
-                .unwrap()
-                .unwrap()
+                .test()?
+                .test()?
                 .endpoint
                 .port,
             39000
@@ -247,7 +250,7 @@ mod tests {
         };
         assert!(
             launch_endpoint(&stale, &manifest)
-                .unwrap_err()
+                .test_err()?
                 .to_string()
                 .contains("found 0 matches")
         );
@@ -259,18 +262,20 @@ mod tests {
         };
         assert!(
             launch_endpoint(&wrong_service, &manifest)
-                .unwrap_err()
+                .test_err()?
                 .to_string()
                 .contains("different service")
         );
+        Ok(())
     }
 
     #[test]
-    fn raw_ports_are_non_launching_metadata() {
+    fn raw_ports_are_non_launching_metadata() -> anyhow::Result<()> {
         let target = OpenTarget {
             contract_key: "dashboard".into(),
             value: "127.0.0.1:39000".into(),
         };
-        assert_eq!(launch_endpoint(&target, &manifest()).unwrap(), None);
+        assert_eq!(launch_endpoint(&target, &manifest()).test()?, None);
+        Ok(())
     }
 }

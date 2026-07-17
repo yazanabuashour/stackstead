@@ -1,16 +1,17 @@
 use super::*;
 
 #[test]
-fn runtime_probe_failure_is_reported_without_breaking_inspect_json() {
-    let project = Project::initialized();
-    project.create("feature-a");
+fn runtime_probe_failure_is_reported_without_breaking_inspect_json() -> anyhow::Result<()> {
+    let project = Project::initialized()?;
+    project.create("feature-a")?;
 
     let ps = stackstead(&project.repo)
         .env("PATH", "")
         .args(["ps", "--json"])
         .assert()
         .success();
-    let listed: Value = serde_json::from_slice(&ps.get_output().stdout).expect("parse ps output");
+    let listed: Value =
+        serde_json::from_slice(&ps.get_output().stdout).test_context("parse ps output")?;
     assert_eq!(listed["stacksteads"][0]["runtime"], "unknown");
 
     let inspect = stackstead(&project.repo)
@@ -18,8 +19,8 @@ fn runtime_probe_failure_is_reported_without_breaking_inspect_json() {
         .args(["inspect", "feature-a", "--json"])
         .assert()
         .success();
-    let inspected: Value =
-        serde_json::from_slice(&inspect.get_output().stdout).expect("parse inspect output");
+    let inspected: Value = serde_json::from_slice(&inspect.get_output().stdout)
+        .test_context("parse inspect output")?;
     assert_eq!(inspected["version"], "3");
     assert_eq!(inspected["live"]["runtime"]["running"], false);
     assert_eq!(inspected["live"]["runtime"]["status"], "unknown");
@@ -30,21 +31,22 @@ fn runtime_probe_failure_is_reported_without_breaking_inspect_json() {
             .as_array()
             .is_some_and(|warnings| !warnings.is_empty())
     );
+    Ok(())
 }
 
 #[test]
-fn inspect_reports_unreadable_compose_files_instead_of_hiding_them() {
-    let project = Project::initialized();
-    let manifest = project.create("feature-a");
-    fs::remove_file(&manifest.compose_files[0]).expect("remove generated Compose fixture");
+fn inspect_reports_unreadable_compose_files_instead_of_hiding_them() -> anyhow::Result<()> {
+    let project = Project::initialized()?;
+    let manifest = project.create("feature-a")?;
+    fs::remove_file(&manifest.compose_files[0]).test_context("remove generated Compose fixture")?;
 
     let inspected = stackstead(&project.repo)
         .env("PATH", "")
         .args(["inspect", "feature-a", "--json"])
         .assert()
         .success();
-    let inspected: Value =
-        serde_json::from_slice(&inspected.get_output().stdout).expect("parse inspect output");
+    let inspected: Value = serde_json::from_slice(&inspected.get_output().stdout)
+        .test_context("parse inspect output")?;
 
     assert!(inspected["warnings"].as_array().is_some_and(|warnings| {
         warnings.iter().any(|warning| {
@@ -54,16 +56,17 @@ fn inspect_reports_unreadable_compose_files_instead_of_hiding_them() {
             })
         })
     }));
+    Ok(())
 }
 
 #[test]
-fn inspect_rejects_mismatched_manifest_port_service_sets() {
-    let project = Project::initialized();
-    let mut manifest = project.create("feature-a");
+fn inspect_rejects_mismatched_manifest_port_service_sets() -> anyhow::Result<()> {
+    let project = Project::initialized()?;
+    let mut manifest = project.create("feature-a")?;
     manifest.container_ports.remove("web");
     manifest
         .save_atomic()
-        .expect("write malformed manifest fixture");
+        .test_context("write malformed manifest fixture")?;
 
     let rejected = stackstead(&project.repo)
         .args(["inspect", "feature-a"])
@@ -71,19 +74,20 @@ fn inspect_rejects_mismatched_manifest_port_service_sets() {
         .failure();
 
     assert!(
-        output_text(&rejected.get_output().stderr)
+        output_text(&rejected.get_output().stderr)?
             .contains("manifest host and container port service sets differ")
     );
-    assert!(!output_text(&rejected.get_output().stdout).contains("-> 0"));
+    assert!(!output_text(&rejected.get_output().stdout)?.contains("-> 0"));
+    Ok(())
 }
 
 #[cfg(unix)]
 #[test]
-fn inspect_distinguishes_completed_and_failed_compose_services() {
-    let project = Project::initialized();
-    project.create("feature-a");
+fn inspect_distinguishes_completed_and_failed_compose_services() -> anyhow::Result<()> {
+    let project = Project::initialized()?;
+    project.create("feature-a")?;
     let path = fake_docker_path(
-        project.repo.parent().unwrap(),
+        project.repo.parent().test()?,
         "inspect-services-bin",
         r#"#!/bin/sh
 case " $* " in
@@ -94,14 +98,14 @@ case " $* " in
 esac
 exit 97
 "#,
-    );
+    )?;
 
     let json = stackstead(&project.repo)
         .env("PATH", &path)
         .args(["inspect", "feature-a", "--json"])
         .assert()
         .success();
-    let inspected: Value = serde_json::from_slice(&json.get_output().stdout).unwrap();
+    let inspected: Value = serde_json::from_slice(&json.get_output().stdout).test()?;
     assert_eq!(inspected["version"], "3");
     assert_eq!(inspected["live"]["runtime"]["status"], "running");
     assert_eq!(inspected["live"]["services"][0]["status"], "completed (0)");
@@ -113,51 +117,54 @@ exit 97
         .args(["inspect", "feature-a"])
         .assert()
         .success();
-    let stdout = output_text(&human.get_output().stdout);
+    let stdout = output_text(&human.get_output().stdout)?;
     assert!(stdout.contains("init           completed (0)"), "{stdout}");
     assert!(stdout.contains("migrate        exited (7)"), "{stdout}");
     assert!(stdout.contains("web            running"), "{stdout}");
+    Ok(())
 }
 
 #[test]
-fn inspect_human_output_ends_with_full_id_actions() {
-    let project = Project::initialized();
-    let manifest = project.create("feature-a");
+fn inspect_human_output_ends_with_full_id_actions() -> anyhow::Result<()> {
+    let project = Project::initialized()?;
+    let manifest = project.create("feature-a")?;
 
     let inspect = stackstead(&project.repo)
         .env("PATH", "")
         .args(["inspect", "feature-a"])
         .assert()
         .success();
-    let stdout = output_text(&inspect.get_output().stdout);
+    let stdout = output_text(&inspect.get_output().stdout)?;
 
     assert!(stdout.contains(&format!(
         "\nNext:\n  stackstead doctor\n  stackstead context {} --print\n",
         manifest.stackstead_id
     )));
+    Ok(())
 }
 
 #[cfg(unix)]
 #[test]
-fn database_status_requires_the_exact_compose_port_publication() {
-    let project = Project::initialized();
-    let manifest = project.create("feature-a");
+fn database_status_requires_the_exact_compose_port_publication() -> anyhow::Result<()> {
+    let project = Project::initialized()?;
+    let manifest = project.create("feature-a")?;
     let port = manifest.ports["postgres"];
-    let _listener = TcpListener::bind(("127.0.0.1", port)).expect("bind unrelated listener");
+    let _listener =
+        TcpListener::bind(("127.0.0.1", port)).test_context("bind unrelated listener")?;
 
     let wrong_path = fake_docker_path(
-        project.repo.parent().unwrap(),
+        project.repo.parent().test()?,
         "wrong-database-publication-fake-bin",
         &format!(
             "#!/bin/sh\ncase \" $* \" in *\" ps --all --format json \"*) printf '%s\\n' '[{{\"Name\":\"demo-postgres-1\",\"Service\":\"postgres\",\"State\":\"running\",\"ExitCode\":0}}]'; exit 0;; esac\nfor arg in \"$@\"; do\n  case \"$arg\" in\n    ps) printf 'container-id\\n'; exit 0 ;;\n    port) printf '127.0.0.2:{port}\\n'; exit 0 ;;\n  esac\ndone\nexit 0\n"
         ),
-    );
+    )?;
     let status = stackstead(&project.repo)
         .env("PATH", &wrong_path)
         .args(["db", "status", "feature-a", "--json"])
         .assert()
         .success();
-    let status: Value = serde_json::from_slice(&status.get_output().stdout).unwrap();
+    let status: Value = serde_json::from_slice(&status.get_output().stdout).test()?;
     for key in [
         "stackstead_id",
         "strategy",
@@ -180,23 +187,23 @@ fn database_status_requires_the_exact_compose_port_publication() {
         .args(["inspect", "feature-a", "--json"])
         .assert()
         .success();
-    let inspected: Value = serde_json::from_slice(&inspected.get_output().stdout).unwrap();
+    let inspected: Value = serde_json::from_slice(&inspected.get_output().stdout).test()?;
     assert_eq!(inspected["live"]["database"]["reachable"], true);
     assert_eq!(inspected["live"]["database"]["status"], "unreachable");
 
     let exact_path = fake_docker_path(
-        project.repo.parent().unwrap(),
+        project.repo.parent().test()?,
         "exact-database-publication-fake-bin",
         &format!(
             "#!/bin/sh\ncase \" $* \" in *\" ps --all --format json \"*) printf '%s\\n' '[{{\"Name\":\"demo-postgres-1\",\"Service\":\"postgres\",\"State\":\"running\",\"ExitCode\":0}}]'; exit 0;; esac\nfor arg in \"$@\"; do\n  case \"$arg\" in\n    ps) printf 'container-id\\n'; exit 0 ;;\n    port) printf '127.0.0.1:{port}\\n'; exit 0 ;;\n  esac\ndone\nexit 0\n"
         ),
-    );
+    )?;
     let status = stackstead(&project.repo)
         .env("PATH", &exact_path)
         .args(["db", "status", "feature-a", "--json"])
         .assert()
         .success();
-    let status: Value = serde_json::from_slice(&status.get_output().stdout).unwrap();
+    let status: Value = serde_json::from_slice(&status.get_output().stdout).test()?;
     assert_eq!(status["reachable"], true);
     assert_eq!(status["identity_status"], "reachable");
 
@@ -205,23 +212,24 @@ fn database_status_requires_the_exact_compose_port_publication() {
         .args(["inspect", "feature-a", "--json"])
         .assert()
         .success();
-    let inspected: Value = serde_json::from_slice(&inspected.get_output().stdout).unwrap();
+    let inspected: Value = serde_json::from_slice(&inspected.get_output().stdout).test()?;
     assert_eq!(inspected["live"]["database"]["reachable"], true);
     assert_eq!(inspected["live"]["database"]["status"], "reachable");
+    Ok(())
 }
 
 #[test]
-fn v2_manifest_requires_explicit_source_ownership() {
-    let project = Project::initialized();
-    let manifest = project.create("feature-a");
+fn v2_manifest_requires_explicit_source_ownership() -> anyhow::Result<()> {
+    let project = Project::initialized()?;
+    let manifest = project.create("feature-a")?;
     let mut value: Value =
-        serde_json::from_slice(&fs::read(manifest.manifest_path()).unwrap()).unwrap();
-    value.as_object_mut().unwrap().remove("source_ownership");
+        serde_json::from_slice(&fs::read(manifest.manifest_path()).test()?).test()?;
+    value.as_object_mut().test()?.remove("source_ownership");
     fs::write(
         manifest.manifest_path(),
-        serde_json::to_vec_pretty(&value).unwrap(),
+        serde_json::to_vec_pretty(&value).test()?,
     )
-    .unwrap();
+    .test()?;
 
     let rejected = stackstead(&project.repo)
         .args(["inspect", "feature-a", "--json"])
@@ -229,46 +237,49 @@ fn v2_manifest_requires_explicit_source_ownership() {
         .failure();
     assert!(rejected.get_output().stdout.is_empty());
     assert!(
-        output_text(&rejected.get_output().stderr).contains("requires source_ownership"),
+        output_text(&rejected.get_output().stderr)?.contains("requires source_ownership"),
         "unexpected error: {}",
-        output_text(&rejected.get_output().stderr)
+        output_text(&rejected.get_output().stderr)?
     );
     assert!(manifest.worktree.is_dir());
     assert!(manifest.stackstead_root.is_dir());
+    Ok(())
 }
 
 #[test]
-fn repair_regenerates_missing_contract_files_without_docker() {
-    let project = Project::initialized();
-    let manifest = project.create("feature-a");
-    fs::remove_file(&manifest.env_file).expect("remove generated env");
-    fs::remove_file(&manifest.agent_context).expect("remove generated context");
-    fs::remove_file(&manifest.pointer_file).expect("remove generated pointer");
+fn repair_regenerates_missing_contract_files_without_docker() -> anyhow::Result<()> {
+    let project = Project::initialized()?;
+    let manifest = project.create("feature-a")?;
+    fs::remove_file(&manifest.env_file).test_context("remove generated env")?;
+    fs::remove_file(&manifest.agent_context).test_context("remove generated context")?;
+    fs::remove_file(&manifest.pointer_file).test_context("remove generated pointer")?;
 
     let assert = stackstead(&project.repo)
         .args(["repair", "feature-a", "--json"])
         .assert()
         .success();
-    let repaired = changed_manifest(&assert.get_output().stdout, "repaired");
+    let repaired = changed_manifest(&assert.get_output().stdout, "repaired")?;
     assert_eq!(repaired.stackstead_id, manifest.stackstead_id);
     assert!(repaired.env_file.is_file());
     assert!(repaired.agent_context.is_file());
     assert!(repaired.pointer_file.is_file());
     assert_eq!(
-        event_types(&repaired.event_log).last().map(String::as_str),
+        event_types(&repaired.event_log)?.last().map(String::as_str),
         Some("repair")
     );
 
-    let repaired_pointer: StacksteadPointer =
-        serde_json::from_slice(&fs::read(&repaired.pointer_file).expect("read repaired pointer"))
-            .expect("parse repaired pointer");
+    let repaired_pointer: StacksteadPointer = serde_json::from_slice(
+        &fs::read(&repaired.pointer_file).test_context("read repaired pointer")?,
+    )
+    .test_context("parse repaired pointer")?;
     assert_eq!(repaired_pointer.manifest, repaired.manifest_path());
+    Ok(())
 }
 
 #[test]
-fn json_destroy_requires_yes_without_writing_a_prompt_to_stdout() {
-    let project = Project::initialized();
-    let manifest = project.create("feature-a");
+fn json_destroy_requires_yes_without_writing_a_prompt_to_stdout() -> anyhow::Result<()> {
+    let project = Project::initialized()?;
+    let manifest = project.create("feature-a")?;
 
     let assert = stackstead(&project.repo)
         .args(["destroy", "feature-a", "--json"])
@@ -277,42 +288,45 @@ fn json_destroy_requires_yes_without_writing_a_prompt_to_stdout() {
     assert!(
         assert.get_output().stdout.is_empty(),
         "JSON failure was contaminated by: {}",
-        output_text(&assert.get_output().stdout)
+        output_text(&assert.get_output().stdout)?
     );
-    assert!(output_text(&assert.get_output().stderr).contains("--yes"));
+    assert!(output_text(&assert.get_output().stderr)?.contains("--yes"));
     assert!(manifest.stackstead_root.is_dir());
     assert!(manifest.worktree.is_dir());
+    Ok(())
 }
 
 #[test]
-fn unexposed_database_service_fails_without_publishing_partial_state() {
-    let project = Project::initialized();
-    project.replace_config("    service: postgres\n", "    service: missing-postgres\n");
+fn unexposed_database_service_fails_without_publishing_partial_state() -> anyhow::Result<()> {
+    let project = Project::initialized()?;
+    project.replace_config("    service: postgres\n", "    service: missing-postgres\n")?;
 
     let assert = stackstead(&project.repo)
         .args(["create", "feature-a", "--json"])
         .assert()
         .failure();
-    let stderr = output_text(&assert.get_output().stderr);
+    let stderr = output_text(&assert.get_output().stderr)?;
     assert!(
         stderr.contains("resources.ports.expose") || stderr.contains("must be present"),
         "unexpected error: {stderr}"
     );
-    assert!(state_stackstead_directories(&project).is_empty());
+    assert!(state_stackstead_directories(&project)?.is_empty());
     assert!(
-        git(&project.repo, &["branch", "--list", "feature-a"])
+        git(&project.repo, &["branch", "--list", "feature-a"])?
             .trim()
             .is_empty()
     );
+    Ok(())
 }
 
 #[test]
-fn pointer_project_identity_fields_are_checked_against_the_manifest() {
-    let project = Project::initialized();
-    let manifest = project.create("feature-a");
-    let original: Value =
-        serde_json::from_slice(&fs::read(&manifest.pointer_file).expect("read generated pointer"))
-            .expect("parse generated pointer");
+fn pointer_project_identity_fields_are_checked_against_the_manifest() -> anyhow::Result<()> {
+    let project = Project::initialized()?;
+    let manifest = project.create("feature-a")?;
+    let original: Value = serde_json::from_slice(
+        &fs::read(&manifest.pointer_file).test_context("read generated pointer")?,
+    )
+    .test_context("parse generated pointer")?;
 
     for (field, value) in [
         ("project", Value::String("different-project".into())),
@@ -325,15 +339,15 @@ fn pointer_project_identity_fields_are_checked_against_the_manifest() {
         tampered[field] = value;
         fs::write(
             &manifest.pointer_file,
-            serde_json::to_vec_pretty(&tampered).expect("serialize tampered pointer"),
+            serde_json::to_vec_pretty(&tampered).test_context("serialize tampered pointer")?,
         )
-        .expect("write tampered pointer");
+        .test_context("write tampered pointer")?;
 
         let assert = stackstead(&manifest.worktree)
             .args(["context", "feature-a", "--json"])
             .assert()
             .failure();
-        let stderr = output_text(&assert.get_output().stderr);
+        let stderr = output_text(&assert.get_output().stderr)?;
         assert!(
             stderr.contains("does not match its manifest"),
             "tampered {field} was not rejected during discovery: {stderr}"
@@ -342,38 +356,39 @@ fn pointer_project_identity_fields_are_checked_against_the_manifest() {
 
     fs::write(
         &manifest.pointer_file,
-        serde_json::to_vec_pretty(&original).expect("serialize original pointer"),
+        serde_json::to_vec_pretty(&original).test_context("serialize original pointer")?,
     )
-    .expect("restore original pointer");
+    .test_context("restore original pointer")?;
+    Ok(())
 }
 
 #[cfg(unix)]
 #[test]
-fn copied_pointer_rejects_every_affected_command_before_external_mutation() {
-    let victim = Project::initialized();
-    let manifest = victim.create("victim");
-    let caller = Project::initialized();
+fn copied_pointer_rejects_every_affected_command_before_external_mutation() -> anyhow::Result<()> {
+    let victim = Project::initialized()?;
+    let manifest = victim.create("victim")?;
+    let caller = Project::initialized()?;
     let copied_pointer = caller.repo.join(".stackstead/stackstead.json");
-    fs::create_dir_all(copied_pointer.parent().unwrap()).unwrap();
-    fs::copy(&manifest.pointer_file, &copied_pointer).unwrap();
-    let manifest_before = fs::read(manifest.manifest_path()).unwrap();
-    let events_before = fs::read(&manifest.event_log).unwrap();
+    fs::create_dir_all(copied_pointer.parent().test()?).test()?;
+    fs::copy(&manifest.pointer_file, &copied_pointer).test()?;
+    let manifest_before = fs::read(manifest.manifest_path()).test()?;
+    let events_before = fs::read(&manifest.event_log).test()?;
     let docker_marker = caller
         .repo
         .parent()
-        .unwrap()
+        .test()?
         .join("copied-pointer-docker-ran");
     let probe = caller
         .repo
         .parent()
-        .unwrap()
+        .test()?
         .join("copied-pointer-probe-ran");
     let path = fake_docker_path(
-        caller.repo.parent().unwrap(),
+        caller.repo.parent().test()?,
         "copied-pointer-fake-bin",
         &format!("#!/bin/sh\ntouch '{}'\nexit 0\n", docker_marker.display()),
-    );
-    let caller_path = caller.repo.to_str().unwrap();
+    )?;
+    let caller_path = caller.repo.to_str().test()?;
     let probe_command = format!("touch '{}'", probe.display());
 
     for args in [
@@ -398,34 +413,35 @@ fn copied_pointer_rejects_every_affected_command_before_external_mutation() {
             .assert()
             .failure();
         assert!(
-            output_text(&rejected.get_output().stderr).contains("does not match its manifest"),
+            output_text(&rejected.get_output().stderr)?.contains("does not match its manifest"),
             "unexpected copied-pointer error: {}",
-            output_text(&rejected.get_output().stderr)
+            output_text(&rejected.get_output().stderr)?
         );
     }
     assert!(!docker_marker.exists());
     assert!(!probe.exists());
-    assert_eq!(fs::read(manifest.manifest_path()).unwrap(), manifest_before);
-    assert_eq!(fs::read(&manifest.event_log).unwrap(), events_before);
+    assert_eq!(fs::read(manifest.manifest_path()).test()?, manifest_before);
+    assert_eq!(fs::read(&manifest.event_log).test()?, events_before);
     assert!(manifest.worktree.is_dir());
+    Ok(())
 }
 
 #[cfg(unix)]
 #[test]
-fn failed_git_worktree_add_leaves_no_published_manifest_or_stackstead_root() {
+fn failed_git_worktree_add_leaves_no_published_manifest_or_stackstead_root() -> anyhow::Result<()> {
     use std::os::unix::fs::PermissionsExt;
 
-    let project = Project::initialized();
+    let project = Project::initialized()?;
     let fake_bin = project
         .repo
         .parent()
-        .expect("repository has parent")
+        .test_context("repository has parent")?
         .join("fake-bin");
-    fs::create_dir(&fake_bin).expect("create fake binary directory");
+    fs::create_dir(&fake_bin).test_context("create fake binary directory")?;
     let real_git = std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
         .map(|directory| directory.join("git"))
         .find(|candidate| candidate.is_file())
-        .expect("find real Git executable");
+        .test_context("find real Git executable")?;
     let wrapper = fake_bin.join("git");
     fs::write(
         &wrapper,
@@ -434,13 +450,13 @@ fn failed_git_worktree_add_leaves_no_published_manifest_or_stackstead_root() {
             real_git.display().to_string().replace('\'', "'\"'\"'")
         ),
     )
-    .expect("write Git wrapper");
+    .test_context("write Git wrapper")?;
     fs::set_permissions(&wrapper, fs::Permissions::from_mode(0o755))
-        .expect("make Git wrapper executable");
+        .test_context("make Git wrapper executable")?;
     let path = std::env::join_paths(std::iter::once(fake_bin.clone()).chain(
         std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()),
     ))
-    .expect("construct command-local PATH");
+    .test_context("construct command-local PATH")?;
 
     let mut command = stackstead(&project.repo);
     command.env("PATH", path);
@@ -448,17 +464,18 @@ fn failed_git_worktree_add_leaves_no_published_manifest_or_stackstead_root() {
         .args(["create", "feature-a", "--json"])
         .assert()
         .failure();
-    assert!(output_text(&assert.get_output().stderr).contains("intentional worktree failure"));
-    assert!(state_stackstead_directories(&project).is_empty());
+    assert!(output_text(&assert.get_output().stderr)?.contains("intentional worktree failure"));
+    assert!(state_stackstead_directories(&project)?.is_empty());
     let registry: Value = serde_json::from_slice(
         &fs::read(test_state_home(&project.repo).join("stackstead/port-leases.json"))
-            .expect("read rolled-back port lease registry"),
+            .test_context("read rolled-back port lease registry")?,
     )
-    .expect("parse rolled-back port lease registry");
-    assert!(registry["leases"].as_array().unwrap().is_empty());
+    .test_context("parse rolled-back port lease registry")?;
+    assert!(registry["leases"].as_array().test()?.is_empty());
     assert!(
-        git(&project.repo, &["branch", "--list", "feature-a"])
+        git(&project.repo, &["branch", "--list", "feature-a"])?
             .trim()
             .is_empty()
     );
+    Ok(())
 }

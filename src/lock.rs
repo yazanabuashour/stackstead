@@ -169,45 +169,48 @@ pub fn project_lock_path(project_state_dir: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::TestResultExt as _;
 
     #[cfg(unix)]
     #[test]
-    fn lock_acquisition_rejects_symlinks_without_modifying_the_target() {
+    fn lock_acquisition_rejects_symlinks_without_modifying_the_target() -> anyhow::Result<()> {
         use std::os::unix::fs::symlink;
 
-        let directory = tempfile::tempdir().unwrap();
+        let directory = tempfile::tempdir().test()?;
         let target = directory.path().join("target");
         let lock = directory.path().join("lock");
-        std::fs::write(&target, b"unchanged").unwrap();
-        symlink(&target, &lock).unwrap();
+        std::fs::write(&target, b"unchanged").test()?;
+        symlink(&target, &lock).test()?;
 
         assert!(LockGuard::acquire(&lock, "stackstead").is_err());
         assert!(LockGuard::acquire_existing(&lock, "stackstead").is_err());
         assert!(LockGuard::acquire_existing_shared(&lock, "stackstead").is_err());
         assert!(!LockGuard::can_acquire(&lock));
-        assert_eq!(std::fs::read(&target).unwrap(), b"unchanged");
+        assert_eq!(std::fs::read(&target).test()?, b"unchanged");
+        Ok(())
     }
 
     #[test]
-    fn lock_acquisition_preserves_regular_file_behavior() {
-        let directory = tempfile::tempdir().unwrap();
+    fn lock_acquisition_preserves_regular_file_behavior() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir().test()?;
         let path = directory.path().join("lock");
 
-        drop(LockGuard::acquire(&path, "stackstead").unwrap());
+        drop(LockGuard::acquire(&path, "stackstead").test()?);
         assert!(LockGuard::can_acquire(&path));
-        drop(LockGuard::acquire_existing(&path, "stackstead").unwrap());
-        drop(LockGuard::acquire_existing_shared(&path, "stackstead").unwrap());
+        drop(LockGuard::acquire_existing(&path, "stackstead").test()?);
+        drop(LockGuard::acquire_existing_shared(&path, "stackstead").test()?);
+        Ok(())
     }
 
     #[test]
-    fn exclusive_lock_can_be_downgraded_for_shared_run_leases() {
-        let directory = tempfile::tempdir().unwrap();
+    fn exclusive_lock_can_be_downgraded_for_shared_run_leases() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir().test()?;
         let path = directory.path().join("lock");
-        let lock = LockGuard::acquire(&path, "stackstead").unwrap();
+        let lock = LockGuard::acquire(&path, "stackstead").test()?;
 
-        let lock = lock.downgrade_to_shared().unwrap();
-        drop(LockGuard::acquire_existing_shared(&path, "stackstead").unwrap());
-        let contender = open_lock(&path, false).unwrap();
+        let lock = lock.downgrade_to_shared().test()?;
+        drop(LockGuard::acquire_existing_shared(&path, "stackstead").test()?);
+        let contender = open_lock(&path, false).test()?;
         assert!(
             wait_for_lock(
                 &contender,
@@ -219,35 +222,37 @@ mod tests {
             .is_err()
         );
         drop(lock);
-        drop(LockGuard::acquire_existing(&path, "stackstead").unwrap());
+        drop(LockGuard::acquire_existing(&path, "stackstead").test()?);
+        Ok(())
     }
 
     #[cfg(unix)]
     #[test]
-    fn handoff_closes_without_unlocking_the_inherited_file_description() {
-        let directory = tempfile::tempdir().unwrap();
+    fn handoff_closes_without_unlocking_the_inherited_file_description() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir().test()?;
         let path = directory.path().join("lock");
-        let lock = LockGuard::acquire(&path, "stackstead").unwrap();
-        let inherited = lock.file.try_clone().unwrap();
+        let lock = LockGuard::acquire(&path, "stackstead").test()?;
+        let inherited = lock.file.try_clone().test()?;
 
         lock.close_after_handoff();
         assert!(
             open_lock(&path, false)
-                .unwrap()
+                .test()?
                 .try_lock_exclusive()
                 .is_err()
         );
 
         drop(inherited);
-        drop(LockGuard::acquire_existing(&path, "stackstead").unwrap());
+        drop(LockGuard::acquire_existing(&path, "stackstead").test()?);
+        Ok(())
     }
 
     #[test]
-    fn bounded_wait_acquires_after_the_contender_releases() {
-        let directory = tempfile::tempdir().unwrap();
+    fn bounded_wait_acquires_after_the_contender_releases() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir().test()?;
         let path = directory.path().join("lock");
-        let lock = LockGuard::acquire(&path, "stackstead").unwrap();
-        let contender = open_lock(&path, false).unwrap();
+        let lock = LockGuard::acquire(&path, "stackstead").test()?;
+        let contender = open_lock(&path, false).test()?;
         let release = std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(100));
             drop(lock);
@@ -260,17 +265,19 @@ mod tests {
             false,
             Duration::from_secs(1),
         )
-        .unwrap();
-        release.join().unwrap();
+        .test()?;
+        release.join().test()?;
+        Ok(())
     }
 
     #[test]
-    fn existing_lock_acquisition_never_recreates_destroyed_state() {
-        let directory = tempfile::tempdir().unwrap();
+    fn existing_lock_acquisition_never_recreates_destroyed_state() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir().test()?;
         let path = directory.path().join("destroyed/state/lock");
         assert!(LockGuard::acquire_existing(&path, "stackstead").is_err());
         assert!(!directory.path().join("destroyed").exists());
         assert!(LockGuard::acquire_existing_shared(&path, "stackstead").is_err());
         assert!(!directory.path().join("destroyed").exists());
+        Ok(())
     }
 }

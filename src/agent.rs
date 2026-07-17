@@ -178,6 +178,7 @@ fn command(
 
 #[cfg(test)]
 mod tests {
+    use crate::test_support::TestResultExt as _;
     use std::{collections::BTreeMap, fs, process::ExitStatus};
 
     use chrono::Utc;
@@ -186,15 +187,15 @@ mod tests {
     use crate::manifest::{ManifestStatus, SourceOwnership, StacksteadManifest};
     use crate::{config::StacksteadConfig, state::ProjectPaths};
 
-    fn manifest(root: &Path) -> StacksteadManifest {
+    fn manifest(root: &Path) -> anyhow::Result<StacksteadManifest> {
         let short_id = "a17ca17ca17ca17ca17ca17ca17ca17c";
         let stackstead_id = format!("feature-a-{short_id}");
         let stackstead_root = root.join("demo").join(&stackstead_id);
         let worktree = stackstead_root.join("source");
         let state_dir = stackstead_root.join("state");
-        fs::create_dir_all(worktree.join(".stackstead")).unwrap();
-        fs::create_dir_all(&state_dir).unwrap();
-        StacksteadManifest {
+        fs::create_dir_all(worktree.join(".stackstead")).test()?;
+        fs::create_dir_all(&state_dir).test()?;
+        Ok(StacksteadManifest {
             kind: "StacksteadManifest".into(),
             version: crate::manifest::MANIFEST_VERSION.into(),
             stackstead_id: stackstead_id.clone(),
@@ -225,17 +226,17 @@ mod tests {
             database: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
-        }
+        })
     }
 
     #[cfg(unix)]
     #[test]
-    fn command_preserves_arguments_cwd_environment_and_exit_status() {
+    fn command_preserves_arguments_cwd_environment_and_exit_status() -> anyhow::Result<()> {
         use std::os::unix::fs::PermissionsExt;
 
-        let directory = tempfile::tempdir().unwrap();
-        let root = directory.path().canonicalize().unwrap();
-        let manifest = manifest(&root);
+        let directory = tempfile::tempdir().test()?;
+        let root = directory.path().canonicalize().test()?;
+        let manifest = manifest(&root)?;
         let script = root.join("probe");
         let script_body = format!(
             r#"#!/bin/sh
@@ -247,8 +248,8 @@ exit "$3"
 "#,
             manifest.stackstead_id, manifest.compose_project
         );
-        fs::write(&script, script_body).unwrap();
-        fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+        fs::write(&script, script_body).test()?;
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).test()?;
         let environment = BTreeMap::from([
             ("API_TOKEN".into(), "private".into()),
             ("STACKSTEAD_ID".into(), "spoofed".into()),
@@ -258,11 +259,11 @@ exit "$3"
 
         let output = command(&manifest, script.as_os_str(), &args, &environment)
             .output()
-            .unwrap();
+            .test()?;
 
         assert_eq!(exit_code(output.status), 23);
         assert_eq!(
-            String::from_utf8(output.stdout).unwrap(),
+            String::from_utf8(output.stdout).test()?,
             format!(
                 "{}\none argument\n; touch nowhere\n{}\n{}\n",
                 manifest.worktree.display(),
@@ -270,25 +271,27 @@ exit "$3"
                 manifest.agent_context.display()
             )
         );
+        Ok(())
     }
 
     #[cfg(unix)]
     #[test]
-    fn signal_status_uses_conventional_shell_exit_code() {
+    fn signal_status_uses_conventional_shell_exit_code() -> anyhow::Result<()> {
         use std::os::unix::process::ExitStatusExt;
 
         let status = ExitStatus::from_raw(9);
         assert_eq!(exit_code(status), 137);
+        Ok(())
     }
 
     #[test]
-    fn validation_rejects_contract_files_outside_the_worktree() {
-        let directory = tempfile::tempdir().unwrap();
-        let mut manifest = manifest(directory.path());
+    fn validation_rejects_contract_files_outside_the_worktree() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir().test()?;
+        let mut manifest = manifest(directory.path())?;
         let compose = manifest.worktree.join("docker-compose.yml");
-        fs::write(&compose, "services: {}\n").unwrap();
+        fs::write(&compose, "services: {}\n").test()?;
         manifest.compose_files = vec![compose];
-        fs::write(&manifest.agent_context, "# context\n").unwrap();
+        fs::write(&manifest.agent_context, "# context\n").test()?;
         let mut config = StacksteadConfig::default();
         config.project.name = "demo".into();
         let runtime = lifecycle::ProjectRuntime {
@@ -299,9 +302,10 @@ exit "$3"
                 "demo",
             ),
         };
-        lifecycle::validate_manifest_binding(&runtime, &manifest).unwrap();
+        lifecycle::validate_manifest_binding(&runtime, &manifest).test()?;
 
         manifest.env_file = directory.path().join("shared.env");
         assert!(lifecycle::validate_manifest_binding(&runtime, &manifest).is_err());
+        Ok(())
     }
 }

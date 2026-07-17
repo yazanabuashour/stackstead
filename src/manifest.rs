@@ -308,6 +308,7 @@ pub fn write_json_atomic<T: Serialize>(path: &Path, value: &T) -> anyhow::Result
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::{TestResultErrorExt as _, TestResultExt as _};
 
     fn manifest_value(version: &str) -> serde_json::Value {
         serde_json::json!({
@@ -325,8 +326,8 @@ mod tests {
     }
 
     #[test]
-    fn pointer_round_trip_is_atomic() {
-        let directory = tempfile::tempdir().unwrap();
+    fn pointer_round_trip_is_atomic() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir().test()?;
         let path = directory.path().join("stackstead.json");
         let pointer = StacksteadPointer {
             kind: "StacksteadPointer".into(),
@@ -338,89 +339,95 @@ mod tests {
             project_state_root: directory.path().join("state"),
             stackstead_root: directory.path().join("cell"),
         };
-        write_pointer(&path, &pointer).unwrap();
+        write_pointer(&path, &pointer).test()?;
         let actual: StacksteadPointer =
-            serde_json::from_reader(File::open(&path).unwrap()).unwrap();
+            serde_json::from_reader(File::open(&path).test()?).test()?;
         assert_eq!(actual, pointer);
 
-        let mut legacy = serde_json::to_value(&pointer).unwrap();
+        let mut legacy = serde_json::to_value(&pointer).test()?;
         legacy["version"] = serde_json::json!("1");
-        write_json_atomic(&path, &legacy).unwrap();
-        assert_eq!(StacksteadPointer::read(&path).unwrap().version, "1");
+        write_json_atomic(&path, &legacy).test()?;
+        assert_eq!(StacksteadPointer::read(&path).test()?.version, "1");
+        Ok(())
     }
 
     #[test]
-    fn rejects_future_or_wrong_manifest_contracts() {
-        let directory = tempfile::tempdir().unwrap();
+    fn rejects_future_or_wrong_manifest_contracts() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir().test()?;
         let path = directory.path().join("manifest.json");
         let mut value = manifest_value("3");
-        write_json_atomic(&path, &value).unwrap();
+        write_json_atomic(&path, &value).test()?;
         assert!(StacksteadManifest::read(&path).is_err());
         value["kind"] = serde_json::json!("OtherManifest");
         value["version"] = serde_json::json!(MANIFEST_VERSION);
-        write_json_atomic(&path, &value).unwrap();
+        write_json_atomic(&path, &value).test()?;
         assert!(StacksteadManifest::read(&path).is_err());
+        Ok(())
     }
 
     #[test]
-    fn requires_explicit_v2_fields_and_rejects_unknown_fields() {
-        let directory = tempfile::tempdir().unwrap();
+    fn requires_explicit_v2_fields_and_rejects_unknown_fields() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir().test()?;
         let path = directory.path().join("manifest.json");
         let mut value = manifest_value(MANIFEST_VERSION);
-        value.as_object_mut().unwrap().remove("source_ownership");
-        write_json_atomic(&path, &value).unwrap();
+        value.as_object_mut().test()?.remove("source_ownership");
+        write_json_atomic(&path, &value).test()?;
         assert!(
             StacksteadManifest::read(&path)
-                .unwrap_err()
+                .test_err()?
                 .to_string()
                 .contains("requires source_ownership")
         );
 
         value["source_ownership"] = serde_json::json!("stackstead");
         value["future_field"] = serde_json::json!(true);
-        write_json_atomic(&path, &value).unwrap();
+        write_json_atomic(&path, &value).test()?;
         assert!(StacksteadManifest::read(&path).is_err());
+        Ok(())
     }
 
     #[test]
-    fn rejects_v1_and_missing_or_invalid_runtime_tokens_with_recreation_guidance() {
-        let directory = tempfile::tempdir().unwrap();
+    fn rejects_v1_and_missing_or_invalid_runtime_tokens_with_recreation_guidance()
+    -> anyhow::Result<()> {
+        let directory = tempfile::tempdir().test()?;
         let path = directory.path().join("manifest.json");
         let mut value = manifest_value("1");
-        value.as_object_mut().unwrap().remove("runtime_token");
-        write_json_atomic(&path, &value).unwrap();
-        let error = StacksteadManifest::read(&path).unwrap_err().to_string();
+        value.as_object_mut().test()?.remove("runtime_token");
+        write_json_atomic(&path, &value).test()?;
+        let error = StacksteadManifest::read(&path).test_err()?.to_string();
         assert!(error.contains("version 1 lacks a cryptographic runtime token"));
         assert!(error.contains("compatible older Stackstead binary"));
 
         value["version"] = serde_json::json!(MANIFEST_VERSION);
-        write_json_atomic(&path, &value).unwrap();
-        let error = StacksteadManifest::read(&path).unwrap_err().to_string();
+        write_json_atomic(&path, &value).test()?;
+        let error = StacksteadManifest::read(&path).test_err()?.to_string();
         assert!(error.contains("requires a cryptographic runtime_token"));
         assert!(error.contains("recreate this stackstead"));
 
         value["runtime_token"] = serde_json::json!("0123456789ABCDEF0123456789ABCDEF");
-        write_json_atomic(&path, &value).unwrap();
-        let error = StacksteadManifest::read(&path).unwrap_err().to_string();
+        write_json_atomic(&path, &value).test()?;
+        let error = StacksteadManifest::read(&path).test_err()?.to_string();
         assert!(error.contains("32 lowercase hexadecimal characters"));
 
         for token in ["0".repeat(31), "0".repeat(33)] {
             value["runtime_token"] = serde_json::json!(token);
-            write_json_atomic(&path, &value).unwrap();
+            write_json_atomic(&path, &value).test()?;
             assert!(StacksteadManifest::read(&path).is_err());
         }
+        Ok(())
     }
 
     #[test]
-    fn generated_runtime_tokens_have_the_contract_shape() {
-        let token = new_runtime_token().unwrap();
+    fn generated_runtime_tokens_have_the_contract_shape() -> anyhow::Result<()> {
+        let token = new_runtime_token().test()?;
         assert!(valid_runtime_token(&token));
+        Ok(())
     }
 
     #[test]
-    fn trusted_environment_pins_both_compose_project_variables() {
+    fn trusted_environment_pins_both_compose_project_variables() -> anyhow::Result<()> {
         let manifest: StacksteadManifest =
-            serde_json::from_value(manifest_value(MANIFEST_VERSION)).unwrap();
+            serde_json::from_value(manifest_value(MANIFEST_VERSION)).test()?;
         let environment = manifest.trusted_environment(&BTreeMap::new());
         assert_eq!(
             environment.get("COMPOSE_PROJECT_NAME"),
@@ -430,39 +437,42 @@ mod tests {
             environment.get("STACKSTEAD_COMPOSE_PROJECT"),
             Some(&manifest.compose_project)
         );
+        Ok(())
     }
 
     #[test]
-    fn pointer_reader_validates_header_before_body() {
-        let directory = tempfile::tempdir().unwrap();
+    fn pointer_reader_validates_header_before_body() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir().test()?;
         let path = directory.path().join("stackstead.json");
         write_json_atomic(
             &path,
             &serde_json::json!({"kind":"StacksteadPointer","version":"3"}),
         )
-        .unwrap();
+        .test()?;
         assert!(
             StacksteadPointer::read(&path)
-                .unwrap_err()
+                .test_err()?
                 .to_string()
                 .contains("unsupported pointer contract")
         );
+        Ok(())
     }
 
     #[test]
-    fn internal_manifest_save_uses_the_canonical_path() {
-        let directory = tempfile::tempdir().unwrap();
+    fn internal_manifest_save_uses_the_canonical_path() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir().test()?;
         let initial = directory.path().join("initial.json");
         let mut value = manifest_value(MANIFEST_VERSION);
         value["state_dir"] = serde_json::json!(directory.path().join("state"));
-        write_json_atomic(&initial, &value).unwrap();
-        let mut manifest = StacksteadManifest::read(&initial).unwrap();
-        manifest.save_atomic().unwrap();
+        write_json_atomic(&initial, &value).test()?;
+        let mut manifest = StacksteadManifest::read(&initial).test()?;
+        manifest.save_atomic().test()?;
         assert_eq!(
             StacksteadManifest::read(&manifest.manifest_path())
-                .unwrap()
+                .test()?
                 .stackstead_id,
             manifest.stackstead_id
         );
+        Ok(())
     }
 }

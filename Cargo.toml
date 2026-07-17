@@ -31,6 +31,24 @@ ureq = { version = "2", default-features = false, features = ["tls"] }
 [dev-dependencies]
 assert_cmd = "2"
 
+[lints.rust]
+unfulfilled_lint_expectations = "deny"
+unsafe_code = "deny"
+unsafe_op_in_unsafe_fn = "deny"
+
+[lints.clippy]
+allow_attributes = "deny"
+allow_attributes_without_reason = "deny"
+expect_used = "deny"
+multiple_unsafe_ops_per_block = "deny"
+panic = "deny"
+todo = "deny"
+undocumented_unsafe_blocks = "deny"
+unnecessary_safety_comment = "deny"
+unimplemented = "deny"
+unreachable = "deny"
+unwrap_used = "deny"
+
 [profile.release]
 strip = true
 lto = "thin"

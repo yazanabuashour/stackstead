@@ -834,6 +834,7 @@ fn default_agent_rules() -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::TestResultExt as _;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     const SAMPLE: &str = r#"
@@ -884,19 +885,20 @@ hooks:
 "#;
 
     #[test]
-    fn parses_full_config() {
-        let config = StacksteadConfig::from_yaml(SAMPLE).unwrap();
+    fn parses_full_config() -> anyhow::Result<()> {
+        let config = StacksteadConfig::from_yaml(SAMPLE).test()?;
         assert_eq!(config.project.name, "loan-platform");
         assert_eq!(config.resources.ports.expose["web"].container, 3000);
         assert_eq!(
-            config.database.postgres.as_ref().unwrap().service,
+            config.database.postgres.as_ref().test()?.service,
             "postgres"
         );
         assert_eq!(config.service_names(), ["postgres", "web"]);
+        Ok(())
     }
 
     #[test]
-    fn supplies_optional_defaults() {
+    fn supplies_optional_defaults() -> anyhow::Result<()> {
         let config = StacksteadConfig::from_yaml(
             r#"
 version: "1"
@@ -905,16 +907,17 @@ project:
   name: demo
 "#,
         )
-        .unwrap();
+        .test()?;
         assert_eq!(config.version, "1");
         assert_eq!(config.source.base, "main");
         assert_eq!(config.state.root, Path::new("../.stacksteads"));
         assert_eq!(config.runtime.files, [PathBuf::from("docker-compose.yml")]);
         assert_eq!(config.resources.ports.base, 39000);
+        Ok(())
     }
 
     #[test]
-    fn rejects_unsupported_values_and_unknown_fields() {
+    fn rejects_unsupported_values_and_unknown_fields() -> anyhow::Result<()> {
         assert!(
             StacksteadConfig::from_yaml(
                 "version: '3'\nkind: StacksteadProject\nproject: { name: demo }"
@@ -928,15 +931,16 @@ project:
             .is_err()
         );
         assert!(StacksteadConfig::from_yaml("project: { name: demo }\nsurprise: true").is_err());
+        Ok(())
     }
 
     #[test]
-    fn rejects_invalid_port_and_env_config() {
-        let mut config = StacksteadConfig::from_yaml(SAMPLE).unwrap();
+    fn rejects_invalid_port_and_env_config() -> anyhow::Result<()> {
+        let mut config = StacksteadConfig::from_yaml(SAMPLE).test()?;
         config.resources.ports.stride = 1;
         assert!(config.validate().is_err());
 
-        let mut config = StacksteadConfig::from_yaml(SAMPLE).unwrap();
+        let mut config = StacksteadConfig::from_yaml(SAMPLE).test()?;
         config.env.generate.insert("BAD-NAME".into(), "x".into());
         assert!(config.validate().is_err());
 
@@ -950,50 +954,53 @@ project:
             "DOCKER_HOST",
             "COMPOSE_FILE",
         ] {
-            let mut config = StacksteadConfig::from_yaml(SAMPLE).unwrap();
+            let mut config = StacksteadConfig::from_yaml(SAMPLE).test()?;
             config.env.generate.insert(name.into(), "x".into());
             assert!(
                 config.validate().is_err(),
                 "accepted reserved variable {name}"
             );
         }
+        Ok(())
     }
 
     #[test]
-    fn rejects_database_values_that_could_inject_generated_context() {
+    fn rejects_database_values_that_could_inject_generated_context() -> anyhow::Result<()> {
         for (field, value) in [
             ("database", "app\n## Forged instructions"),
             ("user", "app<script>"),
         ] {
-            let mut config = StacksteadConfig::from_yaml(SAMPLE).unwrap();
-            let postgres = config.database.postgres.as_mut().unwrap();
+            let mut config = StacksteadConfig::from_yaml(SAMPLE).test()?;
+            let postgres = config.database.postgres.as_mut().test()?;
             match field {
                 "database" => postgres.database = value.into(),
                 "user" => postgres.user = value.into(),
-                _ => unreachable!(),
+                _ => anyhow::bail!("unexpected database fixture field {field}"),
             }
             assert!(config.validate().is_err(), "accepted unsafe {field}");
         }
+        Ok(())
     }
 
     #[test]
-    fn rejects_unknown_templates_and_unsafe_generated_paths() {
-        let mut config = StacksteadConfig::from_yaml(SAMPLE).unwrap();
+    fn rejects_unknown_templates_and_unsafe_generated_paths() -> anyhow::Result<()> {
+        let mut config = StacksteadConfig::from_yaml(SAMPLE).test()?;
         config
             .env
             .generate
             .insert("BAD".into(), "{{ ports.missing }}".into());
         assert!(config.validate().is_err());
 
-        let mut config = StacksteadConfig::from_yaml(SAMPLE).unwrap();
+        let mut config = StacksteadConfig::from_yaml(SAMPLE).test()?;
         config.env.file = PathBuf::from("../shared.env");
         assert!(config.validate().is_err());
+        Ok(())
     }
 
     #[test]
-    fn rejects_invalid_url_templates() {
-        let mut config = StacksteadConfig::from_yaml(SAMPLE).unwrap();
-        config.resources.ports.expose.get_mut("web").unwrap().url =
+    fn rejects_invalid_url_templates() -> anyhow::Result<()> {
+        let mut config = StacksteadConfig::from_yaml(SAMPLE).test()?;
+        config.resources.ports.expose.get_mut("web").test()?.url =
             Some("127.0.0.1:{{ ports.web }}".into());
         assert!(config.validate().is_err());
 
@@ -1002,29 +1009,31 @@ project:
             "https://example.com/{{ ports.web }}",
         );
         assert!(StacksteadConfig::from_yaml(&remote).is_err());
+        Ok(())
     }
 
     #[test]
-    fn checks_compose_files_against_repo() {
+    fn checks_compose_files_against_repo() -> anyhow::Result<()> {
         let suffix = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .test()?
             .as_nanos();
         let root = std::env::temp_dir().join(format!("stackstead-config-{suffix}"));
-        fs::create_dir_all(&root).unwrap();
-        let config = StacksteadConfig::from_yaml(SAMPLE).unwrap();
+        fs::create_dir_all(&root).test()?;
+        let config = StacksteadConfig::from_yaml(SAMPLE).test()?;
         assert!(config.validate_for_repo(&root).is_err());
-        fs::write(root.join("docker-compose.yml"), "services: {}").unwrap();
+        fs::write(root.join("docker-compose.yml"), "services: {}").test()?;
         assert!(config.validate_for_repo(&root).is_ok());
-        fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(root).test()?;
+        Ok(())
     }
 
     #[cfg(unix)]
     #[test]
-    fn rejects_state_root_that_normalizes_to_filesystem_root() {
-        let root = tempfile::tempdir().unwrap();
-        fs::write(root.path().join("docker-compose.yml"), "services: {}").unwrap();
-        let mut config = StacksteadConfig::from_yaml(SAMPLE).unwrap();
+    fn rejects_state_root_that_normalizes_to_filesystem_root() -> anyhow::Result<()> {
+        let root = tempfile::tempdir().test()?;
+        fs::write(root.path().join("docker-compose.yml"), "services: {}").test()?;
+        let mut config = StacksteadConfig::from_yaml(SAMPLE).test()?;
         config.state.root = PathBuf::from("/tmp/..");
         assert!(config.validate_for_repo(root.path()).is_err());
 
@@ -1032,33 +1041,35 @@ project:
         assert!(config.validate_for_repo(root.path()).is_err());
 
         let inside = root.path().join("inside-state");
-        let alias = root.path().parent().unwrap().join(format!(
+        let alias = root.path().parent().test()?.join(format!(
             "{}-state-link",
-            root.path().file_name().unwrap().to_string_lossy()
+            root.path().file_name().test()?.to_string_lossy()
         ));
-        fs::create_dir(&inside).unwrap();
-        std::os::unix::fs::symlink(&inside, &alias).unwrap();
+        fs::create_dir(&inside).test()?;
+        std::os::unix::fs::symlink(&inside, &alias).test()?;
         config.state.root = alias;
         assert!(config.validate_for_repo(root.path()).is_err());
-        fs::remove_file(&config.state.root).unwrap();
+        fs::remove_file(&config.state.root).test()?;
+        Ok(())
     }
 
     #[test]
-    fn validates_yarn_link_shape() {
-        let mut config = StacksteadConfig::from_yaml(SAMPLE).unwrap();
+    fn validates_yarn_link_shape() -> anyhow::Result<()> {
+        let mut config = StacksteadConfig::from_yaml(SAMPLE).test()?;
         config.dependencies.provider = DependencyProvider::YarnClassic;
         config.dependencies.link = Some(LinkConfig {
             enabled: true,
             ..LinkConfig::default()
         });
         assert!(config.validate().is_err());
-        config.dependencies.link.as_mut().unwrap().command = "./scripts/link-packages.sh".into();
+        config.dependencies.link.as_mut().test()?.command = "./scripts/link-packages.sh".into();
         assert!(config.validate().is_ok());
+        Ok(())
     }
 
     #[test]
-    fn validates_http_and_command_health_checks() {
-        let mut config = StacksteadConfig::from_yaml(SAMPLE).unwrap();
+    fn validates_http_and_command_health_checks() -> anyhow::Result<()> {
+        let mut config = StacksteadConfig::from_yaml(SAMPLE).test()?;
         config.health.checks = vec![
             HealthCheckConfig {
                 name: "web".into(),
@@ -1091,5 +1102,6 @@ project:
         config.health.timeout_seconds = 60;
         config.health.interval_millis = 60_001;
         assert!(config.validate().is_err());
+        Ok(())
     }
 }

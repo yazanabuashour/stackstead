@@ -135,29 +135,32 @@ fn decode_value(value: &str) -> anyhow::Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::TestResultExt as _;
 
     #[test]
-    fn validates_names_and_redacts_secret_like_keys() {
+    fn validates_names_and_redacts_secret_like_keys() -> anyhow::Result<()> {
         assert!(validate_env_name("WEB_PORT").is_ok());
         assert!(validate_env_name("9PORT").is_err());
         assert!(validate_env_name("BAD-NAME").is_err());
         assert!(is_secret_name("DATABASE_PASSWORD"));
         assert!(!is_secret_name("WEB_PORT"));
+        Ok(())
     }
 
     #[test]
-    fn reads_and_redacts_values() {
-        let directory = tempfile::tempdir().unwrap();
+    fn reads_and_redacts_values() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir().test()?;
         let path = directory.path().join(".env");
-        std::fs::write(&path, "WEB_PORT=39000\nAPI_TOKEN=private\n").unwrap();
-        let output = rendered(&path, false).unwrap();
+        std::fs::write(&path, "WEB_PORT=39000\nAPI_TOKEN=private\n").test()?;
+        let output = rendered(&path, false).test()?;
         assert!(output.contains("WEB_PORT=39000"));
         assert!(output.contains("API_TOKEN=[REDACTED]"));
         assert!(!output.contains("private"));
+        Ok(())
     }
 
     #[test]
-    fn redacts_credentials_in_urls_even_when_key_is_not_secret_like() {
+    fn redacts_credentials_in_urls_even_when_key_is_not_secret_like() -> anyhow::Result<()> {
         assert!(should_redact(
             "DATABASE_URL",
             "postgres://app:password@127.0.0.1/app"
@@ -167,5 +170,6 @@ mod tests {
             "https://access-token@example.invalid/repo"
         ));
         assert!(!should_redact("PUBLIC_URL", "http://127.0.0.1:3000/path"));
+        Ok(())
     }
 }

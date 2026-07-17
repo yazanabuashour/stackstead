@@ -1,5 +1,3 @@
-#![deny(unsafe_code)]
-
 use std::{
     collections::BTreeSet,
     ffi::OsString,
@@ -13,6 +11,10 @@ use assert_cmd::Command;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tempfile::TempDir;
+
+#[path = "../src/test_support.rs"]
+mod test_support;
+use test_support::{TestResultErrorExt, TestResultExt};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -78,15 +80,17 @@ struct StacksteadManifest {
 }
 
 impl StacksteadManifest {
-    fn read(path: &Path) -> Result<Self, serde_json::Error> {
-        serde_json::from_slice(&fs::read(path).expect("read manifest fixture"))
+    fn read(path: &Path) -> anyhow::Result<Self> {
+        serde_json::from_slice(&fs::read(path).test_context("read manifest fixture")?)
+            .test_context("parse manifest fixture")
     }
 
-    fn save_atomic(&self) -> std::io::Result<()> {
+    fn save_atomic(&self) -> anyhow::Result<()> {
         fs::write(
             self.manifest_path(),
-            serde_json::to_vec_pretty(self).unwrap(),
-        )
+            serde_json::to_vec_pretty(self).test()?,
+        )?;
+        Ok(())
     }
 
     fn manifest_path(&self) -> PathBuf {
@@ -108,9 +112,9 @@ struct StacksteadPointer {
 
 type StacksteadConfig = serde_yaml::Value;
 
-fn load_config(path: &Path) -> StacksteadConfig {
-    serde_yaml::from_slice(&fs::read(path).expect("read config fixture"))
-        .expect("parse config fixture")
+fn load_config(path: &Path) -> anyhow::Result<StacksteadConfig> {
+    serde_yaml::from_slice(&fs::read(path).test_context("read config fixture")?)
+        .test_context("parse config fixture")
 }
 
 fn has_diagnostic(report: &Value, code: &str, severity: &str) -> bool {
@@ -139,12 +143,14 @@ struct StacksteadFiles {
     manifest: PathBuf,
 }
 
-fn changed_manifest(output: &[u8], action: &str) -> StacksteadManifest {
-    let change: StacksteadChange = serde_json::from_slice(output).expect("parse stackstead change");
+fn changed_manifest(output: &[u8], action: &str) -> anyhow::Result<StacksteadManifest> {
+    let change: StacksteadChange =
+        serde_json::from_slice(output).test_context("parse stackstead change")?;
     assert_eq!(change.kind, "StacksteadChange");
     assert_eq!(change.version, "1");
     assert_eq!(change.action, action);
-    StacksteadManifest::read(&change.stackstead.files.manifest).expect("read changed manifest")
+    StacksteadManifest::read(&change.stackstead.files.manifest)
+        .test_context("read changed manifest")
 }
 
 struct Project {
@@ -153,20 +159,20 @@ struct Project {
 }
 
 impl Project {
-    fn git_repo() -> Self {
-        let temp = tempfile::tempdir().expect("create temporary project parent");
+    fn git_repo() -> anyhow::Result<Self> {
+        let temp = tempfile::tempdir().test_context("create temporary project parent")?;
         let repo = temp.path().join("demo-project");
-        fs::create_dir(&repo).expect("create temporary repository");
+        fs::create_dir(&repo).test_context("create temporary repository")?;
         let repo = repo
             .canonicalize()
-            .expect("canonicalize temporary repository");
-        git(&repo, &["init", "--initial-branch=main"]);
-        git(&repo, &["config", "user.name", "Stackstead Tests"]);
+            .test_context("canonicalize temporary repository")?;
+        git(&repo, &["init", "--initial-branch=main"])?;
+        git(&repo, &["config", "user.name", "Stackstead Tests"])?;
         git(
             &repo,
             &["config", "user.email", "stackstead-tests@example.invalid"],
-        );
-        fs::write(repo.join("README.md"), "# Demo project\n").expect("write README");
+        )?;
+        fs::write(repo.join("README.md"), "# Demo project\n").test_context("write README")?;
         fs::write(
             repo.join("docker-compose.yml"),
             r#"services:
@@ -180,21 +186,21 @@ impl Project {
       - "127.0.0.1:${POSTGRES_PORT}:5432"
 "#,
         )
-        .expect("write Compose fixture");
-        git(&repo, &["add", "."]);
-        git(&repo, &["commit", "-m", "initial fixture"]);
-        Self { _temp: temp, repo }
+        .test_context("write Compose fixture")?;
+        git(&repo, &["add", "."])?;
+        git(&repo, &["commit", "-m", "initial fixture"])?;
+        Ok(Self { _temp: temp, repo })
     }
 
-    fn initialized() -> Self {
-        let project = Self::git_repo();
+    fn initialized() -> anyhow::Result<Self> {
+        let project = Self::git_repo()?;
         stackstead(&project.repo).arg("init").assert().success();
-        git(&project.repo, &["add", "stackstead.yaml"]);
-        git(&project.repo, &["commit", "-m", "configure stackstead"]);
-        project
+        git(&project.repo, &["add", "stackstead.yaml"])?;
+        git(&project.repo, &["commit", "-m", "configure stackstead"])?;
+        Ok(project)
     }
 
-    fn create(&self, name: &str) -> StacksteadManifest {
+    fn create(&self, name: &str) -> anyhow::Result<StacksteadManifest> {
         let assert = stackstead(&self.repo)
             .args(["--json", "create", name])
             .assert()
@@ -202,33 +208,36 @@ impl Project {
         changed_manifest(&assert.get_output().stdout, "created")
     }
 
-    fn replace_config(&self, from: &str, to: &str) {
+    fn replace_config(&self, from: &str, to: &str) -> anyhow::Result<()> {
         let path = self.repo.join("stackstead.yaml");
-        let original = fs::read_to_string(&path).expect("read fixture config");
+        let original = fs::read_to_string(&path).test_context("read fixture config")?;
         assert!(
             original.contains(from),
             "fixture config does not contain {from:?}"
         );
-        fs::write(path, original.replacen(from, to, 1)).expect("update fixture config");
-        git(&self.repo, &["add", "stackstead.yaml"]);
-        git(&self.repo, &["commit", "-m", "adjust stackstead fixture"]);
+        fs::write(path, original.replacen(from, to, 1)).test_context("update fixture config")?;
+        git(&self.repo, &["add", "stackstead.yaml"])?;
+        git(&self.repo, &["commit", "-m", "adjust stackstead fixture"])?;
+        Ok(())
     }
 
-    fn write_config(&self, config: &StacksteadConfig, message: &str) {
+    fn write_config(&self, config: &StacksteadConfig, message: &str) -> anyhow::Result<()> {
         fs::write(
             self.repo.join("stackstead.yaml"),
-            serde_yaml::to_string(config).expect("serialize fixture config"),
+            serde_yaml::to_string(config).test_context("serialize fixture config")?,
         )
-        .expect("write fixture config");
-        git(&self.repo, &["add", "stackstead.yaml"]);
-        git(&self.repo, &["commit", "-m", message]);
+        .test_context("write fixture config")?;
+        git(&self.repo, &["add", "stackstead.yaml"])?;
+        git(&self.repo, &["commit", "-m", message])?;
+        Ok(())
     }
 
-    fn project_state_dir(&self) -> PathBuf {
-        self.repo
+    fn project_state_dir(&self) -> anyhow::Result<PathBuf> {
+        Ok(self
+            .repo
             .parent()
-            .expect("repository has a parent")
-            .join(".stacksteads/demo-project")
+            .test_context("repository has a parent")?
+            .join(".stacksteads/demo-project"))
     }
 }
 
@@ -255,67 +264,69 @@ fn stackstead(cwd: &Path) -> Command {
     command
 }
 
-fn git(cwd: &Path, args: &[&str]) -> String {
+fn git(cwd: &Path, args: &[&str]) -> anyhow::Result<String> {
     let output = ProcessCommand::new("git")
         .args(args)
         .current_dir(cwd)
         .output()
-        .expect("run Git fixture command");
+        .test_context("run Git fixture command")?;
     assert!(
         output.status.success(),
         "git {args:?} failed:\nstdout: {}\nstderr: {}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-    String::from_utf8(output.stdout).expect("Git output is UTF-8")
+    String::from_utf8(output.stdout).test_context("Git output is UTF-8")
 }
 
-fn event_types(path: &Path) -> Vec<String> {
+fn event_types(path: &Path) -> anyhow::Result<Vec<String>> {
     fs::read_to_string(path)
-        .expect("read event log")
+        .test_context("read event log")?
         .lines()
         .map(|line| {
-            serde_json::from_str::<Value>(line)
-                .expect("parse event line")
+            Ok(serde_json::from_str::<Value>(line)
+                .test_context("parse event line")?
                 .get("type")
                 .and_then(Value::as_str)
-                .expect("event type")
-                .to_owned()
+                .test_context("event type")?
+                .to_owned())
         })
         .collect()
 }
 
-fn state_stackstead_directories(project: &Project) -> Vec<PathBuf> {
-    let state = project.project_state_dir();
+fn state_stackstead_directories(project: &Project) -> anyhow::Result<Vec<PathBuf>> {
+    let state = project.project_state_dir()?;
     if !state.is_dir() {
-        return vec![];
+        return Ok(vec![]);
     }
-    fs::read_dir(state)
-        .expect("read project state")
-        .map(|entry| entry.expect("read project state entry"))
-        .filter(|entry| entry.file_type().expect("read entry type").is_dir())
-        .map(|entry| entry.path())
-        .collect()
+    let mut directories = Vec::new();
+    for entry in fs::read_dir(state).test_context("read project state")? {
+        let entry = entry.test_context("read project state entry")?;
+        if entry.file_type().test_context("read entry type")?.is_dir() {
+            directories.push(entry.path());
+        }
+    }
+    Ok(directories)
 }
 
-fn output_text(output: &[u8]) -> &str {
-    std::str::from_utf8(output).expect("command output is UTF-8")
+fn output_text(output: &[u8]) -> anyhow::Result<&str> {
+    std::str::from_utf8(output).test_context("command output is UTF-8")
 }
 
 #[cfg(unix)]
-fn fake_docker_path(parent: &Path, directory: &str, script: &str) -> OsString {
+fn fake_docker_path(parent: &Path, directory: &str, script: &str) -> anyhow::Result<OsString> {
     use std::os::unix::fs::PermissionsExt;
 
     let fake_bin = parent.join(directory);
-    fs::create_dir(&fake_bin).expect("create fake Docker directory");
+    fs::create_dir(&fake_bin).test_context("create fake Docker directory")?;
     let docker = fake_bin.join("docker");
-    fs::write(&docker, script).expect("write fake Docker");
+    fs::write(&docker, script).test_context("write fake Docker")?;
     fs::set_permissions(&docker, fs::Permissions::from_mode(0o755))
-        .expect("make fake Docker executable");
+        .test_context("make fake Docker executable")?;
     std::env::join_paths(std::iter::once(fake_bin).chain(std::env::split_paths(
         &std::env::var_os("PATH").unwrap_or_default(),
     )))
-    .expect("construct command-local PATH")
+    .test_context("construct command-local PATH")
 }
 
 #[cfg(unix)]

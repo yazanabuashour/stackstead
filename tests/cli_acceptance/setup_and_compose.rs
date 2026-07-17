@@ -1,8 +1,8 @@
 use super::*;
 
 #[test]
-fn help_exposes_the_complete_command_surface() {
-    let directory = tempfile::tempdir().expect("create command directory");
+fn help_exposes_the_complete_command_surface() -> anyhow::Result<()> {
+    let directory = tempfile::tempdir().test_context("create command directory")?;
     let assert = stackstead(directory.path())
         .arg("--help")
         .assert()
@@ -43,23 +43,24 @@ fn help_exposes_the_complete_command_surface() {
         .args(["env", "demo", "--show-secrets"])
         .assert()
         .failure();
+    Ok(())
 }
 
 #[test]
-fn init_writes_a_valid_config_and_refuses_to_overwrite_it() {
-    let project = Project::git_repo();
+fn init_writes_a_valid_config_and_refuses_to_overwrite_it() -> anyhow::Result<()> {
+    let project = Project::git_repo()?;
     let config_path = project.repo.join("stackstead.yaml");
     let assert = stackstead(&project.repo)
         .args(["init", "--json"])
         .assert()
         .success();
-    let initialized: Value = serde_json::from_slice(&assert.get_output().stdout).unwrap();
+    let initialized: Value = serde_json::from_slice(&assert.get_output().stdout).test()?;
     assert_eq!(initialized["kind"], "StacksteadInit");
     assert_eq!(initialized["version"], "1");
     assert_eq!(initialized["path"], config_path.to_string_lossy().as_ref());
 
-    let original = fs::read(&config_path).expect("read initialized config");
-    let config = load_config(&config_path);
+    let original = fs::read(&config_path).test_context("read initialized config")?;
+    let config = load_config(&config_path)?;
     assert_eq!(config["version"], "1");
     assert_eq!(config["kind"], "StacksteadProject");
     assert_eq!(config["project"]["name"], "demo-project");
@@ -68,31 +69,33 @@ fn init_writes_a_valid_config_and_refuses_to_overwrite_it() {
     let assert = stackstead(&project.repo).arg("init").assert().failure();
     assert!(String::from_utf8_lossy(&assert.get_output().stderr).contains("refusing to overwrite"));
     assert_eq!(
-        fs::read(&config_path).expect("reread initialized config"),
+        fs::read(&config_path).test_context("reread initialized config")?,
         original
     );
+    Ok(())
 }
 
 #[test]
-fn init_records_the_exact_commit_for_a_detached_head() {
-    let project = Project::git_repo();
-    let head = git(&project.repo, &["rev-parse", "HEAD"]);
-    git(&project.repo, &["checkout", "--detach"]);
+fn init_records_the_exact_commit_for_a_detached_head() -> anyhow::Result<()> {
+    let project = Project::git_repo()?;
+    let head = git(&project.repo, &["rev-parse", "HEAD"])?;
+    git(&project.repo, &["checkout", "--detach"])?;
 
     stackstead(&project.repo).arg("init").assert().success();
 
-    let config = load_config(&project.repo.join("stackstead.yaml"));
+    let config = load_config(&project.repo.join("stackstead.yaml"))?;
     assert_eq!(config["source"]["base"], head.trim());
+    Ok(())
 }
 
 #[test]
-fn human_init_recommends_but_does_not_edit_repository_instructions() {
-    let project = Project::git_repo();
+fn human_init_recommends_but_does_not_edit_repository_instructions() -> anyhow::Result<()> {
+    let project = Project::git_repo()?;
     let instructions = project.repo.join("AGENTS.md");
-    fs::write(&instructions, "# Human-owned policy\n").unwrap();
+    fs::write(&instructions, "# Human-owned policy\n").test()?;
 
     let assert = stackstead(&project.repo).arg("init").assert().success();
-    let stdout = output_text(&assert.get_output().stdout);
+    let stdout = output_text(&assert.get_output().stdout)?;
     for expected in [
         "review, add, and commit this policy",
         "commands instead of bare Docker Compose",
@@ -113,75 +116,78 @@ fn human_init_recommends_but_does_not_edit_repository_instructions() {
     }
     assert!(!stdout.contains("stackstead --json ps"));
     assert_eq!(
-        fs::read_to_string(&instructions).unwrap(),
+        fs::read_to_string(&instructions).test()?,
         "# Human-owned policy\n"
     );
 
     assert!(!project.repo.join("CLAUDE.md").exists());
+    Ok(())
 }
 
 #[test]
-fn create_refuses_a_runtime_contract_missing_from_the_configured_base() {
-    let project = Project::git_repo();
+fn create_refuses_a_runtime_contract_missing_from_the_configured_base() -> anyhow::Result<()> {
+    let project = Project::git_repo()?;
     stackstead(&project.repo).arg("init").assert().success();
 
     let assert = stackstead(&project.repo)
         .args(["create", "feature-a"])
         .assert()
         .failure();
-    let stderr = output_text(&assert.get_output().stderr);
+    let stderr = output_text(&assert.get_output().stderr)?;
     assert!(
         stderr.contains("not present on source.base commit")
             && stderr.contains("commit or merge stackstead.yaml"),
         "unexpected error: {stderr}"
     );
-    assert!(state_stackstead_directories(&project).is_empty());
+    assert!(state_stackstead_directories(&project)?.is_empty());
     assert!(
-        git(&project.repo, &["branch", "--list", "feature-a"])
+        git(&project.repo, &["branch", "--list", "feature-a"])?
             .trim()
             .is_empty()
     );
+    Ok(())
 }
 
 #[test]
-fn create_refuses_locally_modified_contract_files_without_allocating_state() {
-    let project = Project::initialized();
+fn create_refuses_locally_modified_contract_files_without_allocating_state() -> anyhow::Result<()> {
+    let project = Project::initialized()?;
     let compose = project.repo.join("docker-compose.yml");
-    let mut contents = fs::read_to_string(&compose).expect("read Compose fixture");
+    let mut contents = fs::read_to_string(&compose).test_context("read Compose fixture")?;
     contents.push_str("# uncommitted runtime change\n");
-    fs::write(&compose, contents).expect("modify Compose fixture");
+    fs::write(&compose, contents).test_context("modify Compose fixture")?;
 
     let assert = stackstead(&project.repo)
         .args(["create", "feature-a"])
         .assert()
         .failure();
-    assert!(output_text(&assert.get_output().stderr).contains("differs from source.base commit"));
-    assert!(state_stackstead_directories(&project).is_empty());
+    assert!(output_text(&assert.get_output().stderr)?.contains("differs from source.base commit"));
+    assert!(state_stackstead_directories(&project)?.is_empty());
     assert!(
-        git(&project.repo, &["branch", "--list", "feature-a"])
+        git(&project.repo, &["branch", "--list", "feature-a"])?
             .trim()
             .is_empty()
     );
+    Ok(())
 }
 
 #[test]
-fn create_compares_clean_contract_files_through_git_filters() {
-    let project = Project::initialized();
+fn create_compares_clean_contract_files_through_git_filters() -> anyhow::Result<()> {
+    let project = Project::initialized()?;
     fs::write(
         project.repo.join(".gitattributes"),
         "stackstead.yaml text eol=crlf\ndocker-compose.yml text eol=crlf\n",
     )
-    .expect("write CRLF attributes");
-    git(&project.repo, &["add", ".gitattributes"]);
-    git(&project.repo, &["add", "--renormalize", "."]);
-    git(&project.repo, &["commit", "-m", "configure CRLF contracts"]);
+    .test_context("write CRLF attributes")?;
+    git(&project.repo, &["add", ".gitattributes"])?;
+    git(&project.repo, &["add", "--renormalize", "."])?;
+    git(&project.repo, &["commit", "-m", "configure CRLF contracts"])?;
     for file in ["stackstead.yaml", "docker-compose.yml"] {
         let path = project.repo.join(file);
-        fs::remove_file(&path).expect("remove LF contract fixture");
-        git(&project.repo, &["checkout", "--", file]);
+        fs::remove_file(&path).test_context("remove LF contract fixture")?;
+        git(&project.repo, &["checkout", "--", file])?;
         assert!(
             fs::read(&path)
-                .expect("read filtered contract")
+                .test_context("read filtered contract")?
                 .windows(2)
                 .any(|bytes| bytes == b"\r\n"),
             "Git did not apply the CRLF checkout filter to {file}"
@@ -196,72 +202,77 @@ fn create_compares_clean_contract_files_through_git_filters() {
             "stackstead.yaml",
             "docker-compose.yml",
         ],
-    );
+    )?;
     assert!(
         status.trim().is_empty(),
         "Git did not consider the filtered contract clean: {status:?}"
     );
-    let manifest = project.create("feature-a");
+    let manifest = project.create("feature-a")?;
     assert!(manifest.worktree.is_dir());
+    Ok(())
 }
 
 #[test]
-fn create_pins_the_configured_base_when_called_from_another_branch() {
-    let project = Project::initialized();
-    git(&project.repo, &["switch", "-c", "caller-branch"]);
+fn create_pins_the_configured_base_when_called_from_another_branch() -> anyhow::Result<()> {
+    let project = Project::initialized()?;
+    git(&project.repo, &["switch", "-c", "caller-branch"])?;
     fs::write(project.repo.join("README.md"), "caller-only change\n")
-        .expect("write caller branch change");
-    git(&project.repo, &["add", "README.md"]);
-    git(&project.repo, &["commit", "-m", "caller-only change"]);
-    let main = git(&project.repo, &["rev-parse", "main"]);
-    let caller = git(&project.repo, &["rev-parse", "caller-branch"]);
+        .test_context("write caller branch change")?;
+    git(&project.repo, &["add", "README.md"])?;
+    git(&project.repo, &["commit", "-m", "caller-only change"])?;
+    let main = git(&project.repo, &["rev-parse", "main"])?;
+    let caller = git(&project.repo, &["rev-parse", "caller-branch"])?;
 
-    let manifest = project.create("feature-a");
+    let manifest = project.create("feature-a")?;
     assert_eq!(manifest.base, main.trim());
     assert_ne!(manifest.base, caller.trim());
     assert_eq!(
-        fs::read_to_string(manifest.worktree.join("README.md")).expect("read created README"),
+        fs::read_to_string(manifest.worktree.join("README.md"))
+            .test_context("read created README")?,
         "# Demo project\n"
     );
+    Ok(())
 }
 
 #[cfg(unix)]
 #[test]
-fn recreating_an_existing_branch_rejects_a_base_it_does_not_contain() {
-    let project = Project::initialized();
-    let first = project.create("feature-a");
+fn recreating_an_existing_branch_rejects_a_base_it_does_not_contain() -> anyhow::Result<()> {
+    let project = Project::initialized()?;
+    let first = project.create("feature-a")?;
     let path = fake_docker_path(
-        project.repo.parent().unwrap(),
+        project.repo.parent().test()?,
         "base-fake-docker-bin",
         "#!/bin/sh\nexit 0\n",
-    );
+    )?;
     stackstead(&project.repo)
         .env("PATH", path)
         .args(["destroy", &first.stackstead_id, "--yes"])
         .assert()
         .success();
 
-    fs::write(project.repo.join("README.md"), "# Advanced base\n").expect("advance base file");
-    git(&project.repo, &["add", "README.md"]);
-    git(&project.repo, &["commit", "-m", "advance configured base"]);
+    fs::write(project.repo.join("README.md"), "# Advanced base\n")
+        .test_context("advance base file")?;
+    git(&project.repo, &["add", "README.md"])?;
+    git(&project.repo, &["commit", "-m", "advance configured base"])?;
     let assert = stackstead(&project.repo)
         .args(["create", "feature-a"])
         .assert()
         .failure();
     assert!(
-        output_text(&assert.get_output().stderr).contains("does not contain pinned source.base")
+        output_text(&assert.get_output().stderr)?.contains("does not contain pinned source.base")
     );
-    assert!(state_stackstead_directories(&project).is_empty());
+    assert!(state_stackstead_directories(&project)?.is_empty());
+    Ok(())
 }
 
 #[test]
-fn normalized_compose_paths_survive_create_and_resolution() {
-    let project = Project::initialized();
-    let mut config = load_config(&project.repo.join("stackstead.yaml"));
+fn normalized_compose_paths_survive_create_and_resolution() -> anyhow::Result<()> {
+    let project = Project::initialized()?;
+    let mut config = load_config(&project.repo.join("stackstead.yaml"))?;
     config["runtime"]["files"] = serde_yaml::Value::Sequence(vec!["./docker-compose.yml".into()]);
-    project.write_config(&config, "use an explicitly relative Compose path");
+    project.write_config(&config, "use an explicitly relative Compose path")?;
 
-    let manifest = project.create("feature-a");
+    let manifest = project.create("feature-a")?;
     assert_eq!(
         manifest.compose_files,
         [manifest.worktree.join("docker-compose.yml")]
@@ -270,16 +281,17 @@ fn normalized_compose_paths_survive_create_and_resolution() {
         .args(["context", "feature-a", "--json"])
         .assert()
         .success();
+    Ok(())
 }
 
 #[test]
-fn host_wide_port_leases_keep_stopped_projects_on_disjoint_ports() {
-    let registry = tempfile::tempdir().unwrap();
-    let first_project = Project::initialized();
-    let second_project = Project::initialized();
-    let mut second_config = load_config(&second_project.repo.join("stackstead.yaml"));
+fn host_wide_port_leases_keep_stopped_projects_on_disjoint_ports() -> anyhow::Result<()> {
+    let registry = tempfile::tempdir().test()?;
+    let first_project = Project::initialized()?;
+    let second_project = Project::initialized()?;
+    let mut second_config = load_config(&second_project.repo.join("stackstead.yaml"))?;
     second_config["project"]["name"] = "second-project".into();
-    second_project.write_config(&second_config, "use a distinct project identity");
+    second_project.write_config(&second_config, "use a distinct project identity")?;
     let create = |project: &Project, name: &str| {
         let created = stackstead(&project.repo)
             .env("XDG_STATE_HOME", registry.path())
@@ -289,29 +301,29 @@ fn host_wide_port_leases_keep_stopped_projects_on_disjoint_ports() {
         changed_manifest(&created.get_output().stdout, "created")
     };
 
-    let first = create(&first_project, "first");
-    let second = create(&second_project, "second");
+    let first = create(&first_project, "first")?;
+    let second = create(&second_project, "second")?;
     let first_ports = first.ports.values().copied().collect::<BTreeSet<_>>();
     let second_ports = second.ports.values().copied().collect::<BTreeSet<_>>();
     assert!(first_ports.is_disjoint(&second_ports));
     assert_eq!(first_ports.len(), 2);
     assert_eq!(second_ports.len(), 2);
     assert_eq!(
-        first_ports.iter().next_back().unwrap() - first_ports.iter().next().unwrap(),
+        first_ports.iter().next_back().test()? - first_ports.iter().next().test()?,
         1
     );
     assert_eq!(
-        second_ports.iter().next_back().unwrap() - second_ports.iter().next().unwrap(),
+        second_ports.iter().next_back().test()? - second_ports.iter().next().test()?,
         1
     );
 
     #[cfg(unix)]
     {
         let path = fake_docker_path(
-            first_project.repo.parent().unwrap(),
+            first_project.repo.parent().test()?,
             "lease-release-fake-bin",
             "#!/bin/sh\ncase \"$1 $2\" in 'container ls'|'network ls'|'volume ls') exit 0;; esac\nexit 97\n",
-        );
+        )?;
         stackstead(&first_project.repo)
             .env("XDG_STATE_HOME", registry.path())
             .env("PATH", path)
@@ -319,52 +331,51 @@ fn host_wide_port_leases_keep_stopped_projects_on_disjoint_ports() {
             .assert()
             .success();
         let registry: Value = serde_json::from_slice(
-            &fs::read(registry.path().join("stackstead/port-leases.json")).unwrap(),
+            &fs::read(registry.path().join("stackstead/port-leases.json")).test()?,
         )
-        .unwrap();
+        .test()?;
         assert_eq!(
             registry["leases"]
                 .as_array()
-                .unwrap()
+                .test()?
                 .iter()
-                .map(|lease| lease["port"].as_u64().unwrap() as u16)
-                .collect::<BTreeSet<_>>(),
+                .map(|lease| lease["port"].as_u64().test().map(|port| port as u16))
+                .collect::<anyhow::Result<BTreeSet<_>>>()?,
             second_ports
         );
     }
+    Ok(())
 }
 
 #[cfg(unix)]
 #[test]
-fn lifecycle_commands_reject_a_port_lease_that_no_longer_belongs_to_the_manifest() {
-    let project = Project::initialized();
-    let manifest = project.create("feature-a");
+fn lifecycle_commands_reject_a_port_lease_that_no_longer_belongs_to_the_manifest()
+-> anyhow::Result<()> {
+    let project = Project::initialized()?;
+    let manifest = project.create("feature-a")?;
     let git_common_dir = PathBuf::from(
         git(
             &project.repo,
             &["rev-parse", "--path-format=absolute", "--git-common-dir"],
-        )
+        )?
         .trim(),
     );
     let registry_path = git_common_dir.join("stackstead-test-state/stackstead/port-leases.json");
     let mut registry: Value =
-        serde_json::from_slice(&fs::read(&registry_path).expect("read port lease registry"))
-            .expect("parse port lease registry");
-    for lease in registry["leases"].as_array_mut().unwrap() {
+        serde_json::from_slice(&fs::read(&registry_path).test_context("read port lease registry")?)
+            .test_context("parse port lease registry")?;
+    for lease in registry["leases"].as_array_mut().test()? {
         lease["owner"] = "ffffffffffffffffffffffffffffffff".into();
     }
-    fs::write(
-        &registry_path,
-        serde_json::to_vec_pretty(&registry).unwrap(),
-    )
-    .expect("replace port lease owner");
+    fs::write(&registry_path, serde_json::to_vec_pretty(&registry).test()?)
+        .test_context("replace port lease owner")?;
 
-    let marker = project.repo.parent().unwrap().join("lease-docker-ran");
+    let marker = project.repo.parent().test()?.join("lease-docker-ran");
     let path = fake_docker_path(
-        project.repo.parent().unwrap(),
+        project.repo.parent().test()?,
         "lease-mismatch-fake-bin",
         &format!("#!/bin/sh\ntouch '{}'\nexit 0\n", marker.display()),
-    );
+    )?;
     for args in [
         vec!["up", &manifest.stackstead_id],
         vec!["stop", &manifest.stackstead_id],
@@ -379,9 +390,9 @@ fn lifecycle_commands_reject_a_port_lease_that_no_longer_belongs_to_the_manifest
             .assert()
             .failure();
         assert!(
-            output_text(&rejected.get_output().stderr).contains("port leases for owner"),
+            output_text(&rejected.get_output().stderr)?.contains("port leases for owner"),
             "unexpected error: {}",
-            output_text(&rejected.get_output().stderr)
+            output_text(&rejected.get_output().stderr)?
         );
     }
     assert!(
@@ -390,29 +401,30 @@ fn lifecycle_commands_reject_a_port_lease_that_no_longer_belongs_to_the_manifest
     );
     assert!(manifest.manifest_path().is_file());
     assert!(manifest.worktree.is_dir());
+    Ok(())
 }
 
 #[cfg(target_os = "linux")]
 #[test]
-fn open_refuses_a_stopped_runtime_before_invoking_the_browser() {
+fn open_refuses_a_stopped_runtime_before_invoking_the_browser() -> anyhow::Result<()> {
     use std::os::unix::fs::PermissionsExt;
 
-    let project = Project::initialized();
-    let manifest = project.create("feature-a");
-    let marker = project.repo.parent().unwrap().join("browser-opened");
+    let project = Project::initialized()?;
+    let manifest = project.create("feature-a")?;
+    let marker = project.repo.parent().test()?.join("browser-opened");
     let path = fake_docker_path(
-        project.repo.parent().unwrap(),
+        project.repo.parent().test()?,
         "stale-open-fake-bin",
         "#!/bin/sh\ncase \"$1 $2\" in 'container ls'|'network ls'|'volume ls') exit 0;; esac\nexit 97\n",
-    );
-    let fake_bin = std::env::split_paths(&path).next().unwrap();
+    )?;
+    let fake_bin = std::env::split_paths(&path).next().test()?;
     let opener = fake_bin.join("xdg-open");
     fs::write(
         &opener,
         format!("#!/bin/sh\ntouch '{}'\n", marker.display()),
     )
-    .unwrap();
-    fs::set_permissions(&opener, fs::Permissions::from_mode(0o755)).unwrap();
+    .test()?;
+    fs::set_permissions(&opener, fs::Permissions::from_mode(0o755)).test()?;
 
     let rejected = stackstead(&project.repo)
         .env("PATH", path)
@@ -420,24 +432,25 @@ fn open_refuses_a_stopped_runtime_before_invoking_the_browser() {
         .assert()
         .failure();
     assert!(
-        output_text(&rejected.get_output().stderr).contains("has no Stackstead ownership claim")
+        output_text(&rejected.get_output().stderr)?.contains("has no Stackstead ownership claim")
     );
     assert!(
         !marker.exists(),
         "browser launched for an unrelated listener"
     );
+    Ok(())
 }
 
 #[cfg(target_os = "linux")]
 #[test]
-fn open_launches_only_after_owned_service_publication_is_proven() {
+fn open_launches_only_after_owned_service_publication_is_proven() -> anyhow::Result<()> {
     use std::os::unix::fs::PermissionsExt;
 
-    let project = Project::initialized();
-    let manifest = project.create("feature-a");
-    let marker = project.repo.parent().unwrap().join("owned-browser-url");
+    let project = Project::initialized()?;
+    let manifest = project.create("feature-a")?;
+    let marker = project.repo.parent().test()?.join("owned-browser-url");
     let path = fake_docker_path(
-        project.repo.parent().unwrap(),
+        project.repo.parent().test()?,
         "owned-open-fake-bin",
         r#"#!/bin/sh
 case "$1 $2" in
@@ -453,8 +466,8 @@ for argument in "$@"; do
 done
 exit 97
 "#,
-    );
-    let fake_bin = std::env::split_paths(&path).next().unwrap();
+    )?;
+    let fake_bin = std::env::split_paths(&path).next().test()?;
     let opener = fake_bin.join("xdg-open");
     fs::write(
         &opener,
@@ -464,8 +477,8 @@ exit 97
             marker.display()
         ),
     )
-    .unwrap();
-    fs::set_permissions(&opener, fs::Permissions::from_mode(0o755)).unwrap();
+    .test()?;
+    fs::set_permissions(&opener, fs::Permissions::from_mode(0o755)).test()?;
 
     stackstead(&project.repo)
         .env("PATH", path)
@@ -479,7 +492,7 @@ exit 97
         match fs::read_to_string(&marker) {
             Ok(url) => opened_url = url,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => panic!("failed to read browser URL marker: {error}"),
+            Err(error) => return Err(error.into()),
         }
         if opened_url == manifest.urls["web"] {
             break;
@@ -487,11 +500,12 @@ exit 97
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
     assert_eq!(opened_url, manifest.urls["web"]);
+    Ok(())
 }
 
 #[test]
-fn compose_discovery_generates_config_and_rewrites_only_after_confirmation() {
-    let project = Project::git_repo();
+fn compose_discovery_generates_config_and_rewrites_only_after_confirmation() -> anyhow::Result<()> {
+    let project = Project::git_repo()?;
     let compose = project.repo.join("docker-compose.yml");
     fs::write(
         &compose,
@@ -506,12 +520,12 @@ fn compose_discovery_generates_config_and_rewrites_only_after_confirmation() {
       - "5432:5432"
 "#,
     )
-    .expect("write fixed-port Compose fixture");
-    git(&project.repo, &["add", "docker-compose.yml"]);
-    git(&project.repo, &["commit", "-m", "use fixed fixture ports"]);
+    .test_context("write fixed-port Compose fixture")?;
+    git(&project.repo, &["add", "docker-compose.yml"])?;
+    git(&project.repo, &["commit", "-m", "use fixed fixture ports"])?;
 
     stackstead(&project.repo).arg("init").assert().success();
-    let config = load_config(&project.repo.join("stackstead.yaml"));
+    let config = load_config(&project.repo.join("stackstead.yaml"))?;
     assert_eq!(
         config["resources"]["ports"]["expose"]["web"]["container"],
         80
@@ -520,7 +534,7 @@ fn compose_discovery_generates_config_and_rewrites_only_after_confirmation() {
         config["resources"]["ports"]["expose"]["postgres"]["container"],
         5432
     );
-    assert_eq!(config["health"]["checks"].as_sequence().unwrap().len(), 1);
+    assert_eq!(config["health"]["checks"].as_sequence().test()?.len(), 1);
     assert_eq!(config["health"]["checks"][0]["name"], "web");
 
     let plan = stackstead(&project.repo)
@@ -528,33 +542,35 @@ fn compose_discovery_generates_config_and_rewrites_only_after_confirmation() {
         .assert()
         .success();
     let plan: Value =
-        serde_json::from_slice(&plan.get_output().stdout).expect("parse Compose plan");
+        serde_json::from_slice(&plan.get_output().stdout).test_context("parse Compose plan")?;
     assert_eq!(plan["kind"], "ComposePlan");
     assert_eq!(plan["version"], "1");
     assert_eq!(plan["file"], "docker-compose.yml");
-    let ports = plan["ports"].as_array().expect("Compose plan ports");
+    let ports = plan["ports"]
+        .as_array()
+        .test_context("Compose plan ports")?;
     assert_eq!(
         ports
             .iter()
             .find(|port| port["name"] == "web")
-            .expect("web plan")["current_host_port"],
+            .test_context("web plan")?["current_host_port"],
         3000
     );
     assert_eq!(
         ports
             .iter()
             .find(|port| port["name"] == "postgres")
-            .expect("Postgres plan")["current_host_port"],
+            .test_context("Postgres plan")?["current_host_port"],
         5432
     );
 
-    let original = fs::read(&compose).expect("read original Compose fixture");
+    let original = fs::read(&compose).test_context("read original Compose fixture")?;
     stackstead(&project.repo)
         .args(["compose", "apply"])
         .assert()
         .failure();
     assert_eq!(
-        fs::read(&compose).expect("reread Compose fixture"),
+        fs::read(&compose).test_context("reread Compose fixture")?,
         original
     );
 
@@ -562,27 +578,28 @@ fn compose_discovery_generates_config_and_rewrites_only_after_confirmation() {
         .args(["compose", "apply", "--yes"])
         .assert()
         .success();
-    let rewritten = fs::read_to_string(&compose).expect("read rewritten Compose fixture");
+    let rewritten = fs::read_to_string(&compose).test_context("read rewritten Compose fixture")?;
     assert!(rewritten.contains("127.0.0.1:${WEB_PORT}:80"));
     assert!(rewritten.contains("127.0.0.1:${POSTGRES_PORT}:5432"));
+    Ok(())
 }
 
 #[test]
-fn explicit_nested_compose_file_drives_init_plan_and_apply() {
-    let project = Project::git_repo();
-    git(&project.repo, &["rm", "docker-compose.yml"]);
+fn explicit_nested_compose_file_drives_init_plan_and_apply() -> anyhow::Result<()> {
+    let project = Project::git_repo()?;
+    git(&project.repo, &["rm", "docker-compose.yml"])?;
     let nested = project.repo.join("infra/docker/compose.yml");
-    fs::create_dir_all(nested.parent().unwrap()).expect("create nested Compose directory");
+    fs::create_dir_all(nested.parent().test()?).test_context("create nested Compose directory")?;
     fs::write(
         &nested,
         "services:\n  web:\n    image: nginx:alpine\n    ports:\n      - \"3000:80\"\n",
     )
-    .expect("write nested Compose file");
-    git(&project.repo, &["add", "infra/docker/compose.yml"]);
-    git(&project.repo, &["commit", "-m", "add nested Compose file"]);
+    .test_context("write nested Compose file")?;
+    git(&project.repo, &["add", "infra/docker/compose.yml"])?;
+    git(&project.repo, &["commit", "-m", "add nested Compose file"])?;
 
     let missing = stackstead(&project.repo).arg("init").assert().failure();
-    let error = output_text(&missing.get_output().stderr);
+    let error = output_text(&missing.get_output().stderr)?;
     assert!(error.contains("--compose-file"));
     assert!(error.contains("infra/docker/compose.yml"));
 
@@ -590,7 +607,7 @@ fn explicit_nested_compose_file_drives_init_plan_and_apply() {
         .args(["init", "--compose-file", "infra/docker/compose.yml"])
         .assert()
         .success();
-    let config = load_config(&project.repo.join("stackstead.yaml"));
+    let config = load_config(&project.repo.join("stackstead.yaml"))?;
     assert_eq!(
         config["runtime"]["files"],
         serde_yaml::Value::Sequence(vec!["infra/docker/compose.yml".into()])
@@ -600,7 +617,8 @@ fn explicit_nested_compose_file_drives_init_plan_and_apply() {
         .args(["compose", "plan", "--json"])
         .assert()
         .success();
-    let plan: Value = serde_json::from_slice(&plan.get_output().stdout).expect("parse plan");
+    let plan: Value =
+        serde_json::from_slice(&plan.get_output().stdout).test_context("parse plan")?;
     assert_eq!(plan["file"], "infra/docker/compose.yml");
 
     let second = project.repo.join("infra/docker/admin-compose.yml");
@@ -608,18 +626,18 @@ fn explicit_nested_compose_file_drives_init_plan_and_apply() {
         &second,
         "services:\n  admin:\n    image: nginx:alpine\n    ports:\n      - \"4000:81\"\n",
     )
-    .expect("write second Compose file");
-    let second_before = fs::read(&second).unwrap();
+    .test_context("write second Compose file")?;
+    let second_before = fs::read(&second).test()?;
     let mut config = config;
     config["runtime"]["files"]
         .as_sequence_mut()
-        .unwrap()
+        .test()?
         .push("infra/docker/admin-compose.yml".into());
     fs::write(
         project.repo.join("stackstead.yaml"),
-        serde_yaml::to_string(&config).unwrap(),
+        serde_yaml::to_string(&config).test()?,
     )
-    .unwrap();
+    .test()?;
 
     stackstead(&project.repo)
         .args(["compose", "plan"])
@@ -635,7 +653,7 @@ fn explicit_nested_compose_file_drives_init_plan_and_apply() {
         ])
         .assert()
         .success();
-    let explicit: Value = serde_json::from_slice(&explicit.get_output().stdout).unwrap();
+    let explicit: Value = serde_json::from_slice(&explicit.get_output().stdout).test()?;
     assert_eq!(explicit["file"], "infra/docker/compose.yml");
 
     stackstead(&project.repo)
@@ -650,49 +668,51 @@ fn explicit_nested_compose_file_drives_init_plan_and_apply() {
         .success();
     assert!(
         fs::read_to_string(&nested)
-            .expect("read rewritten nested Compose file")
+            .test_context("read rewritten nested Compose file")?
             .contains("127.0.0.1:${WEB_PORT}:80")
     );
-    assert_eq!(fs::read(&second).unwrap(), second_before);
+    assert_eq!(fs::read(&second).test()?, second_before);
+    Ok(())
 }
 
 #[test]
-fn multi_file_config_keeps_the_conventional_root_plan_fallback() {
-    let project = Project::initialized();
+fn multi_file_config_keeps_the_conventional_root_plan_fallback() -> anyhow::Result<()> {
+    let project = Project::initialized()?;
     fs::write(
         project.repo.join("compose.override.yml"),
         "services:\n  web:\n    environment:\n      TRIAL: yes\n",
     )
-    .unwrap();
-    let mut config = load_config(&project.repo.join("stackstead.yaml"));
+    .test()?;
+    let mut config = load_config(&project.repo.join("stackstead.yaml"))?;
     config["runtime"]["files"]
         .as_sequence_mut()
-        .unwrap()
+        .test()?
         .push("compose.override.yml".into());
     fs::write(
         project.repo.join("stackstead.yaml"),
-        serde_yaml::to_string(&config).unwrap(),
+        serde_yaml::to_string(&config).test()?,
     )
-    .unwrap();
+    .test()?;
 
     let plan = stackstead(&project.repo)
         .args(["compose", "plan", "--json"])
         .assert()
         .success();
-    let plan: Value = serde_json::from_slice(&plan.get_output().stdout).unwrap();
+    let plan: Value = serde_json::from_slice(&plan.get_output().stdout).test()?;
     assert_eq!(plan["file"], "docker-compose.yml");
+    Ok(())
 }
 
 #[cfg(unix)]
 #[test]
-fn up_rejects_every_structurally_unsafe_or_disconnected_port_contract() {
-    let project = Project::initialized();
-    let manifest = project.create("feature-a");
+fn up_rejects_every_structurally_unsafe_or_disconnected_port_contract() -> anyhow::Result<()> {
+    let project = Project::initialized()?;
+    let manifest = project.create("feature-a")?;
     let path = fake_docker_path(
-        project.repo.parent().unwrap(),
+        project.repo.parent().test()?,
         "port-fake-docker-bin",
         "#!/bin/sh\necho docker-must-not-run >&2\nexit 97\n",
-    );
+    )?;
 
     for (mapping, expected) in [
         ("3000", "unsupported"),
@@ -710,13 +730,13 @@ fn up_rejects_every_structurally_unsafe_or_disconnected_port_contract() {
                 "services:\n  web:\n    image: nginx\n    ports: [{mapping}]\n  postgres:\n    image: postgres:16\n    ports: [\"127.0.0.1:${{POSTGRES_PORT}}:5432\"]\n"
             ),
         )
-        .expect("write unsafe Compose fixture");
+        .test_context("write unsafe Compose fixture")?;
         let assert = stackstead(&project.repo)
             .env("PATH", &path)
             .args(["up", &manifest.stackstead_id])
             .assert()
             .failure();
-        let stderr = output_text(&assert.get_output().stderr);
+        let stderr = output_text(&assert.get_output().stderr)?;
         assert!(
             stderr.contains(expected),
             "unexpected error for {mapping}: {stderr}"
@@ -728,16 +748,17 @@ fn up_rejects_every_structurally_unsafe_or_disconnected_port_contract() {
         &manifest.compose_files[0],
         "services:\n  web:\n    ports: [\"127.0.0.1:${WEB_PORT}:80\"]\n  postgres:\n    ports: [\"127.0.0.1:${POSTGRES_PORT}:5432\"]\n",
     )
-    .unwrap();
+    .test()?;
     project.replace_config(
         "    WEB_PORT: '{{ ports.web }}'\n",
         "    WEB_PORT: '39000'\n",
-    );
+    )?;
     let literal = stackstead(&project.repo)
         .env("PATH", &path)
         .args(["up", &manifest.stackstead_id])
         .assert()
         .failure();
-    assert!(output_text(&literal.get_output().stderr).contains("ports.<name>"));
-    assert!(!output_text(&literal.get_output().stderr).contains("docker-must-not-run"));
+    assert!(output_text(&literal.get_output().stderr)?.contains("ports.<name>"));
+    assert!(!output_text(&literal.get_output().stderr)?.contains("docker-must-not-run"));
+    Ok(())
 }

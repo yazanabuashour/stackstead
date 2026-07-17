@@ -990,6 +990,7 @@ fn diagnose_docker_project(manifest: &StacksteadManifest, diagnostics: &mut Vec<
 
 #[cfg(test)]
 mod tests {
+    use crate::test_support::TestResultExt as _;
     use std::collections::BTreeMap;
     use std::path::PathBuf;
 
@@ -998,14 +999,14 @@ mod tests {
     use super::*;
     use crate::manifest::{ManifestStatus, SourceOwnership};
 
-    fn manifest(id: &str, port: u16) -> StacksteadManifest {
+    fn manifest(id: &str, port: u16) -> anyhow::Result<StacksteadManifest> {
         let root = PathBuf::from(format!("/tmp/state/demo/{id}"));
-        StacksteadManifest {
+        Ok(StacksteadManifest {
             kind: "StacksteadManifest".into(),
             version: crate::manifest::MANIFEST_VERSION.into(),
             stackstead_id: id.into(),
             slug: "feature".into(),
-            short_id: id.rsplit('-').next().unwrap().into(),
+            short_id: id.rsplit('-').next().test()?.into(),
             runtime_token: "0123456789abcdef0123456789abcdef".into(),
             project: "demo".into(),
             branch: "feature".into(),
@@ -1031,17 +1032,18 @@ mod tests {
             database: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
-        }
+        })
     }
 
     #[test]
-    fn diagnostic_severity_displays_stably() {
+    fn diagnostic_severity_displays_stably() -> anyhow::Result<()> {
         assert_eq!(DiagnosticSeverity::Warning.to_string(), "warning");
+        Ok(())
     }
 
     #[test]
-    fn repository_policy_reports_missing_and_current_files() {
-        let directory = tempfile::tempdir().unwrap();
+    fn repository_policy_reports_missing_and_current_files() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir().test()?;
         let mut diagnostics = Vec::new();
         diagnose_repository_policy(directory.path(), &mut diagnostics);
         assert_eq!(diagnostics.len(), 1);
@@ -1056,17 +1058,18 @@ mod tests {
                 repository_policy::TEXT
             ),
         )
-        .unwrap();
-        std::fs::write(directory.path().join("CLAUDE.md"), "# Other policy\n").unwrap();
+        .test()?;
+        std::fs::write(directory.path().join("CLAUDE.md"), "# Other policy\n").test()?;
         diagnostics.clear();
         diagnose_repository_policy(directory.path(), &mut diagnostics);
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(diagnostics[0].code, "repository_policy.current");
         assert_eq!(diagnostics[0].severity, DiagnosticSeverity::Info);
+        Ok(())
     }
 
     #[test]
-    fn repository_policy_reports_older_and_newer_markers() {
+    fn repository_policy_reports_older_and_newer_markers() -> anyhow::Result<()> {
         for (version, code) in [
             (repository_policy::VERSION - 1, "repository_policy.outdated"),
             (
@@ -1074,22 +1077,23 @@ mod tests {
                 "repository_policy.binary_outdated",
             ),
         ] {
-            let directory = tempfile::tempdir().unwrap();
+            let directory = tempfile::tempdir().test()?;
             std::fs::write(
                 directory.path().join("AGENTS.md"),
                 format!("<!-- stackstead-policy: {version} -->\n"),
             )
-            .unwrap();
+            .test()?;
             let mut diagnostics = Vec::new();
             diagnose_repository_policy(directory.path(), &mut diagnostics);
             assert_eq!(diagnostics.len(), 1);
             assert_eq!(diagnostics[0].code, code);
             assert_eq!(diagnostics[0].severity, DiagnosticSeverity::Warning);
         }
+        Ok(())
     }
 
     #[test]
-    fn repository_policy_reports_unversioned_and_invalid_markers() {
+    fn repository_policy_reports_unversioned_and_invalid_markers() -> anyhow::Result<()> {
         for (contents, code) in [
             (
                 "## Stackstead\nRead `$STACKSTEAD_CONTEXT`.\n",
@@ -1100,21 +1104,22 @@ mod tests {
                 "repository_policy.invalid",
             ),
         ] {
-            let directory = tempfile::tempdir().unwrap();
-            std::fs::write(directory.path().join("CLAUDE.md"), contents).unwrap();
+            let directory = tempfile::tempdir().test()?;
+            std::fs::write(directory.path().join("CLAUDE.md"), contents).test()?;
             let mut diagnostics = Vec::new();
             diagnose_repository_policy(directory.path(), &mut diagnostics);
             assert_eq!(diagnostics.len(), 1);
             assert_eq!(diagnostics[0].code, code);
             assert_eq!(diagnostics[0].severity, DiagnosticSeverity::Warning);
         }
+        Ok(())
     }
 
     #[test]
-    fn reports_duplicate_port_allocations() {
+    fn reports_duplicate_port_allocations() -> anyhow::Result<()> {
         let manifests = [
-            manifest("feature-a111", 39000),
-            manifest("feature-b222", 39000),
+            manifest("feature-a111", 39000)?,
+            manifest("feature-b222", 39000)?,
         ];
         let mut diagnostics = Vec::new();
         diagnose_duplicate_ports(&manifests, &mut diagnostics);
@@ -1122,11 +1127,12 @@ mod tests {
         assert_eq!(diagnostics[0].code, "ports.duplicate_allocation");
         assert!(diagnostics[0].message.contains("feature-a111:web"));
         assert!(diagnostics[0].message.contains("feature-b222:web"));
+        Ok(())
     }
 
     #[test]
-    fn project_doctor_finds_fixed_ports_without_requiring_docker() {
-        let directory = tempfile::tempdir().unwrap();
+    fn project_doctor_finds_fixed_ports_without_requiring_docker() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir().test()?;
         std::fs::write(
             directory.path().join("stackstead.yaml"),
             r#"
@@ -1137,14 +1143,14 @@ state: { root: ../state }
 runtime: { files: [docker-compose.yml] }
 "#,
         )
-        .unwrap();
+        .test()?;
         std::fs::write(
             directory.path().join("docker-compose.yml"),
             "services:\n  web:\n    ports:\n      - \"3000:3000\"\n",
         )
-        .unwrap();
+        .test()?;
 
-        let diagnostics = run(directory.path()).unwrap();
+        let diagnostics = run(directory.path()).test()?;
         assert!(
             diagnostics
                 .iter()
@@ -1160,14 +1166,15 @@ runtime: { files: [docker-compose.yml] }
             diagnostic.code == "compose.all_interfaces_host_port"
                 && diagnostic.severity == DiagnosticSeverity::Error
         }));
+        Ok(())
     }
 
     #[test]
-    fn unreadable_manifest_becomes_a_diagnostic() {
-        let directory = tempfile::tempdir().unwrap();
+    fn unreadable_manifest_becomes_a_diagnostic() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir().test()?;
         let project = directory.path().join("demo/cell/state");
-        std::fs::create_dir_all(&project).unwrap();
-        std::fs::write(project.join("manifest.json"), "not json").unwrap();
+        std::fs::create_dir_all(&project).test()?;
+        std::fs::write(project.join("manifest.json"), "not json").test()?;
         let mut diagnostics = Vec::new();
         let manifests = read_manifests(&directory.path().join("demo"), &mut diagnostics);
         assert!(manifests.is_empty());
@@ -1176,16 +1183,18 @@ runtime: { files: [docker-compose.yml] }
                 .iter()
                 .any(|diagnostic| diagnostic.code == "manifest.unreadable")
         );
+        Ok(())
     }
 
     #[test]
-    fn missing_project_lock_is_an_error() {
-        let directory = tempfile::tempdir().unwrap();
+    fn missing_project_lock_is_an_error() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir().test()?;
         let mut diagnostics = Vec::new();
         diagnose_project_lock(directory.path(), &mut diagnostics);
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(diagnostics[0].code, "lock.project.missing");
         assert_eq!(diagnostics[0].severity, DiagnosticSeverity::Error);
         assert!(!diagnostics[0].message.contains("stale"));
+        Ok(())
     }
 }
