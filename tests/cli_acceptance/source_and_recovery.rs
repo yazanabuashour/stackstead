@@ -233,62 +233,6 @@ fn adopted_worktree_is_bound_but_preserved_on_destroy() {
     );
 }
 
-#[cfg(unix)]
-#[test]
-fn destroy_recovery_revalidates_an_adopted_worktree_before_cleanup() {
-    let project = Project::initialized();
-    let external = project
-        .repo
-        .parent()
-        .unwrap()
-        .join("recovery-manager-owned");
-    git(
-        &project.repo,
-        &[
-            "worktree",
-            "add",
-            "-b",
-            "recovery-manager-feature",
-            external.to_str().unwrap(),
-            "main",
-        ],
-    );
-    let adopted = stackstead(&project.repo)
-        .arg("--json")
-        .arg("adopt")
-        .arg("recovery-manager-feature")
-        .arg("--worktree")
-        .arg(&external)
-        .assert()
-        .success();
-    let manifest = changed_manifest(&adopted.get_output().stdout, "adopted");
-    append_destroy_tombstone(&manifest);
-
-    let dirty = external.join("unreviewed-replacement");
-    fs::write(&dirty, "must survive\n").unwrap();
-    let refused = stackstead(&project.repo)
-        .args(["destroy", &manifest.stackstead_id, "--yes"])
-        .assert()
-        .failure();
-    assert!(
-        output_text(&refused.get_output().stderr).contains("uncommitted or untracked"),
-        "unexpected error: {}",
-        output_text(&refused.get_output().stderr)
-    );
-    assert!(dirty.is_file());
-    assert!(manifest.pointer_file.is_file());
-    assert!(manifest.manifest_path().is_file());
-
-    fs::remove_file(dirty).unwrap();
-    stackstead_without_runtime(&project.repo)
-        .args(["destroy", &manifest.stackstead_id, "--yes"])
-        .assert()
-        .success();
-    assert!(external.is_dir());
-    assert!(!external.join(".stackstead").exists());
-    assert!(!manifest.stackstead_root.exists());
-}
-
 #[test]
 fn adoption_rejects_a_manager_worktree_that_does_not_contain_the_pinned_base() {
     let project = Project::initialized();

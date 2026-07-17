@@ -5,7 +5,7 @@ use serde::Serialize;
 use crate::{compose, database, doctor, lifecycle, manifest::StacksteadManifest};
 
 const VERSION: &str = "1";
-const INSPECTION_VERSION: &str = "2";
+const INSPECTION_VERSION: &str = "3";
 
 mod private {
     pub trait Sealed {}
@@ -185,6 +185,7 @@ pub(crate) struct StacksteadInspectionOutput {
     version: &'static str,
     stackstead: StacksteadOutput,
     live: LiveOutput,
+    effective: EffectiveOutput,
     warnings: Vec<String>,
 }
 
@@ -221,16 +222,39 @@ struct LiveHealthOutput {
     healthy: bool,
 }
 
+#[derive(Debug, Serialize)]
+struct EffectiveOutput {
+    phase: &'static str,
+    recorded_at: chrono::DateTime<chrono::Utc>,
+    observed_at: chrono::DateTime<chrono::Utc>,
+    runtime: EffectiveComponentOutput,
+    database: Option<EffectiveComponentOutput>,
+    health: EffectiveComponentOutput,
+}
+
+#[derive(Debug, Serialize)]
+struct EffectiveComponentOutput {
+    status: String,
+    basis: String,
+}
+
+impl From<lifecycle::EffectiveComponent> for EffectiveComponentOutput {
+    fn from(component: lifecycle::EffectiveComponent) -> Self {
+        Self {
+            status: component.status.to_string(),
+            basis: component.basis.to_string(),
+        }
+    }
+}
+
 impl StacksteadInspectionOutput {
     pub(crate) fn new(inspection: &lifecycle::InspectOutput) -> Self {
         let database = inspection
-            .manifest
-            .database
-            .as_ref()
-            .map(|_| LiveDatabaseOutput {
+            .live
+            .database_status
+            .map(|status| LiveDatabaseOutput {
                 reachable: inspection.live.database_reachable.unwrap_or(false),
-                status: database::live_status(&inspection.manifest, inspection.live.runtime_status)
-                    .to_string(),
+                status: status.to_string(),
             });
         Self {
             kind: "StacksteadInspection",
@@ -258,6 +282,14 @@ impl StacksteadInspectionOutput {
                     .live
                     .health_healthy
                     .map(|healthy| LiveHealthOutput { healthy }),
+            },
+            effective: EffectiveOutput {
+                phase: inspection.effective.phase,
+                recorded_at: inspection.effective.recorded_at,
+                observed_at: inspection.effective.observed_at,
+                runtime: inspection.effective.runtime.into(),
+                database: inspection.effective.database.map(Into::into),
+                health: inspection.effective.health.into(),
             },
             warnings: inspection.warnings.clone(),
         }

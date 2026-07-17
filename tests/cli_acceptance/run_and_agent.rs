@@ -16,6 +16,7 @@ test "$STACKSTEAD_ID" = "$2" || exit 92
 test "$STACKSTEAD_COMPOSE_PROJECT" = "$3" || exit 93
 test "$COMPOSE_PROJECT_NAME" = "$3" || exit 94
 test "$STACKSTEAD_WORKTREE" = "$1" || exit 95
+test "$STACKSTEAD_PRIVATE_RUN_SUPERVISOR" = "preserved" || exit 96
 printf '%s|%s\n' "$STACKSTEAD_ID" "$4"
 exit 23
 "#,
@@ -27,6 +28,7 @@ exit 23
     let assert = stackstead(&project.repo)
         .env("STACKSTEAD_ID", "spoofed")
         .env("COMPOSE_PROJECT_NAME", "shared")
+        .env("STACKSTEAD_PRIVATE_RUN_SUPERVISOR", "preserved")
         .arg("run")
         .arg("feature-a")
         .arg("--")
@@ -109,79 +111,6 @@ exit 0
         manifest.stackstead_id,
         manifest.worktree.display()
     )));
-}
-
-#[cfg(unix)]
-#[test]
-fn active_launch_blocks_destroy_without_blocking_another_run() {
-    use std::time::Duration;
-
-    let project = Project::initialized();
-    let mut config = load_config(&project.repo.join("stackstead.yaml"));
-    config["database"]["postgres"] = serde_yaml::Value::Null;
-    config["health"]["checks"] = serde_yaml::Value::Sequence(vec![]);
-    project.write_config(&config, "configure launch lease fixture");
-    let fake_state = project
-        .repo
-        .parent()
-        .unwrap()
-        .join("launch-lease-docker-state");
-    let path = fake_docker_path(
-        project.repo.parent().unwrap(),
-        "launch-lease-fake-docker-bin",
-        r#"#!/bin/sh
-set -eu
-mkdir -p "$FAKE_STATE"
-claim="$COMPOSE_PROJECT_NAME-stackstead-claim"
-case "$1 $2" in
-  "volume ls") test ! -f "$FAKE_STATE/claim" || printf '%s\n' "$claim" ;;
-  "volume create")
-    for argument in "$@"; do
-      case "$argument" in
-        io.stackstead.runtime-token=*) printf '%s' "${argument#*=}" > "$FAKE_STATE/token" ;;
-      esac
-    done
-    : > "$FAKE_STATE/claim"
-    ;;
-  "volume inspect") printf '{"io.stackstead.runtime-token":"%s"}\n' "$(cat "$FAKE_STATE/token")" ;;
-esac
-exit 0
-"#,
-    );
-    let ready = project.repo.parent().unwrap().join("launch-agent-ready");
-    let mut launch = ProcessCommand::new(assert_cmd::cargo::cargo_bin!("stackstead"))
-        .current_dir(&project.repo)
-        .env("XDG_STATE_HOME", test_state_home(&project.repo))
-        .env("PATH", path)
-        .env("FAKE_STATE", fake_state)
-        .args(["launch", "feature-a", "--", "sh", "-c"])
-        .arg("touch \"$1\"; while test -e \"$1\"; do sleep 0.05; done")
-        .arg("stackstead-launch-lease")
-        .arg(&ready)
-        .stdout(std::process::Stdio::null())
-        .spawn()
-        .expect("start launch command");
-    assert!(
-        wait_for_file(&ready, 100, Duration::from_millis(20)),
-        "launched child did not start"
-    );
-
-    let directories = state_stackstead_directories(&project);
-    assert_eq!(directories.len(), 1);
-    let manifest = StacksteadManifest::read(&directories[0].join("state/manifest.json")).unwrap();
-    stackstead(&project.repo)
-        .args(["run", &manifest.stackstead_id, "--", "true"])
-        .assert()
-        .success();
-    let blocked = stackstead(&project.repo)
-        .args(["destroy", &manifest.stackstead_id, "--yes"])
-        .assert()
-        .failure();
-    assert!(output_text(&blocked.get_output().stderr).contains("active stackstead agent"));
-    assert!(manifest.worktree.is_dir());
-
-    fs::remove_file(&ready).expect("release launched child");
-    assert!(launch.wait().expect("wait for launch command").success());
 }
 
 #[test]
@@ -293,8 +222,8 @@ fn generated_environment_cannot_add_process_control_keys() {
 
 #[cfg(unix)]
 #[test]
-fn active_agent_run_blocks_destroy_until_the_child_exits() {
-    use std::time::Duration;
+fn queued_lifecycle_rechecks_teardown_after_the_run_lease_wait() {
+    use std::{thread, time::Duration};
 
     let project = Project::initialized();
     let manifest = project.create("feature-a");
@@ -313,20 +242,32 @@ fn active_agent_run_blocks_destroy_until_the_child_exits() {
         "agent child did not start"
     );
 
-    for args in [
-        vec!["up", "feature-a"],
-        vec!["stop", "feature-a"],
-        vec!["repair", "feature-a"],
-        vec!["destroy", "feature-a", "--yes"],
-    ] {
-        let blocked = stackstead(&project.repo).args(args).assert().failure();
-        assert!(output_text(&blocked.get_output().stderr).contains("active stackstead agent"));
-    }
+    let mut waiting = ProcessCommand::new(assert_cmd::cargo::cargo_bin!("stackstead"))
+        .current_dir(&project.repo)
+        .env("XDG_STATE_HOME", test_state_home(&project.repo))
+        .args(["repair", "feature-a"])
+        .spawn()
+        .expect("start waiting lifecycle command");
+    thread::sleep(Duration::from_millis(150));
+    assert!(waiting.try_wait().unwrap().is_none(), "repair did not wait");
+    fs::write(
+        manifest.state_dir.join("teardown.json"),
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "kind": "StacksteadTeardown",
+            "version": "1",
+            "stackstead_id": &manifest.stackstead_id,
+            "runtime_token": &manifest.runtime_token,
+            "phase": "runtime_remove"
+        }))
+        .unwrap(),
+    )
+    .unwrap();
     assert!(manifest.manifest_path().is_file());
     assert!(manifest.worktree.is_dir());
 
     fs::remove_file(&ready).expect("release agent probe");
     assert!(child.wait().expect("wait for agent command").success());
+    assert!(!waiting.wait().expect("wait for repair").success());
 }
 
 #[cfg(target_os = "linux")]
@@ -358,17 +299,22 @@ fn normal_agent_completion_terminates_background_descendants() {
     panic!("background agent descendant {pid} survived normal wrapper completion");
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 #[test]
-fn agent_child_keeps_the_destroy_lease_after_the_cli_is_killed() {
+fn killed_run_wrapper_cleans_direct_and_detached_children_before_releasing_destroy() {
     use std::{os::unix::fs::PermissionsExt, thread, time::Duration};
 
     let project = Project::initialized();
     let manifest = project.create("feature-a");
     let parent = project.repo.parent().unwrap();
-    let pid_file = parent.join("orphaned-agent.pid");
-    let script = parent.join("orphaned-agent");
-    fs::write(&script, "#!/bin/sh\necho $$ > \"$1\"\nexec sleep 30\n").expect("write agent script");
+    let direct_pid_file = parent.join("interrupted-direct.pid");
+    let detached_pid_file = parent.join("interrupted-detached.pid");
+    let script = parent.join("interrupted-agent");
+    fs::write(
+        &script,
+        "#!/bin/sh\ntrap '' TERM\necho $$ > \"$1\"\nsetsid sh -c 'trap \"\" TERM; echo $$ > \"$1\"; exec sleep 30' stackstead-detached \"$2\" &\nwait\n",
+    )
+    .expect("write agent script");
     fs::set_permissions(&script, fs::Permissions::from_mode(0o755))
         .expect("make agent script executable");
     let mut wrapper = ProcessCommand::new(assert_cmd::cargo::cargo_bin!("stackstead"))
@@ -376,39 +322,52 @@ fn agent_child_keeps_the_destroy_lease_after_the_cli_is_killed() {
         .env("XDG_STATE_HOME", test_state_home(&project.repo))
         .args(["run", "feature-a", "--"])
         .arg(&script)
-        .arg(&pid_file)
+        .arg(&direct_pid_file)
+        .arg(&detached_pid_file)
         .spawn()
         .expect("start stackstead wrapper");
-    assert!(wait_for_file(&pid_file, 100, Duration::from_millis(20)));
-    let agent_pid = fs::read_to_string(&pid_file)
-        .expect("agent wrote PID")
+    assert!(wait_for_file(
+        &detached_pid_file,
+        100,
+        Duration::from_millis(20)
+    ));
+    let direct_pid = fs::read_to_string(&direct_pid_file)
+        .expect("direct child wrote PID")
         .trim()
         .parse::<i32>()
-        .expect("parse agent PID");
+        .expect("parse direct PID");
+    let detached_pid = fs::read_to_string(&detached_pid_file)
+        .expect("detached child wrote PID")
+        .trim()
+        .parse::<i32>()
+        .expect("parse detached PID");
     assert_eq!(unsafe { libc::kill(wrapper.id() as i32, libc::SIGKILL) }, 0);
     wrapper.wait().expect("reap killed wrapper");
 
-    let blocked = stackstead(&project.repo)
-        .args(["destroy", "feature-a", "--yes"])
-        .assert()
-        .failure();
-    assert!(output_text(&blocked.get_output().stderr).contains("active stackstead agent"));
-    assert_eq!(unsafe { libc::kill(agent_pid, libc::SIGKILL) }, 0);
-
     let path = fake_docker_path(parent, "orphan-lease-fake-bin", "#!/bin/sh\nexit 0\n");
-    for _ in 0..100 {
-        let output = stackstead(&project.repo)
-            .env("PATH", &path)
-            .args(["destroy", "feature-a", "--yes"])
-            .output()
-            .expect("retry destroy");
-        if output.status.success() {
-            assert!(!manifest.stackstead_root.exists());
-            return;
+    let mut destroy = ProcessCommand::new(assert_cmd::cargo::cargo_bin!("stackstead"))
+        .current_dir(&project.repo)
+        .env("XDG_STATE_HOME", test_state_home(&project.repo))
+        .env("PATH", path)
+        .args(["destroy", "feature-a", "--yes"])
+        .spawn()
+        .expect("start waiting destroy");
+    thread::sleep(Duration::from_millis(100));
+    assert!(
+        destroy.try_wait().unwrap().is_none(),
+        "destroy overtook cleanup"
+    );
+    assert!(destroy.wait().expect("wait for destroy").success());
+    for pid in [direct_pid, detached_pid] {
+        for _ in 0..100 {
+            if unsafe { libc::kill(pid, 0) } != 0 {
+                break;
+            }
+            thread::sleep(Duration::from_millis(20));
         }
-        thread::sleep(Duration::from_millis(20));
+        assert_ne!(unsafe { libc::kill(pid, 0) }, 0, "child {pid} survived");
     }
-    panic!("destroy lease did not release after the orphaned agent exited");
+    assert!(!manifest.stackstead_root.exists());
 }
 
 #[cfg(unix)]
@@ -618,7 +577,7 @@ fn adopted_manifests_cannot_cross_bind_or_delete_another_checkout() {
 #[cfg(unix)]
 #[test]
 fn post_create_holds_the_cell_lock_after_manifest_publication() {
-    use std::time::Duration;
+    use std::{thread, time::Duration};
 
     let project = Project::initialized();
     let ready = project.repo.parent().unwrap().join("post-create-ready");
@@ -646,19 +605,19 @@ fn post_create_holds_the_cell_lock_after_manifest_publication() {
         wait_for_file(&ready, 200, Duration::from_millis(10)),
         "post-create hook did not start"
     );
-    let manifests = state_stackstead_directories(&project)
-        .into_iter()
-        .map(|root| root.join("state/manifest.json"))
-        .filter(|path| path.is_file())
-        .collect::<Vec<_>>();
-    assert_eq!(manifests.len(), 1, "manifest was not published during hook");
-    let manifest = StacksteadManifest::read(&manifests[0]).expect("read published manifest");
-    let assert = stackstead(&project.repo)
-        .args(["destroy", &manifest.stackstead_id, "--yes"])
-        .assert()
-        .failure();
-    assert!(output_text(&assert.get_output().stderr).contains("lock"));
-    assert!(manifest.worktree.is_dir());
+    let mut second = ProcessCommand::new(assert_cmd::cargo::cargo_bin!("stackstead"))
+        .current_dir(&project.repo)
+        .env("XDG_STATE_HOME", test_state_home(&project.repo))
+        .args(["create", "feature-b"])
+        .spawn()
+        .expect("spawn waiting create");
+    thread::sleep(Duration::from_millis(150));
+    assert!(
+        second.try_wait().unwrap().is_none(),
+        "second create did not wait"
+    );
     fs::remove_file(&release).expect("release post-create hook");
     assert!(create.wait().expect("wait for create").success());
+    assert!(second.wait().expect("wait for second create").success());
+    assert_eq!(state_stackstead_directories(&project).len(), 2);
 }

@@ -58,13 +58,6 @@ pub struct EventLog {
     pub truncated_tail: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DestroyRecovery {
-    None,
-    ResumeSourceRemoval,
-    RemoveState,
-}
-
 pub fn append(
     path: &Path,
     event_type: EventType,
@@ -203,49 +196,6 @@ fn bounded_message(message: &str) -> String {
     message
 }
 
-pub fn destroy_recovery(path: &Path) -> anyhow::Result<DestroyRecovery> {
-    let log = read(path)?;
-    let Some(start) = log.events.iter().rposition(|event| {
-        event.event_type == EventType::Destroy && event.status == EventStatus::Started
-    }) else {
-        return Ok(DestroyRecovery::None);
-    };
-    let mut runtime_removed = false;
-    let mut source_started = false;
-    let mut source_removed = false;
-    for event in &log.events[start + 1..] {
-        match (event.event_type, event.status) {
-            (EventType::RuntimeRemove, EventStatus::Succeeded) => runtime_removed = true,
-            (EventType::SourceRemove, EventStatus::Started) if runtime_removed => {
-                source_started = true
-            }
-            (EventType::SourceRemove, EventStatus::Succeeded) if source_started => {
-                source_removed = true
-            }
-            (EventType::SourceRemove, EventStatus::Started | EventStatus::Succeeded) => {
-                anyhow::bail!(
-                    "event log {} contains an invalid destroy recovery sequence",
-                    path.display()
-                )
-            }
-            (EventType::Destroy, EventStatus::Succeeded) if !source_removed => {
-                anyhow::bail!(
-                    "event log {} records destroy success before source removal",
-                    path.display()
-                )
-            }
-            _ => {}
-        }
-    }
-    Ok(if source_removed {
-        DestroyRecovery::RemoveState
-    } else if runtime_removed && source_started {
-        DestroyRecovery::ResumeSourceRemoval
-    } else {
-        DestroyRecovery::None
-    })
-}
-
 fn redact_message(message: &str) -> String {
     crate::command::redact(message)
 }
@@ -362,37 +312,5 @@ mod tests {
         assert!(read(&path).is_err());
         std::fs::write(&path, b"\n").unwrap();
         assert!(read(&path).is_err());
-    }
-
-    #[test]
-    fn reduces_only_the_latest_destroy_attempt() {
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("events.jsonl");
-        for (event_type, status) in [
-            (EventType::Destroy, EventStatus::Started),
-            (EventType::RuntimeRemove, EventStatus::Succeeded),
-            (EventType::SourceRemove, EventStatus::Started),
-            (EventType::Destroy, EventStatus::Started),
-        ] {
-            append(&path, event_type, status, None).unwrap();
-        }
-        assert_eq!(destroy_recovery(&path).unwrap(), DestroyRecovery::None);
-        append(
-            &path,
-            EventType::RuntimeRemove,
-            EventStatus::Succeeded,
-            None,
-        )
-        .unwrap();
-        append(&path, EventType::SourceRemove, EventStatus::Started, None).unwrap();
-        assert_eq!(
-            destroy_recovery(&path).unwrap(),
-            DestroyRecovery::ResumeSourceRemoval
-        );
-        append(&path, EventType::SourceRemove, EventStatus::Succeeded, None).unwrap();
-        assert_eq!(
-            destroy_recovery(&path).unwrap(),
-            DestroyRecovery::RemoveState
-        );
     }
 }

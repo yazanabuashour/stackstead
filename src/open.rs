@@ -64,10 +64,25 @@ pub fn launch_endpoint(
     if !target.value.starts_with("http://") && !target.value.starts_with("https://") {
         return Ok(None);
     }
-    let endpoint = parse_loopback_endpoint(&target.value).ok_or_else(|| {
+    let launch = manifest_endpoint(&target.value, manifest)?;
+    if launch.contract_key != target.contract_key {
+        anyhow::bail!(
+            "URL contract `{}` targets manifest port contract `{}`; refusing to open a different service",
+            target.contract_key,
+            launch.contract_key
+        );
+    }
+    Ok(Some(launch))
+}
+
+pub(crate) fn manifest_endpoint(
+    url: &str,
+    manifest: &StacksteadManifest,
+) -> anyhow::Result<LaunchEndpoint> {
+    let endpoint = parse_loopback_endpoint(url).ok_or_else(|| {
         anyhow::anyhow!(
             "refusing to open non-loopback URL `{}`; use --print to inspect it without launching a browser",
-            target.value
+            url
         )
     })?;
     let matching = manifest
@@ -78,22 +93,14 @@ pub fn launch_endpoint(
         .collect::<Vec<_>>();
     let [contract_key] = matching.as_slice() else {
         anyhow::bail!(
-            "URL `{}` must target exactly one manifest port contract; found {} matches",
-            target.value,
+            "URL `{url}` must target exactly one manifest port contract; found {} matches",
             matching.len()
         );
     };
-    if contract_key.as_str() != target.contract_key {
-        anyhow::bail!(
-            "URL contract `{}` targets manifest port contract `{}`; refusing to open a different service",
-            target.contract_key,
-            contract_key
-        );
-    }
-    Ok(Some(LaunchEndpoint {
+    Ok(LaunchEndpoint {
         contract_key: (*contract_key).clone(),
         endpoint,
-    }))
+    })
 }
 
 fn parse_loopback_endpoint(url: &str) -> Option<LoopbackEndpoint> {

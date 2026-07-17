@@ -52,7 +52,7 @@ Lifecycle manifest writes derive their destination from the manifest's canonical
 
 Stackstead ships one binary crate (`autolib = false`, `publish = false`) and intentionally has no supported Rust SDK yet. Internal modules may change together without creating a premature semver contract. A library should be introduced only when concrete embedding use cases establish a smaller durable API than the application internals.
 
-Machine-readable output is the supported automation surface. A sealed internal marker permits only command-owned DTOs to reach the JSON writer. Every response is a top-level object with a semantic `kind` and `version`; lists are wrapped rather than emitted as bare arrays. `StacksteadInspection` version 2 adds command-owned per-service observations while the remaining current responses are version 1. DTO conversions copy only intended integration data, so manifest fields, doctor internals, and Compose implementation types cannot leak into stdout merely by gaining a serialization derive.
+Machine-readable output is the supported automation surface. A sealed internal marker permits only command-owned DTOs to reach the JSON writer. Every response is a top-level object with a semantic `kind` and `version`; lists are wrapped rather than emitted as bare arrays. `StacksteadInspection` version 3 separates recorded, live, and effective status while the remaining current responses are version 1. DTO conversions copy only intended integration data, so manifest fields, doctor internals, and Compose implementation types cannot leak into stdout merely by gaining a serialization derive.
 
 ## Pointer-file discovery
 
@@ -79,9 +79,19 @@ The pointer file alone is not deletion authority. `--yes` skips an interactive p
 
 ## Locks and allocation
 
-A project lock serializes project-local state and index changes. A host-wide per-user lease registry serializes port allocation across repositories and retains exact runtime-token ownership until successful destroy cleanup. A pre-existing stackstead lock serializes lifecycle mutations, and a separate shared/exclusive run lease prevents teardown while an agent child is active. Creation holds the environment lock across first manifest publication and post-create hooks. The deterministic allocator checks the lease registry and attempts to bind every candidate port on `127.0.0.1` before committing a slot.
+A project lock serializes project-local state and index changes. A host-wide per-user lease registry serializes port allocation across repositories and retains exact runtime-token ownership until successful destroy cleanup. A pre-existing stackstead lock serializes lifecycle mutations, and a separate shared/exclusive run lease prevents teardown while an agent child is active. Creation holds the environment lock across first manifest publication and post-create hooks. Contended locks use one bounded 30-second wait. The deterministic allocator checks the lease registry and attempts to bind every candidate port on `127.0.0.1` before committing a slot.
 
-Locks are intentionally simple cross-process file locks. `doctor` diagnoses suspicious lock state rather than implementing automatic lease stealing.
+Locks are intentionally simple cross-process file locks. `doctor` diagnoses suspicious lock state rather than implementing automatic lease stealing. Only `stackstead run` has interruption supervision; internal helpers and hooks retain their existing command boundary.
+
+## Reliability scope budget
+
+The four reproduced reliability fixes have a budget of 2,500 net new production
+lines, with a hard checkpoint cap of 3,500: teardown 1,100, run supervision 750,
+inspection 400, lock waiting 150, and glue 100. General helper supervision,
+installer refactors, hook hardening beyond the current JSON contract, journal
+compatibility, and recovery for unobserved states are outside this budget. A
+future expansion needs a reproduced failure and a regression test rather than
+being folded into these mechanisms speculatively.
 
 ## Internal adapters
 

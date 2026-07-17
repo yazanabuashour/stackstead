@@ -171,7 +171,7 @@ verify_three() {
       die "Compose project mismatch for $id"
     inspection="$(cd "$example_root" && "$stackstead_bin" --json inspect "$id")"
     jq -e '
-      .kind == "StacksteadInspection" and .version == "2" and
+      .kind == "StacksteadInspection" and .version == "3" and
       any(.live.services[]; .service == "setup" and .status == "completed (0)")
     ' <<<"$inspection" >/dev/null || die "inspect did not report the successful setup job for $id"
     container="$(compose_for "$manifest" ps -q postgres)"
@@ -261,9 +261,12 @@ create_retired_alpha_service() {
   [ "$label" = "$project" ] || die "retired service project label mismatch"
   git -C "$worktree" checkout -- docker-compose.yml
   rm -f "$retired_ownership"
+  docker run --rm --user 0:0 --mount "type=bind,src=$worktree,dst=/source" \
+    alpine@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc \
+    sh -ceu 'mkdir -p /source/.stackstead/container-owned; printf generated > /source/.stackstead/container-owned/artifact; chmod 400 /source/.stackstead/container-owned/artifact; chmod 500 /source/.stackstead/container-owned'
   [ -z "$(git -C "$worktree" status --porcelain=v1 --untracked-files=all)" ] ||
     die "alpha worktree is dirty after restoring the current Compose contract"
-  printf 'PASS alpha retains one project-labeled retired service absent from the restored Compose file; exact cleanup must remove it as an orphan.\n'
+  printf 'PASS alpha retains one retired service and one non-writable container-created source artifact for exact cleanup.\n'
 }
 
 docker_inventory() {

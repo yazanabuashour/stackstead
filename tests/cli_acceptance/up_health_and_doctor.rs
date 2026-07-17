@@ -388,7 +388,10 @@ fn inspect_passively_checks_http_health_only_for_a_running_runtime() {
     let path = fake_docker_path(
         project.repo.parent().unwrap(),
         "inspect-health-fake-bin",
-        "#!/bin/sh\nprintf '%s\n' '[{\"Name\":\"demo-web-1\",\"Service\":\"web\",\"State\":\"running\",\"ExitCode\":0}]'\n",
+        &format!(
+            "#!/bin/sh\ncase \" $* \" in\n  *\" ps --all --format json \"*) printf '%s\\n' '[{{\"Name\":\"demo-web-1\",\"Service\":\"web\",\"State\":\"running\",\"ExitCode\":0}}]' ;;\n  *\" port web 80 \"*) printf '127.0.0.1:{}\\n' ;;\nesac\n",
+            manifest.ports["web"]
+        ),
     );
 
     for expected in [true, false] {
@@ -398,10 +401,96 @@ fn inspect_passively_checks_http_health_only_for_a_running_runtime() {
             .assert()
             .success();
         let value: Value = serde_json::from_slice(&inspected.get_output().stdout).unwrap();
+        assert_eq!(value["version"], "3");
         assert_eq!(value["live"]["runtime"]["running"], true);
         assert_eq!(value["live"]["health"]["healthy"], expected);
+        assert_eq!(value["effective"]["health"]["basis"], "live");
     }
     server.join().unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn inspect_preserves_passive_health_for_a_static_loopback_url() {
+    use std::{io::Write, thread};
+
+    let project = Project::initialized();
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let mut config = load_config(&project.repo.join("stackstead.yaml"));
+    config["health"]["checks"][0]["url"] = format!("http://127.0.0.1:{port}").into();
+    project.write_config(&config, "use a static loopback health target");
+    let manifest = project.create("feature-a");
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        write!(
+            stream,
+            "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        )
+        .unwrap();
+    });
+    let path = fake_docker_path(
+        project.repo.parent().unwrap(),
+        "inspect-static-health-bin",
+        "#!/bin/sh\ncase \" $* \" in *\" ps --all --format json \"*) printf '%s\\n' '[{\"Name\":\"demo-web-1\",\"Service\":\"web\",\"State\":\"running\",\"ExitCode\":0}]';; esac\n",
+    );
+
+    let inspected = stackstead(&project.repo)
+        .env("PATH", path)
+        .args(["inspect", &manifest.stackstead_id, "--json"])
+        .assert()
+        .success();
+    let inspected: Value = serde_json::from_slice(&inspected.get_output().stdout).unwrap();
+    assert_eq!(inspected["live"]["health"]["healthy"], true);
+    assert_eq!(inspected["effective"]["health"]["basis"], "live");
+    server.join().unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn inspect_reports_recorded_ready_but_live_failed_for_a_stopped_health_target() {
+    let project = Project::initialized();
+    let mut manifest = project.create("feature-a");
+    manifest.status.runtime = ComponentStatus::Running;
+    manifest.status.health = ComponentStatus::Ready;
+    manifest.save_atomic().unwrap();
+    let path = fake_docker_path(
+        project.repo.parent().unwrap(),
+        "inspect-stopped-target-bin",
+        r#"#!/bin/sh
+case " $* " in
+  *" ps --all --format json "*)
+    printf '%s\n' '[{"Name":"demo-postgres-1","Service":"postgres","State":"running","ExitCode":0},{"Name":"demo-web-1","Service":"web","State":"exited","ExitCode":1}]'
+    ;;
+esac
+"#,
+    );
+    let inspect = || {
+        let output = stackstead(&project.repo)
+            .env("PATH", &path)
+            .args(["inspect", &manifest.stackstead_id, "--json"])
+            .assert()
+            .success();
+        serde_json::from_slice::<Value>(&output.get_output().stdout).unwrap()
+    };
+
+    let mut first = inspect();
+    let mut second = inspect();
+    assert_eq!(first["version"], "3");
+    assert_eq!(first["stackstead"]["status"]["health"], "ready");
+    assert_eq!(first["live"]["health"]["healthy"], false);
+    assert_eq!(first["effective"]["health"]["status"], "failed");
+    assert_eq!(first["effective"]["health"]["basis"], "live");
+    assert!(first["warnings"].as_array().is_some_and(|warnings| {
+        warnings.iter().any(|warning| {
+            warning
+                .as_str()
+                .is_some_and(|warning| warning.contains("health recorded=ready effective=failed"))
+        })
+    }));
+    first["effective"]["observed_at"] = Value::Null;
+    second["effective"]["observed_at"] = Value::Null;
+    assert_eq!(first, second);
 }
 
 #[test]

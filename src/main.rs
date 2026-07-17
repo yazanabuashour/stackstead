@@ -26,11 +26,15 @@ mod repair;
 mod repository_policy;
 mod slug;
 mod state;
+mod supervisor;
 mod template;
 
 use clap::Parser;
 
 fn main() {
+    if let Some(code) = supervisor::run_if_requested() {
+        std::process::exit(code);
+    }
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .with_writer(std::io::stderr)

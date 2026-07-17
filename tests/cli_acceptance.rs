@@ -119,27 +119,6 @@ fn has_diagnostic(report: &Value, code: &str, severity: &str) -> bool {
     })
 }
 
-fn append_event(path: &Path, event_type: &str, status: &str) {
-    use std::io::Write;
-
-    let event = serde_json::json!({
-        "kind": "StacksteadEvent",
-        "version": "1",
-        "timestamp": "2026-01-01T00:00:00Z",
-        "type": event_type,
-        "status": status,
-    });
-    writeln!(
-        fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)
-            .unwrap(),
-        "{event}"
-    )
-    .unwrap();
-}
-
 #[derive(Deserialize)]
 struct StacksteadChange {
     kind: String,
@@ -274,18 +253,6 @@ fn stackstead(cwd: &Path) -> Command {
     command
 }
 
-#[cfg(unix)]
-fn stackstead_without_runtime(cwd: &Path) -> Command {
-    let path = fake_docker_path(
-        cwd.parent().expect("command directory has a parent"),
-        "no-runtime-fake-docker-bin",
-        "#!/bin/sh\n[ \"$#\" -eq 4 ] && [ \"$1 $2 $3 $4\" = 'volume ls --format {{.Name}}' ]\n",
-    );
-    let mut command = stackstead(cwd);
-    command.env("PATH", path);
-    command
-}
-
 fn git(cwd: &Path, args: &[&str]) -> String {
     let output = ProcessCommand::new("git")
         .args(args)
@@ -314,12 +281,6 @@ fn event_types(path: &Path) -> Vec<String> {
                 .to_owned()
         })
         .collect()
-}
-
-fn append_destroy_tombstone(manifest: &StacksteadManifest) {
-    append_event(&manifest.event_log, "destroy", "started");
-    append_event(&manifest.event_log, "runtime_remove", "succeeded");
-    append_event(&manifest.event_log, "source_remove", "started");
 }
 
 fn state_stackstead_directories(project: &Project) -> Vec<PathBuf> {

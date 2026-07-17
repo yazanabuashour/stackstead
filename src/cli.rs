@@ -397,7 +397,18 @@ impl Cli {
         println!("Stackstead: {}\n", manifest.stackstead_id);
         println!("Source:        {}", manifest.status.source);
         println!("Dependencies:  {}", manifest.status.dependencies);
-        println!("Runtime:       {}", output.live.runtime_status);
+        println!(
+            "Recorded:      runtime={} database={} health={}",
+            manifest.status.runtime, manifest.status.database, manifest.status.health
+        );
+        println!("Live runtime:  {}", output.live.runtime_status);
+        println!(
+            "Effective:     runtime={} ({}) health={} ({})",
+            output.effective.runtime.status,
+            output.effective.runtime.basis,
+            output.effective.health.status,
+            output.effective.health.basis
+        );
         println!("Services:");
         if output.live.services.is_empty() {
             println!("  none");

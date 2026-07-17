@@ -2,11 +2,15 @@ use std::{
     fs::{File, OpenOptions},
     io::{Seek, SeekFrom, Write},
     path::{Path, PathBuf},
+    time::{Duration, Instant},
 };
 
 use fs2::FileExt;
 
 use crate::error::StacksteadError;
+
+const LOCK_WAIT_TIMEOUT: Duration = Duration::from_secs(30);
+const LOCK_RETRY_INTERVAL: Duration = Duration::from_millis(50);
 
 fn open_lock(path: &Path, create: bool) -> std::io::Result<File> {
     let mut options = OpenOptions::new();
@@ -20,6 +24,39 @@ fn open_lock(path: &Path, create: bool) -> std::io::Result<File> {
     options.open(path)
 }
 
+fn wait_for_lock(
+    file: &File,
+    path: &Path,
+    kind: &'static str,
+    shared: bool,
+    timeout: Duration,
+) -> anyhow::Result<()> {
+    let started = Instant::now();
+    loop {
+        let result = if shared {
+            FileExt::try_lock_shared(file)
+        } else {
+            FileExt::try_lock_exclusive(file)
+        };
+        match result {
+            Ok(()) => return Ok(()),
+            Err(error) if error.kind() != fs2::lock_contended_error().kind() => {
+                return Err(error.into());
+            }
+            Err(_) if started.elapsed() >= timeout => {
+                return Err(StacksteadError::LockBusy {
+                    kind,
+                    path: path.to_path_buf(),
+                }
+                .into());
+            }
+            Err(_) => std::thread::sleep(
+                LOCK_RETRY_INTERVAL.min(timeout.saturating_sub(started.elapsed())),
+            ),
+        }
+    }
+}
+
 pub struct LockGuard {
     file: File,
 }
@@ -30,11 +67,7 @@ impl LockGuard {
             std::fs::create_dir_all(parent)?;
         }
         let mut file = open_lock(path, true)?;
-        file.try_lock_exclusive()
-            .map_err(|_| StacksteadError::LockBusy {
-                kind,
-                path: path.to_path_buf(),
-            })?;
+        wait_for_lock(&file, path, kind, false, LOCK_WAIT_TIMEOUT)?;
         file.set_len(0)?;
         file.seek(SeekFrom::Start(0))?;
         writeln!(
@@ -62,15 +95,7 @@ impl LockGuard {
                 path.display()
             )
         })?;
-        let result = if shared {
-            FileExt::try_lock_shared(&file)
-        } else {
-            FileExt::try_lock_exclusive(&file)
-        };
-        result.map_err(|_| StacksteadError::LockBusy {
-            kind,
-            path: path.to_path_buf(),
-        })?;
+        wait_for_lock(&file, path, kind, shared, LOCK_WAIT_TIMEOUT)?;
         if !shared {
             file.set_len(0)?;
             file.seek(SeekFrom::Start(0))?;
@@ -108,6 +133,22 @@ impl LockGuard {
             }
         }
         Ok(())
+    }
+
+    #[cfg(unix)]
+    pub(crate) fn inherited_identity(&self) -> std::io::Result<(i32, u64, u64)> {
+        use std::os::{fd::AsRawFd, unix::fs::MetadataExt};
+
+        let metadata = self.file.metadata()?;
+        Ok((self.file.as_raw_fd(), metadata.dev(), metadata.ino()))
+    }
+
+    #[cfg(unix)]
+    pub(crate) fn close_after_handoff(self) {
+        use std::mem::ManuallyDrop;
+
+        let this = ManuallyDrop::new(self);
+        unsafe { drop(std::ptr::read(&this.file)) };
     }
 
     pub fn downgrade_to_shared(self) -> anyhow::Result<Self> {
@@ -168,9 +209,41 @@ mod tests {
 
         let lock = lock.downgrade_to_shared().unwrap();
         drop(LockGuard::acquire_existing_shared(&path, "stackstead").unwrap());
-        assert!(LockGuard::acquire_existing(&path, "stackstead").is_err());
+        let contender = open_lock(&path, false).unwrap();
+        assert!(
+            wait_for_lock(
+                &contender,
+                &path,
+                "stackstead",
+                false,
+                Duration::from_millis(100)
+            )
+            .is_err()
+        );
         drop(lock);
         drop(LockGuard::acquire_existing(&path, "stackstead").unwrap());
+    }
+
+    #[test]
+    fn bounded_wait_acquires_after_the_contender_releases() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("lock");
+        let lock = LockGuard::acquire(&path, "stackstead").unwrap();
+        let contender = open_lock(&path, false).unwrap();
+        let release = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(100));
+            drop(lock);
+        });
+
+        wait_for_lock(
+            &contender,
+            &path,
+            "stackstead",
+            false,
+            Duration::from_secs(1),
+        )
+        .unwrap();
+        release.join().unwrap();
     }
 
     #[test]

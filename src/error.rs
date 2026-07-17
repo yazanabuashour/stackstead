@@ -8,7 +8,9 @@ pub enum StacksteadError {
     StacksteadNotFound(String),
     #[error("stackstead name `{name}` is ambiguous; candidates: {candidates}")]
     AmbiguousStackstead { name: String, candidates: String },
-    #[error("could not acquire {kind} lock at {path}")]
+    #[error(
+        "could not acquire {kind} lock at {path} after waiting 30 seconds; retry the exact command"
+    )]
     LockBusy { kind: &'static str, path: PathBuf },
     #[error("unsafe path: {0}")]
     UnsafePath(String),

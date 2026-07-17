@@ -150,143 +150,112 @@ fn custom_compose_project_contract_is_rejected() {
     assert!(!marker.exists());
 }
 
-#[test]
-fn destroy_retries_only_state_after_recorded_source_cleanup() {
-    let project = Project::initialized();
-    let manifest = project.create("feature-a");
-    git(
-        &project.repo,
-        &["worktree", "remove", manifest.worktree.to_str().unwrap()],
-    );
-    append_destroy_tombstone(&manifest);
-    append_event(&manifest.event_log, "source_remove", "succeeded");
-
-    stackstead_without_runtime(&project.repo)
-        .args(["destroy", "feature-a", "--yes"])
-        .assert()
-        .success();
-    assert!(!manifest.stackstead_root.exists());
-}
-
-#[test]
-fn destroy_resumes_source_cleanup_from_the_persisted_tombstone() {
-    let project = Project::initialized();
-    let manifest = project.create("feature-a");
-    append_destroy_tombstone(&manifest);
-    stackstead_without_runtime(&project.repo)
-        .args(["destroy", "feature-a", "--yes"])
-        .assert()
-        .success();
-    assert!(!manifest.stackstead_root.exists());
-    assert!(!manifest.worktree.exists());
-}
-
-#[test]
-fn destroy_recovery_revalidates_a_dirty_owned_worktree() {
-    let project = Project::initialized();
-    let manifest = project.create("dirty-recovery");
-    append_destroy_tombstone(&manifest);
-    fs::write(manifest.worktree.join("README.md"), "dirty\n").expect("dirty tracked file");
-
-    let assert = stackstead(&project.repo)
-        .args(["destroy", &manifest.stackstead_id, "--yes"])
-        .assert()
-        .failure();
-    assert!(output_text(&assert.get_output().stderr).contains("uncommitted or untracked changes"));
-    assert!(manifest.worktree.is_dir());
-    assert!(manifest.manifest_path().is_file());
-}
-
 #[cfg(unix)]
 #[test]
-fn destroy_retry_removes_a_git_unregistered_permission_blocked_remainder() {
-    use std::os::unix::fs::PermissionsExt;
+fn destroy_retries_the_failed_runtime_phase_once_without_touching_a_peer() {
+    const DOCKER: &str = r#"#!/bin/sh
+set -eu
+mkdir -p "$FAKE_STATE"
+printf '%s\n' "$*" >> "$FAKE_STATE/commands"
+kind=${1-}
+verb=${2-}
+last=
+for argument in "$@"; do last=$argument; done
+claim="$COMPOSE_PROJECT_NAME-stackstead-claim"
+case "$kind $verb" in
+  "container ls")
+    case " $* " in
+      *" name=^/"*) ;;
+      *" {{.Names}} "*) test ! -f "$FAKE_STATE/runtime" || printf '%s\n' "$COMPOSE_PROJECT_NAME-web-1" ;;
+      *) test ! -f "$FAKE_STATE/runtime" || printf '%s\n' runtime-id ;;
+    esac
+    ;;
+  "container inspect"|"volume inspect")
+    printf '{"io.stackstead.runtime-token":"%s"}\n' "$EXPECTED_TOKEN"
+    ;;
+  "network ls") ;;
+  "volume ls") test ! -f "$FAKE_STATE/claim" || printf '%s\n' "$claim" ;;
+  "volume rm") rm -f "$FAKE_STATE/claim" ;;
+  "image inspect"|"run --rm") ;;
+  "compose -p")
+    case " $* " in
+      *" down -v --remove-orphans --rmi local "*)
+        if test ! -f "$FAKE_STATE/failed"; then
+          : > "$FAKE_STATE/failed"
+          echo injected-down-failure >&2
+          exit 42
+        fi
+        rm -f "$FAKE_STATE/runtime"
+        ;;
+    esac
+    ;;
+esac
+exit 0
+"#;
 
     let project = Project::initialized();
-    let manifest = project.create("permission-remainder");
-    let blocked = manifest.worktree.join(".stackstead/container-owned");
-    fs::create_dir(&blocked).expect("create ignored container-owned directory");
-    fs::write(blocked.join("artifact"), "generated\n").expect("write generated artifact");
-    fs::set_permissions(&blocked, fs::Permissions::from_mode(0o555))
-        .expect("make generated directory non-writable");
-    append_destroy_tombstone(&manifest);
+    let counter = project.repo.parent().unwrap().join("pre-destroy-count");
+    let mut config = load_config(&project.repo.join("stackstead.yaml"));
+    config["hooks"]["pre_destroy"] = serde_yaml::to_value([serde_json::json!({
+        "command": format!("printf x >> '{}'", counter.display()),
+        "shell": true,
+    })])
+    .unwrap();
+    project.write_config(&config, "count pre-destroy invocations");
+    let manifest = project.create("feature-a");
+    let peer = project.create("feature-b");
+    let state = project.repo.parent().unwrap().join("retry-docker-state");
+    fs::create_dir(&state).unwrap();
+    fs::write(state.join("claim"), "").unwrap();
+    fs::write(state.join("runtime"), "").unwrap();
+    let path = fake_docker_path(project.repo.parent().unwrap(), "retry-bin", DOCKER);
 
     let first = stackstead(&project.repo)
+        .env("PATH", &path)
+        .env("FAKE_STATE", &state)
+        .env("EXPECTED_TOKEN", &manifest.runtime_token)
         .args(["destroy", &manifest.stackstead_id, "--yes"])
         .assert()
         .failure();
-    fs::set_permissions(&blocked, fs::Permissions::from_mode(0o755))
-        .expect("restore generated directory ownership-equivalent permissions");
-    assert!(output_text(&first.get_output().stderr).contains("container-created files"));
+    assert!(output_text(&first.get_output().stderr).contains("injected-down-failure"));
+    let teardown: Value =
+        serde_json::from_slice(&fs::read(manifest.state_dir.join("teardown.json")).unwrap())
+            .unwrap();
+    assert_eq!(teardown["phase"], "runtime_remove");
+    assert_eq!(teardown["stackstead_id"], manifest.stackstead_id);
+    assert_eq!(teardown["runtime_token"], manifest.runtime_token);
+    assert_eq!(fs::read_to_string(&counter).unwrap(), "x");
     assert!(manifest.worktree.is_dir());
-    assert!(
-        !git(&project.repo, &["worktree", "list", "--porcelain"])
-            .contains(manifest.worktree.to_string_lossy().as_ref())
-    );
+    assert!(peer.worktree.is_dir());
 
-    stackstead_without_runtime(&project.repo)
+    stackstead(&project.repo)
+        .env("PATH", &path)
+        .env("FAKE_STATE", &state)
+        .env("EXPECTED_TOKEN", &manifest.runtime_token)
         .args(["destroy", &manifest.stackstead_id, "--yes"])
         .assert()
         .success();
+    assert_eq!(fs::read_to_string(&counter).unwrap(), "x");
     assert!(!manifest.stackstead_root.exists());
-}
-
-#[test]
-fn destroy_retry_preserves_a_still_registered_locked_worktree() {
-    let project = Project::initialized();
-    let manifest = project.create("locked-remainder");
-    git(
-        &project.repo,
-        &["worktree", "lock", manifest.worktree.to_str().unwrap()],
-    );
-    append_destroy_tombstone(&manifest);
+    assert!(peer.worktree.is_dir());
+    let commands = fs::read_to_string(state.join("commands")).unwrap();
+    assert!(!commands.contains(&peer.compose_project));
+    let command_count = commands.lines().count();
 
     stackstead(&project.repo)
+        .env("PATH", path)
+        .env("FAKE_STATE", &state)
+        .env("EXPECTED_TOKEN", &manifest.runtime_token)
         .args(["destroy", &manifest.stackstead_id, "--yes"])
         .assert()
         .failure();
-    assert!(manifest.worktree.is_dir());
-    assert!(
-        git(&project.repo, &["worktree", "list", "--porcelain"])
-            .contains(manifest.worktree.to_string_lossy().as_ref())
+    assert_eq!(
+        fs::read_to_string(state.join("commands"))
+            .unwrap()
+            .lines()
+            .count(),
+        command_count
     );
-
-    git(
-        &project.repo,
-        &["worktree", "unlock", manifest.worktree.to_str().unwrap()],
-    );
-    stackstead_without_runtime(&project.repo)
-        .args(["destroy", &manifest.stackstead_id, "--yes"])
-        .assert()
-        .success();
-    assert!(!manifest.stackstead_root.exists());
-}
-
-#[test]
-fn destroy_rejects_untyped_legacy_recovery_events() {
-    use std::io::Write;
-
-    let project = Project::initialized();
-    let manifest = project.create("legacy-cleanup");
-    manifest.save_atomic().unwrap();
-    git(
-        &project.repo,
-        &["worktree", "remove", manifest.worktree.to_str().unwrap()],
-    );
-    writeln!(
-        fs::OpenOptions::new()
-            .append(true)
-            .open(&manifest.event_log)
-            .unwrap(),
-        "{{\"type\":\"destroyed\"}}"
-    )
-    .unwrap();
-
-    stackstead(&project.repo)
-        .args(["destroy", "legacy-cleanup", "--yes"])
-        .assert()
-        .failure();
-    assert!(manifest.stackstead_root.exists());
 }
 
 #[cfg(unix)]

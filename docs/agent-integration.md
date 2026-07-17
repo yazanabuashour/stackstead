@@ -28,10 +28,14 @@ value is `$STACKSTEAD_ID`; do not resolve the slug again.
 
 `run` and `launch` reject `--json`: stdout and stderr belong directly to the
 child and cannot also be a stable Stackstead JSON document. A shared run lease
-prevents `destroy` from removing source or runtime state until the child exits,
-while ordinary lifecycle commands remain available to the agent. On Unix the
-child inherits that lease, so killing only the Stackstead wrapper cannot silently
-unblock teardown beneath a still-running agent.
+prevents lifecycle mutation from removing or rewriting source or runtime state
+until the child exits. On Unix a small supervisor retains that lease and owns the
+child's exact process group. If the Stackstead wrapper is interrupted, the
+supervisor terminates and reaps that group before releasing the lease. Linux also
+uses child-subreaper support to clean descendants that detach into a new session.
+macOS has no equivalent portable subreaper API: process-group cleanup is exact,
+but cleanup of a child that deliberately calls `setsid` is best effort. Stackstead
+does not generalize this supervision to dependency commands or hooks.
 
 ## Runtime contract
 

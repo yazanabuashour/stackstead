@@ -35,7 +35,7 @@ if [ -f "$worktree/.stackstead/stackstead.json" ]; then
     --arg worktree "$worktree" \
     --arg pointer "$pointer" \
     --arg primary "$primary" \
-    '.kind == "StacksteadInspection" and (.version == "1" or .version == "2") and
+    '.kind == "StacksteadInspection" and .version == "3" and
      (.stackstead |
       .stackstead_id == $id and
       .worktree == $worktree and

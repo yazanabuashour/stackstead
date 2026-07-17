@@ -57,7 +57,6 @@ fn run_with_locks(
     resolved = StacksteadManifest::read(&resolved.manifest_path())?;
     validate_contract(&runtime, &resolved)?;
     lifecycle::verify_port_leases(&resolved)?;
-    run_lease.inherit_on_exec()?;
     drop(mutation_lock);
     let generated = resolved.validated_environment().map_err(|error| {
         anyhow::anyhow!(
@@ -66,20 +65,58 @@ fn run_with_locks(
             resolved.env_file.display()
         )
     })?;
-    let mut command = command(&resolved, program, args, &generated);
     #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        command.process_group(0);
-    }
-    let mut child = command.spawn().map_err(|error| {
-        anyhow::anyhow!(
-            "could not start command in stackstead {}: {error}",
-            resolved.stackstead_id
-        )
-    })?;
-    let status = child.wait()?;
-    crate::command::terminate_descendants_after_exit(&mut child)?;
+    let status = {
+        use std::os::{fd::AsRawFd, unix::process::CommandExt};
+
+        let (control, supervisor_control) = std::os::unix::net::UnixStream::pair()?;
+        crate::supervisor::set_cloexec(supervisor_control.as_raw_fd(), false)?;
+        let (lease_fd, lease_dev, lease_ino) = run_lease.inherited_identity()?;
+        run_lease.inherit_on_exec()?;
+        let executable = std::env::current_exe()?;
+        let supervisor_args = [
+            crate::supervisor::ARGUMENT.into(),
+            supervisor_control.as_raw_fd().to_string().into(),
+            lease_fd.to_string().into(),
+            lease_dev.to_string().into(),
+            lease_ino.to_string().into(),
+            "--".into(),
+        ]
+        .into_iter()
+        .chain(std::iter::once(program.to_os_string()))
+        .chain(args.iter().cloned())
+        .collect::<Vec<_>>();
+        let mut supervisor = command(
+            &resolved,
+            executable.as_os_str(),
+            &supervisor_args,
+            &generated,
+        );
+        supervisor.process_group(0);
+        let mut child = supervisor.spawn().map_err(|error| {
+            anyhow::anyhow!(
+                "could not start command in stackstead {}: {error}",
+                resolved.stackstead_id
+            )
+        })?;
+        drop(supervisor_control);
+        run_lease.close_after_handoff();
+        let status = child.wait()?;
+        drop(control);
+        status
+    };
+    #[cfg(not(unix))]
+    let status = {
+        let mut command = command(&resolved, program, args, &generated);
+        run_lease.inherit_on_exec()?;
+        let mut child = command.spawn().map_err(|error| {
+            anyhow::anyhow!(
+                "could not start command in stackstead {}: {error}",
+                resolved.stackstead_id
+            )
+        })?;
+        child.wait()?
+    };
     Ok(status)
 }
 

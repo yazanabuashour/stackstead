@@ -27,6 +27,7 @@ use crate::{
 };
 use anyhow::Context;
 use chrono::Utc;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone)]
 pub struct ProjectRuntime {
@@ -39,14 +40,36 @@ impl ProjectRuntime {
         let manifest = self.paths.resolve(name)?;
         validate_manifest_binding(self, &manifest)?;
         validate_pointer_binding(&manifest)?;
+        ensure_no_teardown(&manifest)?;
         Ok(manifest)
     }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum TeardownPhase {
+    RuntimeRemove,
+    SourceRemove,
+    Finalize,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TeardownState {
+    kind: String,
+    version: String,
+    stackstead_id: String,
+    runtime_token: String,
+    phase: TeardownPhase,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    last_error: Option<String>,
 }
 
 #[derive(Debug, Clone)]
 pub struct InspectOutput {
     pub manifest: StacksteadManifest,
     pub live: LiveStatus,
+    pub effective: EffectiveStatus,
     pub warnings: Vec<String>,
 }
 
@@ -55,7 +78,41 @@ pub struct LiveStatus {
     pub runtime_status: ComponentStatus,
     pub services: Vec<compose::ServiceObservation>,
     pub database_reachable: Option<bool>,
+    pub database_status: Option<ComponentStatus>,
     pub health_healthy: Option<bool>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StatusBasis {
+    Live,
+    Recorded,
+    Lifecycle,
+}
+
+impl std::fmt::Display for StatusBasis {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::Live => "live",
+            Self::Recorded => "recorded",
+            Self::Lifecycle => "lifecycle",
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct EffectiveComponent {
+    pub status: ComponentStatus,
+    pub basis: StatusBasis,
+}
+
+#[derive(Debug, Clone)]
+pub struct EffectiveStatus {
+    pub phase: &'static str,
+    pub recorded_at: chrono::DateTime<Utc>,
+    pub observed_at: chrono::DateTime<Utc>,
+    pub runtime: EffectiveComponent,
+    pub database: Option<EffectiveComponent>,
+    pub health: EffectiveComponent,
 }
 
 #[derive(Default)]
@@ -866,6 +923,7 @@ pub fn stop(cwd: &Path, name: &str) -> anyhow::Result<StacksteadManifest> {
     )?;
     manifest = StacksteadManifest::read(&manifest.manifest_path())?;
     validate_manifest_binding(&runtime, &manifest)?;
+    ensure_no_teardown(&manifest)?;
     validate_pointer_binding(&manifest)?;
     validate_source_binding(&manifest)?;
     verify_port_leases(&manifest)?;
@@ -901,72 +959,105 @@ pub fn destroy(cwd: &Path, name: &str) -> anyhow::Result<StacksteadManifest> {
         drop(lock);
         return Ok(manifest);
     }
-    let recovery = if pending {
-        events::DestroyRecovery::None
-    } else {
-        events::destroy_recovery(&manifest.event_log)?
-    };
-    if recovery != events::DestroyRecovery::RemoveState {
+    let teardown = read_teardown(&manifest)?;
+    if teardown
+        .as_ref()
+        .is_none_or(|state| state.phase != TeardownPhase::Finalize)
+    {
         verify_port_leases(&manifest)?;
     }
-    if recovery == events::DestroyRecovery::ResumeSourceRemoval {
-        validate_recovery_source(&manifest)?;
-        finish_source_cleanup(&manifest)?;
-        return finalize_destroy(&runtime, manifest, lock);
-    }
-    if recovery == events::DestroyRecovery::RemoveState {
-        if !source_cleanup_complete(&manifest) {
-            anyhow::bail!("event journal records source removal, but source cleanup is incomplete");
-        }
-        return finalize_destroy(&runtime, manifest, lock);
-    }
-    debug_assert_eq!(recovery, events::DestroyRecovery::None);
-    validate_pointer_binding(&manifest)?;
-    validate_source_binding(&manifest)?;
-    git::ensure_worktree_clean(&manifest.worktree)?;
-    events::append(
-        &manifest.event_log,
-        events::EventType::Destroy,
-        events::EventStatus::Started,
-        None,
-    )?;
-    let environment = manifest.trusted_environment(&manifest.validated_environment()?);
-    run_commands(
-        &runtime.config.hooks.pre_destroy,
-        &manifest.worktree,
-        &environment,
-    )?;
-    validate_source_binding(&manifest)?;
-    validate_pointer_binding(&manifest)?;
-    git::ensure_worktree_clean(&manifest.worktree)?;
-    events::append(
-        &manifest.event_log,
-        events::EventType::RuntimeRemove,
-        events::EventStatus::Started,
-        None,
-    )?;
-    if let Err(error) = compose::down_volumes(&manifest) {
+    let mut phase = if let Some(teardown) = teardown {
+        teardown.phase
+    } else {
+        validate_pointer_binding(&manifest)?;
+        validate_source_binding(&manifest)?;
+        git::ensure_worktree_clean(&manifest.worktree)?;
+        events::append(
+            &manifest.event_log,
+            events::EventType::Destroy,
+            events::EventStatus::Started,
+            None,
+        )?;
+        let environment = manifest.trusted_environment(&manifest.validated_environment()?);
+        run_commands(
+            &runtime.config.hooks.pre_destroy,
+            &manifest.worktree,
+            &environment,
+        )?;
+        write_teardown(&manifest, TeardownPhase::RuntimeRemove, None)?;
+        TeardownPhase::RuntimeRemove
+    };
+    if phase == TeardownPhase::RuntimeRemove {
+        validate_source_binding(&manifest)?;
+        validate_pointer_binding(&manifest)?;
+        git::ensure_worktree_clean(&manifest.worktree)?;
         events::append(
             &manifest.event_log,
             events::EventType::RuntimeRemove,
-            events::EventStatus::Failed,
-            Some(&error.to_string()),
+            events::EventStatus::Started,
+            None,
         )?;
-        return Err(error);
+        let removal = (|| {
+            compose::stop(&manifest)?;
+            compose::down_volumes(&manifest)
+        })();
+        if let Err(error) = removal {
+            write_teardown(
+                &manifest,
+                TeardownPhase::RuntimeRemove,
+                Some(&error.to_string()),
+            )?;
+            events::append(
+                &manifest.event_log,
+                events::EventType::RuntimeRemove,
+                events::EventStatus::Failed,
+                Some(&error.to_string()),
+            )?;
+            return Err(error);
+        }
+        events::append(
+            &manifest.event_log,
+            events::EventType::RuntimeRemove,
+            events::EventStatus::Succeeded,
+            None,
+        )?;
+        write_teardown(&manifest, TeardownPhase::SourceRemove, None)?;
+        phase = TeardownPhase::SourceRemove;
     }
-    events::append(
-        &manifest.event_log,
-        events::EventType::RuntimeRemove,
-        events::EventStatus::Succeeded,
-        None,
-    )?;
-    events::append(
-        &manifest.event_log,
-        events::EventType::SourceRemove,
-        events::EventStatus::Started,
-        None,
-    )?;
-    finish_source_cleanup(&manifest)?;
+    if phase == TeardownPhase::SourceRemove {
+        validate_recovery_source(&manifest)?;
+        events::append(
+            &manifest.event_log,
+            events::EventType::SourceRemove,
+            events::EventStatus::Started,
+            None,
+        )?;
+        let cleanup = match finish_source_cleanup(&manifest) {
+            Ok(()) => Ok(()),
+            Err(initial) if manifest.source_ownership == SourceOwnership::Stackstead => {
+                compose::prepare_owned_source_removal(&manifest)
+                    .with_context(|| {
+                        format!("source cleanup failed before ownership repair: {initial}")
+                    })
+                    .and_then(|()| finish_source_cleanup(&manifest))
+            }
+            Err(error) => Err(error),
+        };
+        if let Err(error) = cleanup {
+            write_teardown(
+                &manifest,
+                TeardownPhase::SourceRemove,
+                Some(&error.to_string()),
+            )?;
+            return Err(error);
+        }
+        write_teardown(&manifest, TeardownPhase::Finalize, None)?;
+        phase = TeardownPhase::Finalize;
+    }
+    debug_assert_eq!(phase, TeardownPhase::Finalize);
+    if !source_cleanup_complete(&manifest) {
+        anyhow::bail!("teardown reached finalize before source cleanup completed");
+    }
     finalize_destroy(&runtime, manifest, lock)
 }
 
@@ -1074,8 +1165,7 @@ fn resolve_destroy_manifest(
         }
         return Ok(manifest);
     }
-    let recovery = events::destroy_recovery(&manifest.event_log)?;
-    if recovery != events::DestroyRecovery::None {
+    if read_teardown(&manifest)?.is_some() {
         return Ok(manifest);
     }
     validate_pointer_binding(&manifest)?;
@@ -1084,6 +1174,61 @@ fn resolve_destroy_manifest(
 
 fn pending_create(manifest: &StacksteadManifest) -> bool {
     !manifest.event_log.exists() && manifest.status.source == ComponentStatus::Created
+}
+
+fn teardown_path(manifest: &StacksteadManifest) -> PathBuf {
+    manifest.state_dir.join("teardown.json")
+}
+
+fn read_teardown(manifest: &StacksteadManifest) -> anyhow::Result<Option<TeardownState>> {
+    let path = teardown_path(manifest);
+    let state: TeardownState = match std::fs::read(&path) {
+        Ok(bytes) => serde_json::from_slice(&bytes)
+            .with_context(|| format!("parse teardown state {}", path.display()))?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+    if state.kind != "StacksteadTeardown"
+        || state.version != "1"
+        || state.stackstead_id != manifest.stackstead_id
+        || state.runtime_token != manifest.runtime_token
+    {
+        anyhow::bail!(
+            "teardown state {} is not bound to stackstead `{}` and its runtime token",
+            path.display(),
+            manifest.stackstead_id
+        );
+    }
+    Ok(Some(state))
+}
+
+pub(crate) fn ensure_no_teardown(manifest: &StacksteadManifest) -> anyhow::Result<()> {
+    if read_teardown(manifest)?.is_some() {
+        anyhow::bail!(
+            "stackstead `{}` has an incomplete teardown; retry `stackstead destroy {} --yes`",
+            manifest.stackstead_id,
+            manifest.stackstead_id
+        );
+    }
+    Ok(())
+}
+
+fn write_teardown(
+    manifest: &StacksteadManifest,
+    phase: TeardownPhase,
+    last_error: Option<&str>,
+) -> anyhow::Result<()> {
+    write_json_atomic(
+        &teardown_path(manifest),
+        &TeardownState {
+            kind: "StacksteadTeardown".into(),
+            version: "1".into(),
+            stackstead_id: manifest.stackstead_id.clone(),
+            runtime_token: manifest.runtime_token.clone(),
+            phase,
+            last_error: last_error.map(command::redact),
+        },
+    )
 }
 
 fn source_cleanup_complete(manifest: &StacksteadManifest) -> bool {
@@ -1138,7 +1283,7 @@ fn finish_source_cleanup(manifest: &StacksteadManifest) -> anyhow::Result<()> {
 
 #[cfg(test)]
 fn validate_completed_source_cleanup(manifest: &StacksteadManifest) -> anyhow::Result<()> {
-    if events::destroy_recovery(&manifest.event_log)? != events::DestroyRecovery::RemoveState
+    if !read_teardown(manifest)?.is_some_and(|state| state.phase == TeardownPhase::Finalize)
         || !source_cleanup_complete(manifest)
     {
         anyhow::bail!("destroy has not recorded completed source cleanup");
@@ -1148,10 +1293,15 @@ fn validate_completed_source_cleanup(manifest: &StacksteadManifest) -> anyhow::R
 
 pub fn inspect(cwd: &Path, name: &str) -> anyhow::Result<InspectOutput> {
     let runtime = load_project(cwd)?;
-    let manifest = runtime.resolve(name)?;
+    let manifest = runtime.paths.resolve(name)?;
+    validate_manifest_binding(&runtime, &manifest)?;
+    let teardown = read_teardown(&manifest)?;
     let mut warnings = vec![];
     if let Err(error) = validate_source_binding(&manifest) {
         warnings.push(format!("source binding is invalid: {error}"));
+    }
+    if let Err(error) = validate_pointer_binding(&manifest) {
+        warnings.push(format!("generated pointer is invalid: {error}"));
     }
     let (runtime_status, services) = match compose::service_observations(&manifest) {
         Ok(services) => {
@@ -1170,12 +1320,26 @@ pub fn inspect(cwd: &Path, name: &str) -> anyhow::Result<InspectOutput> {
             (ComponentStatus::Unknown, vec![])
         }
     };
+    let database_status = manifest
+        .database
+        .as_ref()
+        .map(|_| database::live_status(&manifest, runtime_status));
     let database_reachable = manifest.database.as_ref().map(|database| {
         database::reachable(&database.host, database.port, Duration::from_millis(250))
     });
-    let health_healthy = (runtime_status == ComponentStatus::Running)
-        .then(|| health::healthy_passive(&runtime.config.health, &manifest, &BTreeMap::new()))
-        .flatten();
+    let health_healthy = if runtime_status == ComponentStatus::Running {
+        match observed_passive_health(&runtime.config, &manifest, &services) {
+            Ok(status) => status,
+            Err(error) => {
+                warnings.push(format!(
+                    "could not inspect configured health targets: {error}"
+                ));
+                None
+            }
+        }
+    } else {
+        None
+    };
     if !manifest.worktree.is_dir() {
         warnings.push("worktree is missing; run `stackstead doctor`".into());
     }
@@ -1197,16 +1361,164 @@ pub fn inspect(cwd: &Path, name: &str) -> anyhow::Result<InspectOutput> {
             )),
         }
     }
+    let effective_runtime = EffectiveComponent {
+        status: runtime_status,
+        basis: StatusBasis::Live,
+    };
+    let effective_database = database_status.map(|status| EffectiveComponent {
+        status,
+        basis: StatusBasis::Live,
+    });
+    let effective_health = match health_healthy {
+        Some(healthy) => EffectiveComponent {
+            status: if healthy {
+                ComponentStatus::Ready
+            } else {
+                ComponentStatus::Failed
+            },
+            basis: StatusBasis::Live,
+        },
+        None if runtime.config.health.checks.is_empty()
+            || runtime
+                .config
+                .health
+                .checks
+                .iter()
+                .any(|check| check.url.is_none()) =>
+        {
+            EffectiveComponent {
+                status: manifest.status.health,
+                basis: StatusBasis::Recorded,
+            }
+        }
+        None => EffectiveComponent {
+            status: ComponentStatus::Unknown,
+            basis: StatusBasis::Lifecycle,
+        },
+    };
+    push_status_divergence(
+        &mut warnings,
+        "runtime",
+        manifest.status.runtime,
+        effective_runtime,
+    );
+    if let Some(database) = effective_database {
+        push_status_divergence(
+            &mut warnings,
+            "database",
+            manifest.status.database,
+            database,
+        );
+    }
+    if effective_health.basis == StatusBasis::Live {
+        push_status_divergence(
+            &mut warnings,
+            "health",
+            manifest.status.health,
+            effective_health,
+        );
+    }
+    let phase = match teardown.as_ref() {
+        None => "normal",
+        Some(state) if state.last_error.is_some() => "teardown_failed",
+        Some(_) => "teardown_incomplete",
+    };
+    if phase != "normal" {
+        warnings.push(format!(
+            "lifecycle phase is {phase}; retry `stackstead destroy {} --yes`",
+            manifest.stackstead_id
+        ));
+    }
+    let effective = EffectiveStatus {
+        phase,
+        recorded_at: manifest.updated_at,
+        observed_at: Utc::now(),
+        runtime: effective_runtime,
+        database: effective_database,
+        health: effective_health,
+    };
     Ok(InspectOutput {
         manifest,
         live: LiveStatus {
             runtime_status,
             services,
             database_reachable,
+            database_status,
             health_healthy,
         },
+        effective,
         warnings,
     })
+}
+
+fn observed_passive_health(
+    config: &StacksteadConfig,
+    manifest: &StacksteadManifest,
+    services: &[compose::ServiceObservation],
+) -> anyhow::Result<Option<bool>> {
+    if config.health.checks.is_empty()
+        || config.health.checks.iter().any(|check| check.url.is_none())
+    {
+        return Ok(None);
+    }
+    for check in &config.health.checks {
+        let Some(template) = check.url.as_deref() else {
+            return Ok(None);
+        };
+        let correlation = (|| {
+            let url = render_template(template, &template_context(manifest))?;
+            let endpoint = crate::open::manifest_endpoint(&url, manifest)?;
+            let target = compose::resolve_port_target(
+                &manifest.compose_files,
+                &manifest.container_ports,
+                &config.env.generate,
+                &endpoint.contract_key,
+            )?;
+            Ok::<_, anyhow::Error>((endpoint, target))
+        })();
+        let Ok((endpoint, target)) = correlation else {
+            return Ok(health::healthy_passive(
+                &config.health,
+                manifest,
+                &BTreeMap::new(),
+            ));
+        };
+        if !services
+            .iter()
+            .any(|service| service.service == target.service && service.state == "running")
+            || !compose::endpoint_is_published(
+                manifest,
+                &target.service,
+                target.container_port,
+                &endpoint.endpoint.host,
+                endpoint.endpoint.port,
+            )?
+        {
+            return Ok(Some(false));
+        }
+    }
+    Ok(health::healthy_passive(
+        &config.health,
+        manifest,
+        &BTreeMap::new(),
+    ))
+}
+
+fn push_status_divergence(
+    warnings: &mut Vec<String>,
+    component: &str,
+    recorded: ComponentStatus,
+    effective: EffectiveComponent,
+) {
+    if recorded != ComponentStatus::Unknown
+        && effective.status != ComponentStatus::Unknown
+        && recorded != effective.status
+    {
+        warnings.push(format!(
+            "recorded/live divergence: {component} recorded={recorded} effective={} ({})",
+            effective.status, effective.basis
+        ));
+    }
 }
 
 pub fn regenerate_contract(
@@ -1540,6 +1852,7 @@ pub(crate) fn validate_current_contract(
     manifest: &StacksteadManifest,
 ) -> anyhow::Result<()> {
     validate_manifest_binding(runtime, manifest)?;
+    ensure_no_teardown(manifest)?;
     let expected_compose_files = configured_compose_files(&runtime.config, &manifest.worktree)?;
     let expected_env = paths::safe_generated_path(&manifest.worktree, &runtime.config.env.file)?;
     let expected_context =
@@ -1850,11 +2163,15 @@ mod tests {
     fn partial_destroy_retry_requires_truthful_source_cleanup_state() {
         let directory = tempfile::tempdir().unwrap();
         let external = cleanup_manifest(directory.path(), SourceOwnership::External);
+        assert!(validate_completed_source_cleanup(&external).is_err());
+        write_teardown(&external, TeardownPhase::Finalize, None).unwrap();
         validate_completed_source_cleanup(&external).unwrap();
         std::fs::create_dir(external.worktree.join(".stackstead")).unwrap();
         assert!(validate_completed_source_cleanup(&external).is_err());
 
+        std::fs::remove_dir(external.worktree.join(".stackstead")).unwrap();
         let owned = cleanup_manifest(directory.path(), SourceOwnership::Stackstead);
+        write_teardown(&owned, TeardownPhase::Finalize, None).unwrap();
         validate_completed_source_cleanup(&owned).unwrap();
         std::fs::create_dir_all(&owned.worktree).unwrap();
         assert!(validate_completed_source_cleanup(&owned).is_err());

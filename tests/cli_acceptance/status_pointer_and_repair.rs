@@ -20,10 +20,11 @@ fn runtime_probe_failure_is_reported_without_breaking_inspect_json() {
         .success();
     let inspected: Value =
         serde_json::from_slice(&inspect.get_output().stdout).expect("parse inspect output");
-    assert_eq!(inspected["version"], "2");
+    assert_eq!(inspected["version"], "3");
     assert_eq!(inspected["live"]["runtime"]["running"], false);
     assert_eq!(inspected["live"]["runtime"]["status"], "unknown");
     assert_eq!(inspected["live"]["database"]["status"], "unknown");
+    assert_eq!(inspected["effective"]["runtime"]["basis"], "live");
     assert!(
         inspected["warnings"]
             .as_array()
@@ -101,7 +102,7 @@ exit 97
         .assert()
         .success();
     let inspected: Value = serde_json::from_slice(&json.get_output().stdout).unwrap();
-    assert_eq!(inspected["version"], "2");
+    assert_eq!(inspected["version"], "3");
     assert_eq!(inspected["live"]["runtime"]["status"], "running");
     assert_eq!(inspected["live"]["services"][0]["status"], "completed (0)");
     assert_eq!(inspected["live"]["services"][1]["status"], "exited (7)");
