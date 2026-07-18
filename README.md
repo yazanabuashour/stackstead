@@ -1,6 +1,11 @@
 # Stackstead
 
-**Run parallel coding agents against your real app—without sharing ports, services, or databases.**
+**Run parallel coding agents against your real app—without sharing ports,
+services, or databases.**
+
+> **Early access:** Stackstead is pre-1.0 software for macOS and glibc Linux
+> repositories that use Docker Compose. Contracts may change between any
+> pre-1.0 releases, including patches; pin matching binaries and manager hooks.
 
 - **Your real stack:** reuse the existing Compose topology instead of maintaining
   a second agent-specific environment.
@@ -10,7 +15,7 @@
   agent’s work or state.
 
 Stackstead works with Codex, Claude Code, Cursor, other coding agents, and
-worktree managers.
+worktree managers. [Why Stackstead?](docs/why-stackstead.md)
 
 ## Install
 
@@ -19,11 +24,11 @@ curl -fsSL https://github.com/yazanabuashour/stackstead/releases/latest/download
 ```
 
 This installs the latest checksummed binary to `~/.local/bin`. Stackstead
-supports macOS and glibc Linux and requires Git plus Docker with the Compose
-plugin. See [Installation](docs/install.md) for platform details, pinned releases,
-custom install paths, and building from source.
+requires Git plus Docker with the Compose plugin. See
+[Installation](docs/install.md) for supported platforms, pinned releases, and
+building from source.
 
-## Quick start
+## Try it
 
 In a repository already configured for Stackstead:
 
@@ -31,12 +36,10 @@ In a repository already configured for Stackstead:
 stackstead launch feature-a -- claude
 ```
 
-Stackstead creates a worktree and Compose project, allocates ports, starts the
-services, and launches Claude from that exact worktree and runtime contract.
-Replace `claude` with any agent or command.
-
-To add Stackstead to a repository, ask your coding agent to follow the
-[agent setup guide](docs/agent-setup.md):
+Stackstead creates the worktree, allocates ports, starts the Compose runtime,
+and runs the command inside that exact environment. Replace `claude` with any
+agent or command. To add Stackstead to an existing Compose repository, give your
+coding agent the [setup guide](docs/agent-setup.md) and this prompt:
 
 > Set up Stackstead in this repository. Follow the Stackstead agent setup guide,
 > reuse the existing Compose setup, make the smallest changes needed, and show
@@ -44,62 +47,39 @@ To add Stackstead to a repository, ask your coding agent to follow the
 
 Prefer to do it yourself? Follow the [manual quickstart](docs/quickstart.md).
 
-## Everyday commands
+## Core workflow
 
 ```sh
 stackstead ps
 stackstead inspect <full-id>
-stackstead logs <full-id> --tail 200
 stackstead run <full-id> -- npm test
 stackstead exec <full-id> api -- npm test
-stackstead open <full-id> web
-stackstead db status <full-id>
 stackstead stop <full-id>
 stackstead destroy <full-id> --yes
 ```
 
-`run` executes a host command from the stackstead worktree. `exec` executes a
-command inside one configured, running Compose service.
+Use the full ID printed by `launch` for scripts and runtime-sensitive commands.
+Inside an environment, use `$STACKSTEAD_ID` directly.
 
-Use the full ID printed by `launch` in scripts and runtime-sensitive commands.
-Inside an environment, use `$STACKSTEAD_ID` directly. See
-[Agent integration](docs/agent-integration.md) for generated context and JSON
-workflows.
+## Isolation proof
+
+![Stackstead three-environment isolation proof](docs/assets/stackstead-demo.gif)
+
+The reproducible [three-agent demo](examples/three-agent-demo/README.md) starts
+three real Nginx/Postgres stacks, proves their ports and databases are isolated,
+recovers one after failure, and removes it without touching its peers. The same
+proof runs in CI.
 
 ## Existing worktree managers
 
-When another tool owns the checkout, Stackstead can adopt it without taking
-ownership of the source:
+Stackstead can adopt an externally managed checkout while preserving manager
+ownership. Ready-to-use Worktrunk, workmux, webmux, and generic hooks live in
+[`integrations/`](integrations); see [Manager integrations](docs/integrations.md)
+for the lifecycle and teardown contract.
 
-```sh
-stackstead adopt feature-a --worktree /absolute/path/to/worktree
-stackstead up <full-id>
-stackstead run <full-id> -- claude
-stackstead destroy <full-id> --yes
-```
+## Learn and participate
 
-The external checkout is preserved after teardown. Ready-to-use hooks for
-Worktrunk, workmux, webmux, and generic launchers live in
-[`integrations/`](integrations). See [Manager integrations](docs/integrations.md)
-for the ownership and teardown contract.
-
-## Verified harmony
-
-The [three-agent demo](examples/three-agent-demo/README.md) starts three real
-Nginx/Postgres stacks, proves their ports and databases are isolated, recovers
-one after failure, and tears it down without touching its peers. The same proof
-runs in CI through `scripts/docker-integration.sh`.
-
-## Documentation
-
-- Get started: [Quickstart](docs/quickstart.md) · [Agent setup](docs/agent-setup.md)
-  · [Installation](docs/install.md)
-- Configure and operate: [Configuration](docs/config.md) ·
-  [Lifecycle and cleanup](docs/lifecycle.md) · [Docker Compose](docs/compose.md) ·
-  [Postgres](docs/database.md)
-- Integrate: [Agent integration](docs/agent-integration.md) ·
-  [Manager integrations](docs/integrations.md)
-- Understand the contracts: [Agent and manifest contract](docs/agent-contract.md) ·
-  [Rust architecture](docs/rust-architecture.md)
-- Contribute: [Contributing](CONTRIBUTING.md) · [Security policy](SECURITY.md) ·
-  [CI workflow](.github/workflows/ci.yml)
+- [Documentation index](docs/README.md)
+- [Reliability evidence](docs/reliability.md)
+- [Early adopter program](docs/early-adopters.md)
+- [Contributing](CONTRIBUTING.md) · [Security policy](SECURITY.md)

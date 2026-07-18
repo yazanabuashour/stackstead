@@ -1,0 +1,73 @@
+name: Early adopter report
+description: Evaluate Stackstead on a real Docker Compose repository
+title: "[Early adopter]: "
+labels:
+  - early-adopter
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for evaluating Stackstead. Do not include secrets, `.stackstead/.env`, private source, or private database contents. A repository URL is optional.
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - macOS — Apple Silicon
+        - macOS — Intel
+        - Linux — x86-64 glibc
+        - Linux — ARM64 glibc
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Stackstead version
+      description: Output of `stackstead --version`.
+      placeholder: stackstead 0.1.4
+    validations:
+      required: true
+  - type: textarea
+    id: topology
+    attributes:
+      label: Repository and Compose topology
+      description: Describe the application, service count, databases, and volumes without sharing secrets.
+      placeholder: A TypeScript web app with API, Postgres, Redis, and one worker...
+    validations:
+      required: true
+  - type: textarea
+    id: agents
+    attributes:
+      label: Agent workflow and current collision
+      description: Which agents or worktree manager do you use, and what conflicts today?
+    validations:
+      required: true
+  - type: dropdown
+    id: stage
+    attributes:
+      label: Evaluation stage
+      options:
+        - Interested but not installed
+        - Installed but not configured
+        - First environment running
+        - Multiple environments running
+        - Evaluation completed
+    validations:
+      required: true
+  - type: textarea
+    id: intervention
+    attributes:
+      label: Intervention or unclear behavior
+      description: Note any maintainer help, manual Docker work, guessed identity, or unclear diagnostic that was required.
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Outcome
+      description: What worked, what failed, and did exact teardown leave any owned residue?
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety check
+      options:
+        - label: I did not include secrets, generated environment contents, private source, or private application data.
+          required: true

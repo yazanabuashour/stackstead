@@ -27,9 +27,15 @@ install -d "$HOME/.local/libexec/stackstead-hooks"
 install -m 0755 integrations/hooks/*.sh "$HOME/.local/libexec/stackstead-hooks/"
 ```
 
-When upgrading across an inspection JSON version change, install the matching
-binary and trusted hooks together. The current hooks require inspection version
-3; this pre-release contract does not include rollout or rollback bridges.
+When upgrading across an inspection JSON version change, pause manager lifecycle
+automation and install the matching binary plus every trusted hook copy as one
+maintenance operation from a reviewed release checkout. Verify the binary,
+inspection contract, and every installed hook before resuming. The current hooks
+require inspection version 3; this pre-release contract does not include
+mixed-version rollout or rollback bridges. A rollback must restore the matching
+pair, and an older binary must not resume teardown started by a newer one. The
+[0.1.4 upgrade procedure](upgrade-0.1.4.md) provides the exact verification for
+the 0.1.3 transition.
 
 Do not invoke a relative hook script from a managed worktree: a branch could
 replace it before a manager lifecycle event. `adopt-current.sh` is idempotent:

@@ -47,8 +47,21 @@ cargo install --locked --path .
 
 ## Upgrade
 
-Run the latest-release installer again, then run `stackstead doctor`. Also
-compare the repository policy in your agent instruction file with the current
+Before replacing the binary, finish active agent commands and inspect every
+retained environment. Complete any started or failed destroy with the same old
+binary; retain that pinned binary until the upgrade is verified. Pre-1.0
+teardown recovery formats are not imported across releases.
+
+If a worktree manager uses trusted Stackstead hooks, pause its lifecycle
+automation and update the binary plus every installed hook copy as one
+maintenance operation. Mixed inspection-contract versions fail closed, and a
+rollback must restore the matching pair. Follow the release-specific upgrade
+guide before replacing either side; for 0.1.3, use the complete
+[0.1.4 upgrade procedure](upgrade-0.1.4.md), including exact-target recovery for
+an already failed teardown.
+
+After upgrading, run `stackstead doctor` and compare the repository policy in
+your agent instruction file with the current
 [agent setup guide](agent-setup.md#repository-policy); agent instructions can
 change independently of the binary.
 

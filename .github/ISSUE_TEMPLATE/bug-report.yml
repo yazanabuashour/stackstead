@@ -1,0 +1,61 @@
+name: Bug report
+description: Report a reproducible Stackstead defect
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not report vulnerabilities here; use the private process in SECURITY.md. Never attach `.stackstead/.env`, secrets, private source, or private database contents.
+  - type: input
+    id: version
+    attributes:
+      label: Stackstead version
+      description: Output of `stackstead --version`.
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Operating system and architecture
+      placeholder: macOS 15 arm64 or Ubuntu 24.04 x86_64
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Exact Stackstead command
+      description: Use the durable full ID, but redact private paths and arguments when necessary.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include redacted `doctor`, `inspect`, or event information when useful. Do not copy generated environment contents.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Describe the smallest safe sequence and whether runtime or source residue remains.
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety check
+      options:
+        - label: This is not an undisclosed vulnerability.
+          required: true
+        - label: I did not include secrets, generated environment contents, private source, or private application data.
+          required: true
