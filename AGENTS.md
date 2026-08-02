@@ -26,10 +26,9 @@
 - `stackstead compose plan` is read-only. Use `stackstead compose apply --yes` to
   make supported edits, inspect the diff, and commit `stackstead.yaml` plus its
   Compose file before `create`, `adopt`, or `up`; environments pin committed `source.base`.
-- Stackstead is binary-only; `scripts/check-policy.sh` enforces its crate shape.
-  Do not add a public module surface, plugin abstraction, compatibility layer,
-  or migration path without a concrete current use case. This pre-release
-  codebase prefers explicit breaking cleanup over silent inference.
+- Do not add a plugin abstraction, compatibility layer, or migration path
+  without a concrete current use case. This pre-release codebase prefers
+  explicit breaking cleanup over silent inference.
 - CLI JSON is a versioned transport contract, not a serialized manifest or
   internal type. Prefer `stackstead --json <subcommand> ...`, keep command-owned
   DTOs, validate `kind` and `version` (and mutation `action`), and wrap lists.

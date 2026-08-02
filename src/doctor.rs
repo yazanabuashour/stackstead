@@ -71,6 +71,10 @@ impl Diagnostic {
 }
 
 #[derive(Debug, Clone, Copy)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each boolean is an independent external-tool readiness receipt"
+)]
 struct ToolStatus {
     git: bool,
     docker: bool,
@@ -78,6 +82,11 @@ struct ToolStatus {
     docker_daemon: bool,
 }
 
+#[expect(
+    clippy::too_many_lines,
+    clippy::unnecessary_wraps,
+    reason = "doctor preserves one fallible diagnostic interface while collecting all checks"
+)]
 pub fn run(cwd: &Path) -> anyhow::Result<Vec<Diagnostic>> {
     let mut diagnostics = Vec::new();
     let tools = diagnose_tools(&mut diagnostics);
@@ -315,6 +324,10 @@ fn diagnose_repository(repo_root: &Path, git_available: bool, diagnostics: &mut 
     }
 }
 
+#[expect(
+    clippy::comparison_chain,
+    reason = "the equal/older/newer policy branches read directly in version order"
+)]
 fn diagnose_repository_policy(repo_root: &Path, diagnostics: &mut Vec<Diagnostic>) {
     let mut found = false;
     for name in ["AGENTS.md", "CLAUDE.md"] {
@@ -674,6 +687,10 @@ fn diagnose_project_lock(project_state_dir: &Path, diagnostics: &mut Vec<Diagnos
     });
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "manifest diagnosis reports independent contract failures without short-circuiting"
+)]
 fn diagnose_manifest(
     manifest: &StacksteadManifest,
     config: &StacksteadConfig,
@@ -929,7 +946,7 @@ fn diagnose_stackstead_discovery(manifest: &StacksteadManifest, diagnostics: &mu
                     "{} is correctly discoverable from its worktree",
                     manifest.stackstead_id
                 ),
-            ))
+            ));
         }
         Ok(_) => diagnostics.push(Diagnostic::error(
             "discovery.stackstead_mismatch",

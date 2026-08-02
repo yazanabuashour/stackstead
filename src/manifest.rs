@@ -266,9 +266,7 @@ impl StacksteadPointer {
             .map_err(|error| anyhow::anyhow!("cannot parse pointer {}: {error}", path.display()))?;
         let kind = value.get("kind").and_then(serde_json::Value::as_str);
         let version = value.get("version").and_then(serde_json::Value::as_str);
-        if kind != Some("StacksteadPointer")
-            || !matches!(version, Some("1") | Some(POINTER_VERSION))
-        {
+        if kind != Some("StacksteadPointer") || !matches!(version, Some("1" | POINTER_VERSION)) {
             anyhow::bail!(
                 "unsupported pointer contract in {}: kind={} version={}",
                 path.display(),

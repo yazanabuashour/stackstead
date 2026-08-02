@@ -202,7 +202,11 @@ impl StacksteadConfig {
                 ports.expose.len()
             ));
         }
-        if u32::from(ports.base) + ports.expose.len().saturating_sub(1) as u32 > u32::from(u16::MAX)
+        let exposed_offset = u32::try_from(ports.expose.len().saturating_sub(1))
+            .map_err(|_| ConfigError::Validation("too many exposed services".to_owned()))?;
+        if u32::from(ports.base)
+            .checked_add(exposed_offset)
+            .is_none_or(|last| last > u32::from(u16::MAX))
         {
             return invalid("the first deterministic port slot exceeds port 65535");
         }
@@ -236,7 +240,7 @@ impl StacksteadConfig {
             return invalid("dependencies.link requires provider `yarn-classic`");
         }
 
-        for (hook_name, commands) in self.hooks.iter() {
+        for (hook_name, commands) in self.hooks.entries() {
             for command in commands {
                 if command.command.trim().is_empty() {
                     return invalid(format!("hooks.{hook_name} contains an empty command"));
@@ -646,7 +650,7 @@ pub struct HealthCheckConfig {
 }
 
 impl HooksConfig {
-    fn iter(&self) -> [(&str, &[CommandConfig]); 4] {
+    fn entries(&self) -> [(&str, &[CommandConfig]); 4] {
         [
             ("post_create", &self.post_create),
             ("pre_up", &self.pre_up),
@@ -714,7 +718,7 @@ fn valid_env_name(name: &str) -> bool {
         && chars.all(|character| character.is_ascii_alphanumeric() || character == '_')
 }
 
-pub(crate) fn reserved_process_env(name: &str) -> bool {
+pub fn reserved_process_env(name: &str) -> bool {
     let name = name.to_ascii_uppercase();
     matches!(
         name.as_str(),
@@ -775,23 +779,23 @@ fn default_project_name_template() -> String {
     "{{ project.name }}-{{ stackstead.id }}".to_owned()
 }
 
-fn default_port_base() -> u16 {
+const fn default_port_base() -> u16 {
     39000
 }
 
-fn default_port_stride() -> u16 {
+const fn default_port_stride() -> u16 {
     50
 }
 
-fn default_health_timeout_seconds() -> u64 {
+const fn default_health_timeout_seconds() -> u64 {
     60
 }
 
-fn default_health_interval_millis() -> u64 {
+const fn default_health_interval_millis() -> u64 {
     500
 }
 
-fn default_health_status() -> u16 {
+const fn default_health_status() -> u16 {
     200
 }
 

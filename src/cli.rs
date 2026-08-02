@@ -97,7 +97,7 @@ enum Commands {
     },
     /// Delegate runtime logs to Docker Compose.
     Logs(LogsArgs),
-    /// Locate or print AGENT_CONTEXT.md.
+    /// Locate or print `AGENT_CONTEXT.md`.
     Context {
         name: String,
         #[arg(long)]
@@ -169,6 +169,10 @@ enum ComposeCommand {
 }
 
 impl Cli {
+    #[expect(
+        clippy::too_many_lines,
+        reason = "the CLI dispatcher keeps the command-to-handler mapping in one exhaustive match"
+    )]
     pub fn run(self) -> anyhow::Result<i32> {
         let cwd = std::env::current_dir()?;
         match &self.command {

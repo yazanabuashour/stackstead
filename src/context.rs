@@ -18,6 +18,10 @@ pub fn write_agent_context(manifest: &StacksteadManifest, rules: &[String]) -> a
     Ok(())
 }
 
+#[expect(
+    clippy::format_push_string,
+    reason = "the Markdown renderer is a linear sequence of readable template fragments"
+)]
 pub fn render_agent_context(manifest: &StacksteadManifest, rules: &[String]) -> String {
     let mut output = format!(
         "# Stackstead: {}\n\nProject: {}  \nBranch: {}  \nWorktree: {}  \nCompose project: {}\n\n\

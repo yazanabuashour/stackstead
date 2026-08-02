@@ -11,7 +11,7 @@ mod private {
     pub trait Sealed {}
 }
 
-pub(crate) trait CliOutput: private::Sealed + Serialize {}
+pub trait CliOutput: private::Sealed + Serialize {}
 
 macro_rules! cli_output {
     ($($type:ty),+ $(,)?) => {$(
@@ -21,14 +21,14 @@ macro_rules! cli_output {
 }
 
 #[derive(Debug, Serialize)]
-pub(crate) struct PathOutput {
+pub struct PathOutput {
     kind: &'static str,
     version: &'static str,
     path: PathBuf,
 }
 
 impl PathOutput {
-    pub(crate) fn initialized(path: PathBuf) -> Self {
+    pub(crate) const fn initialized(path: PathBuf) -> Self {
         Self {
             kind: "StacksteadInit",
             version: VERSION,
@@ -38,7 +38,7 @@ impl PathOutput {
 }
 
 #[derive(Debug, Serialize)]
-pub(crate) struct ComposePlanOutput {
+pub struct ComposePlanOutput {
     kind: &'static str,
     version: &'static str,
     file: PathBuf,
@@ -82,7 +82,7 @@ impl From<&compose::ComposePlan> for ComposePlanOutput {
 }
 
 #[derive(Debug, Serialize)]
-pub(crate) struct ComposeApplyOutput {
+pub struct ComposeApplyOutput {
     kind: &'static str,
     version: &'static str,
     file: PathBuf,
@@ -101,7 +101,7 @@ impl From<&compose::ComposeApplyOutput> for ComposeApplyOutput {
 }
 
 #[derive(Debug, Serialize)]
-pub(crate) struct StacksteadChangeOutput {
+pub struct StacksteadChangeOutput {
     kind: &'static str,
     version: &'static str,
     action: &'static str,
@@ -120,14 +120,14 @@ impl StacksteadChangeOutput {
 }
 
 #[derive(Debug, Serialize)]
-pub(crate) struct StacksteadListOutput {
+pub struct StacksteadListOutput {
     kind: &'static str,
     version: &'static str,
     stacksteads: Vec<StacksteadSummaryOutput>,
 }
 
 #[derive(Debug, Serialize)]
-pub(crate) struct StacksteadSummaryOutput {
+pub struct StacksteadSummaryOutput {
     stackstead_id: String,
     branch: String,
     ports: BTreeMap<String, u16>,
@@ -148,7 +148,7 @@ impl StacksteadSummaryOutput {
 }
 
 impl StacksteadListOutput {
-    pub(crate) fn new(stacksteads: Vec<StacksteadSummaryOutput>) -> Self {
+    pub(crate) const fn new(stacksteads: Vec<StacksteadSummaryOutput>) -> Self {
         Self {
             kind: "StacksteadList",
             version: VERSION,
@@ -170,7 +170,7 @@ impl StacksteadSummaryOutput {
         &self.branch
     }
 
-    pub(crate) fn ports(&self) -> &BTreeMap<String, u16> {
+    pub(crate) const fn ports(&self) -> &BTreeMap<String, u16> {
         &self.ports
     }
 
@@ -180,7 +180,7 @@ impl StacksteadSummaryOutput {
 }
 
 #[derive(Debug, Serialize)]
-pub(crate) struct StacksteadInspectionOutput {
+pub struct StacksteadInspectionOutput {
     kind: &'static str,
     version: &'static str,
     stackstead: StacksteadOutput,
@@ -297,7 +297,7 @@ impl StacksteadInspectionOutput {
 }
 
 #[derive(Debug, Serialize)]
-pub(crate) struct EnvironmentOutput {
+pub struct EnvironmentOutput {
     kind: &'static str,
     version: &'static str,
     stackstead_id: String,
@@ -306,7 +306,7 @@ pub(crate) struct EnvironmentOutput {
 }
 
 impl EnvironmentOutput {
-    pub(crate) fn new(
+    pub(crate) const fn new(
         stackstead_id: String,
         path: PathBuf,
         values: BTreeMap<String, String>,
@@ -322,7 +322,7 @@ impl EnvironmentOutput {
 }
 
 #[derive(Debug, Serialize)]
-pub(crate) struct ContextOutput {
+pub struct ContextOutput {
     kind: &'static str,
     version: &'static str,
     stackstead_id: String,
@@ -331,7 +331,7 @@ pub(crate) struct ContextOutput {
 }
 
 impl ContextOutput {
-    pub(crate) fn new(stackstead_id: String, path: PathBuf, content: Option<String>) -> Self {
+    pub(crate) const fn new(stackstead_id: String, path: PathBuf, content: Option<String>) -> Self {
         Self {
             kind: "StacksteadContext",
             version: VERSION,
@@ -343,7 +343,7 @@ impl ContextOutput {
 }
 
 #[derive(Debug, Serialize)]
-pub(crate) struct LogsOutput {
+pub struct LogsOutput {
     kind: &'static str,
     version: &'static str,
     stackstead_id: String,
@@ -353,7 +353,7 @@ pub(crate) struct LogsOutput {
 }
 
 impl LogsOutput {
-    pub(crate) fn new(
+    pub(crate) const fn new(
         stackstead_id: String,
         service: Option<String>,
         tail: usize,
@@ -371,7 +371,7 @@ impl LogsOutput {
 }
 
 #[derive(Debug, Serialize)]
-pub(crate) struct OpenOutput {
+pub struct OpenOutput {
     kind: &'static str,
     version: &'static str,
     stackstead_id: String,
@@ -380,7 +380,7 @@ pub(crate) struct OpenOutput {
 }
 
 impl OpenOutput {
-    pub(crate) fn new(stackstead_id: String, url: String) -> Self {
+    pub(crate) const fn new(stackstead_id: String, url: String) -> Self {
         Self {
             kind: "StacksteadOpen",
             version: VERSION,
@@ -392,7 +392,7 @@ impl OpenOutput {
 }
 
 #[derive(Debug, Serialize)]
-pub(crate) struct DatabaseStatusOutput {
+pub struct DatabaseStatusOutput {
     kind: &'static str,
     version: &'static str,
     stackstead_id: String,
@@ -427,7 +427,7 @@ impl DatabaseStatusOutput {
 }
 
 #[derive(Debug, Serialize)]
-pub(crate) struct DoctorOutput {
+pub struct DoctorOutput {
     kind: &'static str,
     version: &'static str,
     ok: bool,
@@ -472,7 +472,7 @@ impl DoctorOutput {
         }
     }
 
-    pub(crate) fn has_errors(&self) -> bool {
+    pub(crate) const fn has_errors(&self) -> bool {
         self.error_count != 0
     }
 }

@@ -106,10 +106,12 @@ pub fn configured_status_with_timeout(
     let mut child = configured
         .spawn()
         .map_err(|error| anyhow::anyhow!("could not run {program}: {error}"))?;
-    let deadline = Instant::now() + timeout;
+    let deadline = Instant::now()
+        .checked_add(timeout)
+        .ok_or_else(|| anyhow::anyhow!("command timeout exceeds the supported Instant range"))?;
     loop {
         if let Some(status) = child.try_wait()? {
-            terminate_descendants_after_exit(&mut child)?;
+            terminate_descendants_after_exit(&child)?;
             return Ok(Some(status));
         }
         if Instant::now() >= deadline {
@@ -121,9 +123,7 @@ pub fn configured_status_with_timeout(
 }
 
 #[cfg(unix)]
-pub(crate) fn terminate_descendants_after_exit(
-    child: &mut std::process::Child,
-) -> std::io::Result<()> {
+pub fn terminate_descendants_after_exit(child: &std::process::Child) -> std::io::Result<()> {
     kill_process_group(child)
 }
 
@@ -224,12 +224,18 @@ pub fn redact_with_env(value: &str, env: &BTreeMap<String, String>) -> String {
         ranges.extend(
             value
                 .match_indices(secret)
-                .map(|(start, matched)| (start, start + matched.len())),
+                .map(|(start, matched)| (start, start.saturating_add(matched.len()))),
         );
     }
     replace_ranges(value, ranges)
 }
 
+#[expect(
+    clippy::arithmetic_side_effects,
+    clippy::indexing_slicing,
+    clippy::string_slice,
+    reason = "the byte scanner checks every index and only slices at ASCII token boundaries"
+)]
 fn sensitive_assignment_ranges(value: &str) -> Vec<(usize, usize)> {
     let bytes = value.as_bytes();
     let mut ranges = Vec::new();
@@ -292,6 +298,12 @@ fn sensitive_assignment_ranges(value: &str) -> Vec<(usize, usize)> {
     ranges
 }
 
+#[expect(
+    clippy::arithmetic_side_effects,
+    clippy::indexing_slicing,
+    clippy::string_slice,
+    reason = "the byte scanner checks every index and only slices at ASCII header boundaries"
+)]
 fn sensitive_header_ranges(value: &str) -> Vec<(usize, usize)> {
     const HEADERS: [&str; 5] = [
         "authorization",
@@ -350,6 +362,12 @@ fn sensitive_header_ranges(value: &str) -> Vec<(usize, usize)> {
     ranges
 }
 
+#[expect(
+    clippy::arithmetic_side_effects,
+    clippy::indexing_slicing,
+    clippy::string_slice,
+    reason = "the byte scanner checks every index and only slices at ASCII URL delimiters"
+)]
 fn credential_url_ranges(value: &str) -> Vec<(usize, usize)> {
     let bytes = value.as_bytes();
     let mut ranges = Vec::new();
@@ -397,6 +415,10 @@ fn known_secret_values(env: &BTreeMap<String, String>) -> Vec<&str> {
     secrets
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "all ranges originate from match_indices or the checked ASCII scanners above"
+)]
 fn replace_ranges(value: &str, mut ranges: Vec<(usize, usize)>) -> String {
     ranges.sort_unstable_by_key(|&(start, end)| (start, std::cmp::Reverse(end)));
     let mut merged: Vec<(usize, usize)> = Vec::new();
@@ -420,6 +442,11 @@ fn replace_ranges(value: &str, mut ranges: Vec<(usize, usize)>) -> String {
     redacted
 }
 
+#[expect(
+    clippy::arithmetic_side_effects,
+    clippy::indexing_slicing,
+    reason = "the loop bounds every byte access and advances by one within the slice length"
+)]
 fn quoted_end(bytes: &[u8], mut index: usize, quote: u8, include_quote: bool) -> usize {
     let mut escaped = false;
     while index < bytes.len() {
@@ -435,15 +462,15 @@ fn quoted_end(bytes: &[u8], mut index: usize, quote: u8, include_quote: bool) ->
     bytes.len()
 }
 
-fn is_name_start(byte: u8) -> bool {
+const fn is_name_start(byte: u8) -> bool {
     byte == b'_' || byte.is_ascii_alphabetic()
 }
 
-fn is_name_character(byte: u8) -> bool {
+const fn is_name_character(byte: u8) -> bool {
     byte == b'_' || byte.is_ascii_alphanumeric()
 }
 
-fn is_scheme_character(byte: u8) -> bool {
+const fn is_scheme_character(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'-' | b'.')
 }
 

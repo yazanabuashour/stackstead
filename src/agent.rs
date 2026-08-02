@@ -20,7 +20,7 @@ pub fn run(
     run_with_locks(cwd, name, program, args, None)
 }
 
-pub(crate) fn run_after_up(
+pub fn run_after_up(
     cwd: &Path,
     name: &str,
     program: &OsStr,
@@ -94,7 +94,7 @@ pub fn exec(
         &environment,
         &removed,
         run_lease,
-        format!(
+        &format!(
             "could not execute command in Compose service `{service}` for {}",
             resolved.stackstead_id
         ),
@@ -108,7 +108,7 @@ fn foreground_status(
     environment: &std::collections::BTreeMap<String, String>,
     removed: &[String],
     run_lease: LockGuard,
-    start_error: String,
+    start_error: &str,
 ) -> anyhow::Result<ExitStatus> {
     let mut command = command(manifest, program, args, environment, removed);
     run_lease.inherit_on_exec()?;
@@ -165,7 +165,7 @@ fn run_with_locks(
         &environment,
         &[],
         run_lease,
-        format!(
+        &format!(
             "could not start command in stackstead {}",
             resolved.stackstead_id
         ),
@@ -179,7 +179,7 @@ fn supervised_status(
     environment: &std::collections::BTreeMap<String, String>,
     removed: &[String],
     run_lease: LockGuard,
-    start_error: String,
+    start_error: &str,
 ) -> anyhow::Result<ExitStatus> {
     #[cfg(unix)]
     {
@@ -239,7 +239,7 @@ pub fn exit_code(status: ExitStatus) -> i32 {
     #[cfg(unix)]
     {
         use std::os::unix::process::ExitStatusExt;
-        128 + status.signal().unwrap_or(1)
+        128_i32.saturating_add(status.signal().unwrap_or(1))
     }
 
     #[cfg(not(unix))]

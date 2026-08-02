@@ -82,15 +82,15 @@ pub fn new_short_id() -> anyhow::Result<String> {
     new_random_hex()
 }
 
-pub(crate) fn new_random_hex() -> anyhow::Result<String> {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
+pub fn new_random_hex() -> anyhow::Result<String> {
+    use std::fmt::Write as _;
+
     let mut bytes = [0_u8; RANDOM_ID_BYTES];
     getrandom::fill(&mut bytes)
         .map_err(|error| anyhow::anyhow!("cannot generate a secure runtime identity: {error}"))?;
     let mut value = String::with_capacity(RANDOM_ID_BYTES * 2);
     for byte in bytes {
-        value.push(HEX[(byte >> 4) as usize] as char);
-        value.push(HEX[(byte & 0x0f) as usize] as char);
+        write!(value, "{byte:02x}")?;
     }
     Ok(value)
 }

@@ -75,14 +75,13 @@ pub fn launch_endpoint(
     Ok(Some(launch))
 }
 
-pub(crate) fn manifest_endpoint(
+pub fn manifest_endpoint(
     url: &str,
     manifest: &StacksteadManifest,
 ) -> anyhow::Result<LaunchEndpoint> {
     let endpoint = parse_loopback_endpoint(url).ok_or_else(|| {
         anyhow::anyhow!(
-            "refusing to open non-loopback URL `{}`; use --print to inspect it without launching a browser",
-            url
+            "refusing to open non-loopback URL `{url}`; use --print to inspect it without launching a browser"
         )
     })?;
     let matching = manifest

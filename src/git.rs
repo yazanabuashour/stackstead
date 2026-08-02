@@ -9,7 +9,7 @@ use anyhow::Context;
 
 use crate::command;
 
-fn empty_env() -> BTreeMap<String, String> {
+const fn empty_env() -> BTreeMap<String, String> {
     BTreeMap::new()
 }
 

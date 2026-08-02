@@ -228,8 +228,7 @@ fn plan_contents(repo_root: &Path, file: &Path, contents: &str) -> anyhow::Resul
 
     let relative = file
         .strip_prefix(repo_root)
-        .map(Path::to_owned)
-        .unwrap_or_else(|_| file.to_owned());
+        .map_or_else(|_| file.to_owned(), Path::to_owned);
     Ok(ComposePlan {
         file: relative,
         ports: discovered,
@@ -312,7 +311,7 @@ fn port_declarations(
                 );
             }
             let count = service_counts.entry(service.to_owned()).or_insert(0usize);
-            *count += 1;
+            *count = count.saturating_add(1);
             let name = if *count == 1 {
                 service.to_owned()
             } else {
@@ -401,7 +400,9 @@ pub fn validate_port_contract(
         );
     }
     for (name, expected_container) in expected_containers {
-        let (container, variable, file) = &actual[name];
+        let (container, variable, file) = actual.get(name).ok_or_else(|| {
+            anyhow::anyhow!("Compose port `{name}` disappeared during validation")
+        })?;
         if container != expected_container {
             anyhow::bail!(
                 "Compose port `{name}` publishes container port {container}, expected {expected_container} in {}",
@@ -502,7 +503,10 @@ pub fn apply_at(repo_root: &Path, requested: Option<&Path>) -> anyhow::Result<Co
     let mut output = Vec::new();
 
     for (index, line) in contents.lines().enumerate() {
-        let Some(fixed) = fixed.iter().find(|fixed| fixed.file_line == index + 1) else {
+        let Some(fixed) = fixed
+            .iter()
+            .find(|fixed| fixed.file_line == index.saturating_add(1))
+        else {
             output.push(line.to_owned());
             continue;
         };
@@ -511,15 +515,14 @@ pub fn apply_at(repo_root: &Path, requested: Option<&Path>) -> anyhow::Result<Co
             .iter()
             .filter(|port| port.current_host_port == Some(fixed.host_port))
             .collect::<Vec<_>>();
-        if matches.len() != 1 {
+        let [port] = matches.as_slice() else {
             anyhow::bail!(
                 "cannot safely rewrite host port {} on line {}: expected one discovered service, found {}",
                 fixed.host_port,
                 fixed.file_line,
                 matches.len()
             );
-        }
-        let port = matches[0];
+        };
         let replacement = if fixed.mapping.starts_with("published:") {
             format!("published: \"${{{}}}\"", port.env)
         } else {
@@ -542,7 +545,7 @@ pub fn apply_at(repo_root: &Path, requested: Option<&Path>) -> anyhow::Result<Co
             let indentation = line.strip_suffix(line.trim_start()).unwrap_or_default();
             output.push(format!("{indentation}host_ip: \"127.0.0.1\""));
         }
-        changed_lines += 1;
+        changed_lines = changed_lines.saturating_add(1);
     }
 
     if changed_lines > 0 {
@@ -551,7 +554,6 @@ pub fn apply_at(repo_root: &Path, requested: Option<&Path>) -> anyhow::Result<Co
             .ok_or_else(|| anyhow::anyhow!("Compose path has no parent"))?;
         let permissions = std::fs::metadata(&path)?.permissions();
         let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
-        use std::io::Write;
         temporary.write_all(output.join("\n").as_bytes())?;
         if contents.ends_with('\n') {
             temporary.write_all(b"\n")?;
@@ -638,12 +640,13 @@ fn rsplit_port_separator(value: &str) -> Option<(&str, &str)> {
     let mut brackets = 0usize;
     for (index, character) in value.char_indices().rev() {
         match character {
-            '}' => braces += 1,
+            '}' => braces = braces.saturating_add(1),
             '{' => braces = braces.saturating_sub(1),
-            ']' => brackets += 1,
+            ']' => brackets = brackets.saturating_add(1),
             '[' => brackets = brackets.saturating_sub(1),
             ':' if braces == 0 && brackets == 0 => {
-                return Some((&value[..index], &value[index + 1..]));
+                let (left, right) = value.split_at(index);
+                return Some((left, right.strip_prefix(':')?));
             }
             _ => {}
         }
@@ -659,7 +662,7 @@ fn compose_variable(value: &str) -> Option<String> {
             .chars()
             .take_while(|character| character.is_ascii_alphanumeric() || *character == '_')
             .count();
-        (&inner[..name_len], &inner[name_len..])
+        (inner.get(..name_len)?, inner.get(name_len..)?)
     } else {
         (raw, "")
     };
@@ -759,7 +762,7 @@ fn ownership_override_path(manifest: &StacksteadManifest) -> PathBuf {
     manifest.worktree.join(OWNERSHIP_OVERRIDE)
 }
 
-pub(crate) fn verify_ownership_override(manifest: &StacksteadManifest) -> anyhow::Result<()> {
+pub fn verify_ownership_override(manifest: &StacksteadManifest) -> anyhow::Result<()> {
     let path = ownership_override_path(manifest);
     let expected = render_ownership_override(manifest)?;
     let actual = std::fs::read_to_string(&path).map_err(|error| {
@@ -780,7 +783,7 @@ pub(crate) fn verify_ownership_override(manifest: &StacksteadManifest) -> anyhow
     Ok(())
 }
 
-pub(crate) fn ensure_service_configured(
+pub fn ensure_service_configured(
     manifest: &StacksteadManifest,
     service: &str,
 ) -> anyhow::Result<()> {
@@ -1009,9 +1012,7 @@ fn validate_service_volumes(
                 })?,
                 None => "volume",
             };
-            if kind != "volume" {
-                None
-            } else {
+            if kind == "volume" {
                 Some(
                     mapping
                         .get(serde_yaml::Value::String("source".into()))
@@ -1023,6 +1024,8 @@ fn validate_service_volumes(
                             )
                         })?,
                 )
+            } else {
+                None
             }
         } else {
             anyhow::bail!(
@@ -1042,7 +1045,7 @@ fn validate_service_volumes(
     Ok(())
 }
 
-pub(crate) fn docker_environment(
+pub fn docker_environment(
     manifest: &StacksteadManifest,
 ) -> anyhow::Result<(Vec<String>, BTreeMap<String, String>)> {
     let generated = manifest.validated_environment()?;
@@ -1321,7 +1324,7 @@ pub fn verify_owned_runtime(manifest: &StacksteadManifest) -> anyhow::Result<()>
     Ok(())
 }
 
-pub(crate) fn remove_runtime_claim(manifest: &StacksteadManifest) -> anyhow::Result<()> {
+pub fn remove_runtime_claim(manifest: &StacksteadManifest) -> anyhow::Result<()> {
     if !runtime_claim_exists(manifest)? {
         return Ok(());
     }
@@ -1915,7 +1918,7 @@ pub fn detect_fixed_host_ports(contents: &str) -> Vec<FixedPort> {
                 let raw = value.trim();
                 let published = raw.trim_matches(['\'', '"']);
                 return published.parse::<u16>().ok().map(|host_port| FixedPort {
-                    file_line: index + 1,
+                    file_line: index.saturating_add(1),
                     host_port,
                     mapping: format!("published: {raw}"),
                 });
@@ -1936,7 +1939,7 @@ pub fn detect_fixed_host_ports(contents: &str) -> Vec<FixedPort> {
                 _ => return None,
             };
             host.parse::<u16>().ok().map(|host_port| FixedPort {
-                file_line: index + 1,
+                file_line: index.saturating_add(1),
                 host_port,
                 mapping: mapping.to_string(),
             })

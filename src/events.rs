@@ -41,6 +41,10 @@ pub enum EventStatus {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
+#[expect(
+    clippy::struct_field_names,
+    reason = "event_type is the stable serialized contract field"
+)]
 pub struct Event {
     pub kind: String,
     pub version: String,
@@ -102,12 +106,12 @@ pub fn read(path: &Path) -> anyhow::Result<EventLog> {
         let mut line = Vec::new();
         let read = reader
             .by_ref()
-            .take((MAX_EVENT_BYTES + 2) as u64)
+            .take(u64::try_from(MAX_EVENT_BYTES.saturating_add(2))?)
             .read_until(b'\n', &mut line)?;
         if read == 0 {
             break;
         }
-        record += 1;
+        record = record.saturating_add(1);
         let terminated = line.last() == Some(&b'\n');
         if terminated {
             line.pop();
@@ -162,18 +166,22 @@ fn truncate_torn_tail(file: &mut File) -> anyhow::Result<()> {
     file.seek(SeekFrom::End(-1))?;
     let mut last = [0u8; 1];
     file.read_exact(&mut last)?;
-    if last[0] == b'\n' {
+    if last.first() == Some(&b'\n') {
         return Ok(());
     }
 
     let mut buffer = [0u8; 8192];
     while end > 0 {
-        let start = end.saturating_sub(buffer.len() as u64);
-        let length = usize::try_from(end - start)?;
+        let start = end.saturating_sub(u64::try_from(buffer.len())?);
+        let length = usize::try_from(end.saturating_sub(start))?;
         file.seek(SeekFrom::Start(start))?;
-        file.read_exact(&mut buffer[..length])?;
-        if let Some(index) = buffer[..length].iter().rposition(|byte| *byte == b'\n') {
-            file.set_len(start + index as u64 + 1)?;
+        let window = buffer
+            .get_mut(..length)
+            .ok_or_else(|| anyhow::anyhow!("event log repair window exceeds its buffer"))?;
+        file.read_exact(window)?;
+        if let Some(index) = window.iter().rposition(|byte| *byte == b'\n') {
+            let newline = u64::try_from(index)?.saturating_add(1);
+            file.set_len(start.saturating_add(newline))?;
             return Ok(());
         }
         end = start;
@@ -189,7 +197,7 @@ fn bounded_message(message: &str) -> String {
     }
     let mut end = MAX_MESSAGE_BYTES;
     while !message.is_char_boundary(end) {
-        end -= 1;
+        end = end.saturating_sub(1);
     }
     message.truncate(end);
     message.push_str(" [truncated]");

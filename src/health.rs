@@ -18,7 +18,9 @@ pub fn wait(
     if config.checks.is_empty() {
         return Ok(());
     }
-    let deadline = Instant::now() + Duration::from_secs(config.timeout_seconds);
+    let deadline = Instant::now()
+        .checked_add(Duration::from_secs(config.timeout_seconds))
+        .ok_or_else(|| anyhow::anyhow!("health timeout exceeds the supported Instant range"))?;
     loop {
         let failed = failed_checks(config, manifest, environment, deadline);
         if failed.is_empty() {
@@ -43,17 +45,11 @@ pub fn healthy_passive(
     manifest: &StacksteadManifest,
     environment: &BTreeMap<String, String>,
 ) -> Option<bool> {
-    (!config.checks.is_empty() && config.checks.iter().all(|check| check.url.is_some())).then(
-        || {
-            failed_checks(
-                config,
-                manifest,
-                environment,
-                Instant::now() + Duration::from_secs(2),
-            )
-            .is_empty()
-        },
-    )
+    if config.checks.is_empty() || config.checks.iter().any(|check| check.url.is_none()) {
+        return None;
+    }
+    let deadline = Instant::now().checked_add(Duration::from_secs(2))?;
+    Some(failed_checks(config, manifest, environment, deadline).is_empty())
 }
 
 fn failed_checks(

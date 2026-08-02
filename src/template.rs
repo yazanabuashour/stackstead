@@ -73,6 +73,14 @@ pub fn validate_template_keys<'a>(
     Ok(())
 }
 
+#[expect(
+    clippy::arithmetic_side_effects,
+    reason = "str::find offsets and fixed ASCII delimiters keep these positions in bounds"
+)]
+#[expect(
+    clippy::string_slice,
+    reason = "all offsets come from str::find and therefore lie on UTF-8 boundaries"
+)]
 fn parse_template(template: &str) -> Result<Vec<TemplatePart<'_>>, TemplateError> {
     let mut parts = Vec::new();
     let mut cursor = 0;

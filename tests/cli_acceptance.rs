@@ -1,3 +1,14 @@
+#![expect(
+    clippy::as_conversions,
+    clippy::cast_possible_truncation,
+    clippy::indexing_slicing,
+    clippy::panic_in_result_fn,
+    clippy::redundant_clone,
+    clippy::redundant_pub_crate,
+    clippy::too_many_lines,
+    reason = "acceptance tests return Result for setup while assertions and direct fixture access report failures"
+)]
+
 use std::{
     collections::BTreeSet,
     ffi::OsString,

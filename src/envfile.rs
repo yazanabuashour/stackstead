@@ -120,13 +120,11 @@ fn encode_value(value: &str) -> String {
 }
 
 fn decode_value(value: &str) -> anyhow::Result<String> {
-    if value.starts_with('"') {
-        if !value.ends_with('"') || value.len() < 2 {
-            anyhow::bail!("unterminated quoted env value");
-        }
-        Ok(value[1..value.len() - 1]
-            .replace("\\\"", "\"")
-            .replace("\\\\", "\\"))
+    if let Some(quoted) = value.strip_prefix('"') {
+        let quoted = quoted
+            .strip_suffix('"')
+            .ok_or_else(|| anyhow::anyhow!("unterminated quoted env value"))?;
+        Ok(quoted.replace("\\\"", "\"").replace("\\\\", "\\"))
     } else {
         Ok(value.to_string())
     }

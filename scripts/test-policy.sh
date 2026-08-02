@@ -29,12 +29,21 @@ unsafe_code = "deny"
 unsafe_op_in_unsafe_fn = "deny"
 
 [lints.clippy]
+pedantic = { level = "deny", priority = -1 }
+nursery = { level = "deny", priority = -1 }
 allow_attributes = "deny"
 allow_attributes_without_reason = "deny"
+arithmetic_side_effects = "deny"
+as_conversions = "deny"
+exit = "deny"
 expect_used = "deny"
+indexing_slicing = "deny"
 multiple_unsafe_ops_per_block = "deny"
 panic = "deny"
+panic_in_result_fn = "deny"
+string_slice = "deny"
 todo = "deny"
+unchecked_duration_subtraction = "deny"
 undocumented_unsafe_blocks = "deny"
 unnecessary_safety_comment = "deny"
 unimplemented = "deny"
@@ -69,7 +78,34 @@ while IFS='|' read -r section setting; do
   mv "$policy_fixture/Cargo.toml.next" "$policy_fixture/Cargo.toml"
   validate_policy_manifest
   expect_policy_failure "missing [$section] $setting"
+done <<'EOF'
+package|autolib = false
+lints.rust|unfulfilled_lint_expectations = "deny"
+lints.rust|unsafe_code = "deny"
+lints.rust|unsafe_op_in_unsafe_fn = "deny"
+lints.clippy|pedantic = { level = "deny", priority = -1 }
+lints.clippy|nursery = { level = "deny", priority = -1 }
+lints.clippy|allow_attributes = "deny"
+lints.clippy|allow_attributes_without_reason = "deny"
+lints.clippy|arithmetic_side_effects = "deny"
+lints.clippy|as_conversions = "deny"
+lints.clippy|exit = "deny"
+lints.clippy|expect_used = "deny"
+lints.clippy|indexing_slicing = "deny"
+lints.clippy|multiple_unsafe_ops_per_block = "deny"
+lints.clippy|panic = "deny"
+lints.clippy|panic_in_result_fn = "deny"
+lints.clippy|string_slice = "deny"
+lints.clippy|todo = "deny"
+lints.clippy|unchecked_duration_subtraction = "deny"
+lints.clippy|undocumented_unsafe_blocks = "deny"
+lints.clippy|unnecessary_safety_comment = "deny"
+lints.clippy|unimplemented = "deny"
+lints.clippy|unreachable = "deny"
+lints.clippy|unwrap_used = "deny"
+EOF
 
+while IFS='|' read -r section setting; do
   reset_policy_fixture
   awk -v drop="$setting" '$0 != drop' "$policy_fixture/Cargo.toml" \
     >"$policy_fixture/Cargo.toml.next"
@@ -83,24 +119,16 @@ while IFS='|' read -r section setting; do
 done <<'EOF'
 package|autolib = false
 lints.rust|unfulfilled_lint_expectations = "deny"
-lints.rust|unsafe_code = "deny"
-lints.rust|unsafe_op_in_unsafe_fn = "deny"
-lints.clippy|allow_attributes = "deny"
-lints.clippy|allow_attributes_without_reason = "deny"
-lints.clippy|expect_used = "deny"
-lints.clippy|multiple_unsafe_ops_per_block = "deny"
-lints.clippy|panic = "deny"
-lints.clippy|todo = "deny"
-lints.clippy|undocumented_unsafe_blocks = "deny"
-lints.clippy|unnecessary_safety_comment = "deny"
-lints.clippy|unimplemented = "deny"
-lints.clippy|unreachable = "deny"
-lints.clippy|unwrap_used = "deny"
+lints.clippy|pedantic = { level = "deny", priority = -1 }
 EOF
 
 reset_policy_fixture
 printf 'pub fn library() {}\n' >"$policy_fixture/src/lib.rs"
 expect_policy_failure src/lib.rs
+
+reset_policy_fixture
+printf 'pub mod exposed {}\n' >"$policy_fixture/src/main.rs"
+expect_policy_failure 'a public Rust module'
 
 for header in '[lib] # explicit target' '[ lib ]'; do
   reset_policy_fixture

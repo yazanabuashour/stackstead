@@ -8,12 +8,12 @@ use std::{
 };
 
 #[cfg(unix)]
-pub(crate) const ARGUMENT: &str = "__stackstead_run_supervisor_v1";
+pub const ARGUMENT: &str = "__stackstead_run_supervisor_v1";
 #[cfg(unix)]
 const GRACE: Duration = Duration::from_millis(500);
 
 #[cfg(unix)]
-pub(crate) fn run_if_requested() -> Option<i32> {
+pub fn run_if_requested() -> Option<i32> {
     (std::env::args_os().nth(1).as_deref() == Some(std::ffi::OsStr::new(ARGUMENT))).then(|| {
         run().unwrap_or_else(|error| {
             eprintln!("error: private run supervisor failed: {error:#}");
@@ -150,7 +150,7 @@ fn validate_lease(
 }
 
 #[cfg(unix)]
-pub(crate) fn set_cloexec(fd: &impl AsFd, enabled: bool) -> std::io::Result<()> {
+pub fn set_cloexec(fd: &impl AsFd, enabled: bool) -> std::io::Result<()> {
     let mut flags = rustix::io::fcntl_getfd(fd)?;
     if enabled {
         flags.insert(rustix::io::FdFlags::CLOEXEC);
@@ -200,7 +200,9 @@ fn cancel_target(
     group: rustix::process::Pid,
 ) -> std::io::Result<()> {
     signal_group(group, rustix::process::Signal::TERM)?;
-    let deadline = Instant::now() + GRACE;
+    let deadline = Instant::now()
+        .checked_add(GRACE)
+        .ok_or_else(|| std::io::Error::other("supervisor grace period exceeds Instant range"))?;
     while Instant::now() < deadline {
         match child.try_wait() {
             Ok(Some(_)) => {
@@ -278,7 +280,7 @@ fn cleanup_adopted_children() -> std::io::Result<()> {
 fn reap_children() -> std::io::Result<()> {
     loop {
         match rustix::process::wait(rustix::process::WaitOptions::NOHANG) {
-            Ok(Some(_)) => continue,
+            Ok(Some(_)) => {}
             Ok(None) | Err(rustix::io::Errno::CHILD) => return Ok(()),
             Err(error) => return Err(error.into()),
         }

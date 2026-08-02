@@ -116,7 +116,7 @@ pub struct EffectiveStatus {
 }
 
 #[derive(Default)]
-pub(crate) struct UpTimings {
+pub struct UpTimings {
     pub dependencies: Duration,
     pub runtime: Duration,
     pub database: Option<Duration>,
@@ -126,14 +126,14 @@ pub(crate) struct UpTimings {
     pub total: Duration,
 }
 
-pub(crate) struct UpOutcome {
+pub struct UpOutcome {
     pub manifest: StacksteadManifest,
     pub timings: UpTimings,
     pub mutation_lock: LockGuard,
     pub run_lease: LockGuard,
 }
 
-pub(crate) struct CreateOutcome {
+pub struct CreateOutcome {
     pub manifest: StacksteadManifest,
     pub mutation_lock: LockGuard,
 }
@@ -211,7 +211,7 @@ pub fn load_project(cwd: &Path) -> anyhow::Result<ProjectRuntime> {
             let config = StacksteadConfig::load(&repo_root.join("stackstead.yaml"))?;
             let state_root = config.validated_state_root(repo_root)?;
             let project = config.project.name.clone();
-            return finish_project(config, repo_root.clone(), state_root, project);
+            return finish_project(config, repo_root, &state_root, &project);
         }
         Discovery::Stackstead {
             pointer, manifest, ..
@@ -222,25 +222,25 @@ pub fn load_project(cwd: &Path) -> anyhow::Result<ProjectRuntime> {
         ),
     };
     let config = StacksteadConfig::load(&repo_root.join("stackstead.yaml"))?;
-    finish_project(config, repo_root, state_root, project)
+    finish_project(config, &repo_root, &state_root, &project)
 }
 
 fn finish_project(
     config: StacksteadConfig,
-    repo_root: PathBuf,
-    state_root: PathBuf,
-    project: String,
+    repo_root: &Path,
+    state_root: &Path,
+    project: &str,
 ) -> anyhow::Result<ProjectRuntime> {
     config.validate()?;
-    let repo_root = paths::normalize_absolute(&repo_root)?;
-    let state_root = paths::normalize_absolute(&state_root)?;
+    let repo_root = paths::normalize_absolute(repo_root)?;
+    let state_root = paths::normalize_absolute(state_root)?;
     if state_root.parent().is_none() {
         anyhow::bail!("state.root must not resolve to the filesystem root");
     }
     if state_root == repo_root {
         anyhow::bail!("state.root must not resolve to the repository root");
     }
-    let paths = ProjectPaths::new(repo_root, state_root, &project);
+    let paths = ProjectPaths::new(repo_root, state_root, project);
     Ok(ProjectRuntime { config, paths })
 }
 
@@ -248,7 +248,7 @@ pub fn create(cwd: &Path, name: &str) -> anyhow::Result<StacksteadManifest> {
     Ok(provision(cwd, name, None)?.manifest)
 }
 
-pub(crate) fn create_for_launch(cwd: &Path, name: &str) -> anyhow::Result<CreateOutcome> {
+pub fn create_for_launch(cwd: &Path, name: &str) -> anyhow::Result<CreateOutcome> {
     provision(cwd, name, None)
 }
 
@@ -256,6 +256,10 @@ pub fn adopt(cwd: &Path, name: &str, worktree: &Path) -> anyhow::Result<Stackste
     Ok(provision(cwd, name, Some(worktree))?.manifest)
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "provision is one ordered, rollback-aware lifecycle transaction"
+)]
 fn provision(
     cwd: &Path,
     name: &str,
@@ -436,8 +440,8 @@ fn provision(
     let mut manifest = StacksteadManifest {
         kind: "StacksteadManifest".into(),
         version: crate::manifest::MANIFEST_VERSION.into(),
-        stackstead_id: stackstead_id.clone(),
-        slug: slug.clone(),
+        stackstead_id,
+        slug,
         short_id,
         runtime_token,
         project: runtime.config.project.name.clone(),
@@ -446,7 +450,7 @@ fn provision(
         source_ownership,
         repo_root: runtime.paths.repo_root.clone(),
         project_state_root: runtime.paths.state_root.clone(),
-        stackstead_root: stackstead_root.clone(),
+        stackstead_root,
         worktree: worktree.clone(),
         state_dir: state_dir.clone(),
         port_lease_state_dir,
@@ -496,8 +500,8 @@ fn provision(
             (Ok(()), Ok(())) => Err(error),
             (lease_cleanup, cleanup) => Err(anyhow::anyhow!(
                 "{error}; failed to reconcile partial create: port lease cleanup={}; source/state cleanup={}",
-                lease_cleanup.map_or_else(|error| error.to_string(), |_| "ok".into()),
-                cleanup.map_or_else(|error| error.to_string(), |_| "ok".into())
+                lease_cleanup.map_or_else(|error| error.to_string(), |()| "ok".into()),
+                cleanup.map_or_else(|error| error.to_string(), |()| "ok".into())
             )),
         };
     }
@@ -532,8 +536,8 @@ fn provision(
             (Ok(()), Ok(())) => Err(error),
             (cleanup, lease_cleanup) => Err(anyhow::anyhow!(
                 "{error}; failed to roll back partial create: source/state cleanup={}; port lease cleanup={}",
-                cleanup.map_or_else(|error| error.to_string(), |_| "ok".into()),
-                lease_cleanup.map_or_else(|error| error.to_string(), |_| "ok".into())
+                cleanup.map_or_else(|error| error.to_string(), |()| "ok".into()),
+                lease_cleanup.map_or_else(|error| error.to_string(), |()| "ok".into())
             )),
         };
     }
@@ -632,10 +636,10 @@ fn cleanup_failed_create(
     if manifest.worktree.exists() {
         match manifest.source_ownership {
             SourceOwnership::Stackstead => {
-                git::remove_worktree(&manifest.repo_root, &manifest.worktree)?
+                git::remove_worktree(&manifest.repo_root, &manifest.worktree)?;
             }
             SourceOwnership::External => {
-                paths::remove_generated_dir(&manifest.worktree, Path::new(".stackstead"))?
+                paths::remove_generated_dir(&manifest.worktree, Path::new(".stackstead"))?;
             }
         }
     }
@@ -646,7 +650,7 @@ pub fn up(cwd: &Path, name: &str) -> anyhow::Result<UpOutcome> {
     up_with_lock(cwd, name, None)
 }
 
-pub(crate) fn up_after_create(
+pub fn up_after_create(
     cwd: &Path,
     name: &str,
     mutation_lock: LockGuard,
@@ -654,6 +658,10 @@ pub(crate) fn up_after_create(
     up_with_lock(cwd, name, Some(mutation_lock))
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "up is one ordered lifecycle transaction with recorded phase timings"
+)]
 fn up_with_lock(
     cwd: &Path,
     name: &str,
@@ -868,12 +876,20 @@ fn up_with_lock(
         &environment,
     )?;
     if !runtime.config.hooks.post_up.is_empty() {
-        timings.hooks = Some(timings.hooks.unwrap_or_default() + phase_started.elapsed());
+        timings.hooks = Some(
+            timings
+                .hooks
+                .unwrap_or_default()
+                .checked_add(phase_started.elapsed())
+                .ok_or_else(|| anyhow::anyhow!("hook timing exceeds the supported duration"))?,
+        );
     }
     validate_source_binding(&manifest)?;
     validate_pointer_binding(&manifest)?;
     validate_configured_ports(&runtime.config, &manifest.worktree)?;
-    if !runtime.config.health.checks.is_empty() {
+    if runtime.config.health.checks.is_empty() {
+        manifest.status.health = ComponentStatus::Unknown;
+    } else {
         let phase_started = Instant::now();
         events::append(
             &manifest.event_log,
@@ -900,8 +916,6 @@ fn up_with_lock(
             events::EventStatus::Succeeded,
             None,
         )?;
-    } else {
-        manifest.status.health = ComponentStatus::Unknown;
     }
     manifest.save_atomic()?;
     timings.total = total_started.elapsed();
@@ -941,11 +955,15 @@ pub fn stop(cwd: &Path, name: &str) -> anyhow::Result<StacksteadManifest> {
     Ok(manifest)
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "destroy is one fail-closed teardown transaction with resumable phases"
+)]
 pub fn destroy(cwd: &Path, name: &str) -> anyhow::Result<StacksteadManifest> {
     let runtime = load_project(cwd)?;
     let mut manifest = resolve_destroy_manifest(&runtime, name)?;
     let lock = LockGuard::acquire_existing(&manifest.state_dir.join("lock"), "stackstead")?;
-    let _run_lease = LockGuard::acquire_existing(
+    let run_lease = LockGuard::acquire_existing(
         &manifest.state_dir.join("run.lock"),
         "active stackstead agent",
     )?;
@@ -955,7 +973,7 @@ pub fn destroy(cwd: &Path, name: &str) -> anyhow::Result<StacksteadManifest> {
     if pending && !manifest.pointer_file.exists() {
         release_port_leases_after_destroy(&manifest)?;
         cleanup_failed_create(&runtime, &manifest)?;
-        drop(_run_lease);
+        drop(run_lease);
         drop(lock);
         return Ok(manifest);
     }
@@ -1081,7 +1099,7 @@ fn finalize_destroy(
     Ok(manifest)
 }
 
-pub(crate) fn verify_port_leases(manifest: &StacksteadManifest) -> anyhow::Result<()> {
+pub fn verify_port_leases(manifest: &StacksteadManifest) -> anyhow::Result<()> {
     if manifest.ports.is_empty() {
         return Ok(());
     }
@@ -1142,7 +1160,7 @@ fn remove_bound_source(manifest: &StacksteadManifest) -> anyhow::Result<()> {
             }
         }
         SourceOwnership::External => {
-            paths::remove_generated_dir(&manifest.worktree, Path::new(".stackstead"))?
+            paths::remove_generated_dir(&manifest.worktree, Path::new(".stackstead"))?;
         }
     }
     Ok(())
@@ -1202,7 +1220,7 @@ fn read_teardown(manifest: &StacksteadManifest) -> anyhow::Result<Option<Teardow
     Ok(Some(state))
 }
 
-pub(crate) fn ensure_no_teardown(manifest: &StacksteadManifest) -> anyhow::Result<()> {
+pub fn ensure_no_teardown(manifest: &StacksteadManifest) -> anyhow::Result<()> {
     if read_teardown(manifest)?.is_some() {
         anyhow::bail!(
             "stackstead `{}` has an incomplete teardown; retry `stackstead destroy {} --yes`",
@@ -1291,6 +1309,10 @@ fn validate_completed_source_cleanup(manifest: &StacksteadManifest) -> anyhow::R
     Ok(())
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "inspection assembles one complete state report from independent validations"
+)]
 pub fn inspect(cwd: &Path, name: &str) -> anyhow::Result<InspectOutput> {
     let runtime = load_project(cwd)?;
     let manifest = runtime.paths.resolve(name)?;
@@ -1633,7 +1655,7 @@ fn write_contract(
     Ok(())
 }
 
-pub(crate) fn template_context(manifest: &StacksteadManifest) -> TemplateContext {
+pub fn template_context(manifest: &StacksteadManifest) -> TemplateContext {
     let mut context = TemplateContext::from([
         ("project.name".into(), manifest.project.clone()),
         ("stackstead.id".into(), manifest.stackstead_id.clone()),
@@ -1781,7 +1803,7 @@ fn configured_container_ports(config: &StacksteadConfig) -> BTreeMap<String, u16
         .collect()
 }
 
-pub(crate) fn validate_manifest_binding(
+pub fn validate_manifest_binding(
     runtime: &ProjectRuntime,
     manifest: &StacksteadManifest,
 ) -> anyhow::Result<()> {
@@ -1828,7 +1850,7 @@ pub(crate) fn validate_manifest_binding(
     Ok(())
 }
 
-pub(crate) fn validate_pointer_binding(manifest: &StacksteadManifest) -> anyhow::Result<()> {
+pub fn validate_pointer_binding(manifest: &StacksteadManifest) -> anyhow::Result<()> {
     let pointer = StacksteadPointer::read(&manifest.pointer_file)?;
     if pointer.stackstead_id != manifest.stackstead_id
         || paths::normalize_absolute(&pointer.manifest)?
@@ -1847,7 +1869,7 @@ pub(crate) fn validate_pointer_binding(manifest: &StacksteadManifest) -> anyhow:
     Ok(())
 }
 
-pub(crate) fn validate_current_contract(
+pub fn validate_current_contract(
     runtime: &ProjectRuntime,
     manifest: &StacksteadManifest,
 ) -> anyhow::Result<()> {
@@ -1896,7 +1918,7 @@ fn validate_worktree_path(worktree: &Path, path: &Path, label: &str) -> anyhow::
     Ok(())
 }
 
-pub(crate) fn validate_source_binding(manifest: &StacksteadManifest) -> anyhow::Result<()> {
+pub fn validate_source_binding(manifest: &StacksteadManifest) -> anyhow::Result<()> {
     let branch = git::registered_worktree_branch(&manifest.repo_root, &manifest.worktree)?;
     if branch != manifest.branch {
         anyhow::bail!(
@@ -2006,7 +2028,7 @@ fn default_config(
         .find(|port| port.container_port == 5432 && port.name == port.service)
     {
         config.database.postgres = Some(PostgresConfig {
-            strategy: Default::default(),
+            strategy: crate::config::PostgresStrategy::default(),
             database: "app".into(),
             user: "app".into(),
             password: "app".into(),

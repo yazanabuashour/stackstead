@@ -65,6 +65,10 @@ pub fn allocate_ports(
     allocate_ports_with_probe(base, stride, service_names, used_ports, port_is_available)
 }
 
+#[expect(
+    clippy::arithmetic_side_effects,
+    reason = "input validation and the preceding range check prove this arithmetic is safe"
+)]
 pub fn allocate_ports_with_probe<F>(
     base: u16,
     stride: u16,
@@ -84,12 +88,16 @@ where
         });
     }
 
-    let last_service_offset = service_names.len() as u32 - 1;
-    if u32::from(base) + last_service_offset > u32::from(u16::MAX) {
+    let last_service_offset = u32::try_from(service_names.len().saturating_sub(1))
+        .map_err(|_| PortAllocationError::PortRangeOverflow)?;
+    if u32::from(base)
+        .checked_add(last_service_offset)
+        .is_none_or(|last| last > u32::from(u16::MAX))
+    {
         return Err(PortAllocationError::PortRangeOverflow);
     }
-    let max_slot =
-        (u32::from(u16::MAX) - u32::from(base) - last_service_offset) / u32::from(stride);
+    let available_span = u32::from(u16::MAX) - u32::from(base) - last_service_offset;
+    let max_slot = available_span / u32::from(stride);
 
     for slot in 0..=max_slot {
         let ports = ports_for_slot(base, stride, service_names, slot)?;
@@ -137,10 +145,12 @@ pub fn ports_for_slot(
         .enumerate()
         .map(|(index, service)| {
             let port = slot_start
-                .checked_add(index as u32)
-                .filter(|port| *port <= u32::from(u16::MAX))
+                .checked_add(
+                    u32::try_from(index).map_err(|_| PortAllocationError::PortRangeOverflow)?,
+                )
                 .ok_or(PortAllocationError::PortRangeOverflow)?;
-            Ok((service.clone(), port as u16))
+            let port = u16::try_from(port).map_err(|_| PortAllocationError::PortRangeOverflow)?;
+            Ok((service.clone(), port))
         })
         .collect()
 }

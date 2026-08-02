@@ -1,3 +1,17 @@
+#![cfg_attr(
+    test,
+    expect(
+        clippy::indexing_slicing,
+        clippy::literal_string_with_formatting_args,
+        clippy::needless_pass_by_value,
+        clippy::needless_raw_string_hashes,
+        clippy::panic_in_result_fn,
+        clippy::redundant_pub_crate,
+        clippy::unnecessary_wraps,
+        reason = "unit tests return Result for setup while assertions and direct fixture access report failures"
+    )
+)]
+
 mod agent;
 mod cli;
 mod command;

@@ -8,7 +8,7 @@ pub fn marker() -> String {
     format!("{MARKER_PREFIX} {VERSION} {MARKER_SUFFIX}")
 }
 
-pub const TEXT: &str = r#"## Stackstead
+pub const TEXT: &str = r"## Stackstead
 
 For tasks that need services, ports, URLs, databases, migrations, or runtime
 tests, work in a Stackstead—not the canonical checkout—and use Stackstead lifecycle
@@ -19,4 +19,4 @@ only the ports, URLs, and database it provides. Otherwise, create a new environm
 with `stackstead --json create <name>`, capture its full `stackstead_id`, run
 `stackstead up <full-id>`, then enter it with
 `stackstead run <full-id> -- <agent-or-command>`. Reuse an environment only when the user
-or manager supplies its exact full ID."#;
+or manager supplies its exact full ID.";
