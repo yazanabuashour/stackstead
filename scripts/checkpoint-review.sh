@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-repo_root="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+repo_root="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root" || exit 1
 
 if [ "${CHECKPOINT_REVIEW_ACTIVE:-}" = "1" ]; then
@@ -25,7 +25,7 @@ if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   exit 2
 fi
 
-REVIEW_MODEL="${REVIEW_MODEL:-gpt-5.6-sol}"
+REVIEW_MODEL="${REVIEW_MODEL:-}"
 
 correctness_effort=""
 complexity_effort=""
@@ -137,25 +137,14 @@ fi
 run_codex() {
   effort="$1"
   shift
-  codex --search \
-    -m "$REVIEW_MODEL" \
-    -c "model_reasoning_effort=\"$effort\"" \
-    "$@"
+  if [ -n "$REVIEW_MODEL" ]; then
+    codex -m "$REVIEW_MODEL" -c "model_reasoning_effort=\"$effort\"" "$@"
+  else
+    codex -c "model_reasoning_effort=\"$effort\"" "$@"
+  fi
 }
 
-git_status() {
-  git status "$@" --untracked-files=all
-}
-
-git_status_short() {
-  git_status --short
-}
-
-git_status_porcelain() {
-  git_status --porcelain=v1
-}
-
-if [ -z "$(git_status_porcelain)" ]; then
+if [ -z "$(git status --porcelain=v1 --untracked-files=all)" ]; then
   printf 'No uncommitted changes; no review checkpoint was run.\n'
   exit 0
 fi
@@ -165,7 +154,7 @@ summary_file="$review_dir/summary.txt"
 
 snapshot_state() {
   {
-    git_status_porcelain
+    git status --porcelain=v1 --untracked-files=all
     git diff --cached --no-ext-diff --
     git diff --no-ext-diff --
     git ls-files --others --exclude-standard -z |
@@ -252,9 +241,13 @@ policy_prompt="$review_prefix Focus on orchestration-policy quality: ambiguous d
 printf 'Requested reviews: %s\n' "${requested_reviews[*]}"
 printf 'Review output: %s\n' "$review_dir"
 printf '\nChanged files:\n'
-git_status_short
-git_status_short >"$review_dir/changed-files.txt"
-git diff HEAD --stat >"$review_dir/diff-stat.txt"
+git status --short --untracked-files=all
+git status --short --untracked-files=all >"$review_dir/changed-files.txt"
+if git rev-parse --verify HEAD >/dev/null 2>&1; then
+  git diff HEAD --stat >"$review_dir/diff-stat.txt"
+else
+  git diff "$(git hash-object -w -t tree /dev/null)" --stat >"$review_dir/diff-stat.txt"
+fi
 review_state_hash="$(snapshot_state)"
 
 # Standard checkpoint review: keep this cheap enough to run for every work item.
@@ -294,9 +287,9 @@ failed=0
 
 for i in "${!pids[@]}"; do
   if wait "${pids[$i]}"; then
-    statuses[$i]=0
+    statuses[i]=0
   else
-    statuses[$i]=$?
+    statuses[i]=$?
     failed=1
   fi
 done
