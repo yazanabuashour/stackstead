@@ -25,7 +25,7 @@ if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   exit 2
 fi
 
-REVIEW_MODEL="${REVIEW_MODEL:-}"
+REVIEW_MODEL="${REVIEW_MODEL:-gpt-5.6-sol}"
 
 correctness_effort=""
 complexity_effort=""
@@ -137,11 +137,10 @@ fi
 run_codex() {
   effort="$1"
   shift
-  if [ -n "$REVIEW_MODEL" ]; then
-    codex -m "$REVIEW_MODEL" -c "model_reasoning_effort=\"$effort\"" "$@"
-  else
-    codex -c "model_reasoning_effort=\"$effort\"" "$@"
-  fi
+  codex --search \
+    -m "$REVIEW_MODEL" \
+    -c "model_reasoning_effort=\"$effort\"" \
+    "$@"
 }
 
 if [ -z "$(git status --porcelain=v1 --untracked-files=all)" ]; then
@@ -243,11 +242,7 @@ printf 'Review output: %s\n' "$review_dir"
 printf '\nChanged files:\n'
 git status --short --untracked-files=all
 git status --short --untracked-files=all >"$review_dir/changed-files.txt"
-if git rev-parse --verify HEAD >/dev/null 2>&1; then
-  git diff HEAD --stat >"$review_dir/diff-stat.txt"
-else
-  git diff "$(git hash-object -w -t tree /dev/null)" --stat >"$review_dir/diff-stat.txt"
-fi
+git diff HEAD --stat >"$review_dir/diff-stat.txt"
 review_state_hash="$(snapshot_state)"
 
 # Standard checkpoint review: keep this cheap enough to run for every work item.
