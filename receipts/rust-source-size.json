@@ -1,0 +1,46 @@
+{
+  "kind": "rust-source-size-receipt",
+  "version": 1,
+  "measured_at": "2026-08-14T16:50:09Z",
+  "source": {
+    "commit": "12d72f848765cd44f3d31a8f639f419322e6bf96",
+    "status": "working-tree-measured",
+    "scope": "Tracked Rust files and non-ignored working-tree additions; deleted working-tree paths are omitted."
+  },
+  "toolchain": {
+    "rustc": "rustc 1.91.1 (ed61e7d7e 2025-11-07)",
+    "clippy": "clippy 0.1.91 (ed61e7d7e2 2025-11-07)"
+  },
+  "files": {
+    "population": 143,
+    "measurement": "Read the NUL-delimited output from git ls-files --cached --others --exclude-standard directly in Bash without sorting it, retain existing *.rs paths, then count physical lines with LC_ALL=C awk using NR. Path order does not affect the per-file gate, and the pipeline does not require non-portable NUL sorting.",
+    "p90_method": "For this receipt only, sort the collected line counts ascending and select the nearest rank: ceil(0.90 * 143), rank 129.",
+    "p90": {
+      "lines": 261,
+      "path": "tests/cli_acceptance/run.rs"
+    },
+    "maximum": {
+      "lines": 293,
+      "path": "src/supervisor.rs"
+    },
+    "limit": {
+      "maximum_lines": 300,
+      "first_failing_line_count": 301,
+      "decision": "The requested 300-line gate sits above the measured 293-line maximum and acts as a tripwire. scripts/check-rust-source-size.sh reads Git's path stream without sorting, rejects the identifier string too_many_lines anywhere in Rust source, and reports each violating tracked or non-ignored new Rust file exactly once."
+    }
+  },
+  "functions": {
+    "measurement": "Run Clippy across locked all-target and all-feature builds. The configured threshold 100 passed. Copy clippy.toml to a temporary CLIPPY_CONF_DIR, change only the threshold to 98, and rerun the same command; exactly one (99/98) diagnostic establishes the maximum.",
+    "maximum": {
+      "clippy_counted_lines": 99,
+      "path": "tests/cli_acceptance/compose_config.rs",
+      "line": 104,
+      "function": "explicit_nested_compose_file_drives_init_plan_and_apply"
+    },
+    "limit": {
+      "too_many_lines_threshold": 100,
+      "first_failing_clippy_count": 101,
+      "decision": "The requested 100-line Clippy threshold remains above the measured 99-line maximum. Cargo.toml sets too_many_lines to deny, scripts/check-policy.sh enforces that exact setting, and CI runs Clippy across all targets and features. The source-size gate rejects the identifier string anywhere in Rust source, so source-level lint overrides fail before Clippy runs."
+    }
+  }
+}

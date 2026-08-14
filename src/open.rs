@@ -192,11 +192,13 @@ mod tests {
             OpenTarget {
                 contract_key: "dashboard".into(),
                 value: "http://127.0.0.1:39000".into()
-            }
+            },
+            "test contract values differ"
         );
         assert_eq!(
             resolve(&manifest, Some("dashboard")).test()?.contract_key,
-            "dashboard"
+            "dashboard",
+            "test contract values differ"
         );
         Ok(())
     }
@@ -240,7 +242,8 @@ mod tests {
                 .test()?
                 .endpoint
                 .port,
-            39000
+            39000,
+            "test contract values differ"
         );
 
         let stale = OpenTarget {
@@ -251,7 +254,8 @@ mod tests {
             launch_endpoint(&stale, &manifest)
                 .test_err()?
                 .to_string()
-                .contains("found 0 matches")
+                .contains("found 0 matches"),
+            "test contract condition failed"
         );
 
         manifest.ports.insert("api".into(), 39001);
@@ -263,7 +267,8 @@ mod tests {
             launch_endpoint(&wrong_service, &manifest)
                 .test_err()?
                 .to_string()
-                .contains("different service")
+                .contains("different service"),
+            "test contract condition failed"
         );
         Ok(())
     }
@@ -274,7 +279,11 @@ mod tests {
             contract_key: "dashboard".into(),
             value: "127.0.0.1:39000".into(),
         };
-        assert_eq!(launch_endpoint(&target, &manifest()).test()?, None);
+        assert_eq!(
+            launch_endpoint(&target, &manifest()).test()?,
+            None,
+            "test contract values differ"
+        );
         Ok(())
     }
 }

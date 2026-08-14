@@ -10,6 +10,20 @@ stackstead launch feature-a -- claude
 environment if startup fails and returns the child command's exit code. It does not
 reuse an existing environment.
 
+When a launcher already runs beneath a generated worktree, resolve and use its
+validated full ID:
+
+```sh
+id="$(stackstead current)"
+stackstead run "$id" -- true
+```
+
+`current` validates the durable manifest, exact pointer location, registered Git
+branch, pinned base, and the primary worktree's configured project and state
+root without reading generated environment or probing Docker. Use
+`stackstead --json current` when a consumer also needs the validated source
+ownership, repository, worktree, and pointer binding.
+
 Run a host command from an existing environment's worktree by its full ID:
 
 ```sh

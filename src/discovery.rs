@@ -19,35 +19,13 @@ pub enum Discovery {
 }
 
 pub fn discover(start: &Path) -> anyhow::Result<Discovery> {
-    let start = if start.is_file() {
-        start.parent().unwrap_or(start)
-    } else {
-        start
-    };
+    let start = discovery_start(start);
     for directory in start.ancestors() {
-        let pointer_path =
-            crate::paths::normalize_absolute(&directory.join(".stackstead/stackstead.json"))?;
-        if pointer_path.is_file() {
-            let pointer = StacksteadPointer::read(&pointer_path)?;
-            let manifest = StacksteadManifest::read(&pointer.manifest)?;
-            if manifest.stackstead_id != pointer.stackstead_id
-                || manifest.repo_root != pointer.repo_root
-                || manifest.stackstead_root != pointer.stackstead_root
-                || manifest.project != pointer.project
-                || manifest.project_state_root != pointer.project_state_root
-                || crate::paths::normalize_absolute(&pointer.manifest)?
-                    != crate::paths::normalize_absolute(&manifest.manifest_path())?
-                || pointer_path != crate::paths::normalize_absolute(&manifest.pointer_file)?
-            {
-                anyhow::bail!(
-                    "pointer {} does not match its manifest",
-                    pointer_path.display()
-                );
-            }
+        if let Some(stackstead) = stackstead_at(directory)? {
             return Ok(Discovery::Stackstead {
-                pointer_path,
-                pointer,
-                manifest: Box::new(manifest),
+                pointer_path: stackstead.pointer_path,
+                pointer: stackstead.pointer,
+                manifest: stackstead.manifest,
             });
         }
         let config_path = directory.join("stackstead.yaml");
@@ -59,6 +37,59 @@ pub fn discover(start: &Path) -> anyhow::Result<Discovery> {
         }
     }
     Err(StacksteadError::ProjectNotFound(start.to_path_buf()).into())
+}
+
+pub fn discover_stackstead(start: &Path) -> anyhow::Result<Box<StacksteadManifest>> {
+    let start = discovery_start(start);
+    for directory in start.ancestors() {
+        if let Some(stackstead) = stackstead_at(directory)? {
+            return Ok(stackstead.manifest);
+        }
+    }
+    anyhow::bail!("current directory is not inside a generated Stackstead worktree")
+}
+
+fn discovery_start(start: &Path) -> &Path {
+    if start.is_file() {
+        start.parent().unwrap_or(start)
+    } else {
+        start
+    }
+}
+
+struct DiscoveredStackstead {
+    pointer_path: PathBuf,
+    pointer: StacksteadPointer,
+    manifest: Box<StacksteadManifest>,
+}
+
+fn stackstead_at(directory: &Path) -> anyhow::Result<Option<DiscoveredStackstead>> {
+    let pointer_path =
+        crate::paths::normalize_absolute(&directory.join(".stackstead/stackstead.json"))?;
+    if !pointer_path.is_file() {
+        return Ok(None);
+    }
+    let pointer = StacksteadPointer::read(&pointer_path)?;
+    let manifest = StacksteadManifest::read(&pointer.manifest)?;
+    if manifest.stackstead_id != pointer.stackstead_id
+        || manifest.repo_root != pointer.repo_root
+        || manifest.stackstead_root != pointer.stackstead_root
+        || manifest.project != pointer.project
+        || manifest.project_state_root != pointer.project_state_root
+        || crate::paths::normalize_absolute(&pointer.manifest)?
+            != crate::paths::normalize_absolute(&manifest.manifest_path())?
+        || pointer_path != crate::paths::normalize_absolute(&manifest.pointer_file)?
+    {
+        anyhow::bail!(
+            "pointer {} does not match its manifest",
+            pointer_path.display()
+        );
+    }
+    Ok(Some(DiscoveredStackstead {
+        pointer_path,
+        pointer,
+        manifest: Box::new(manifest),
+    }))
 }
 
 pub fn project_root(discovery: &Discovery) -> &Path {
@@ -143,10 +174,10 @@ mod tests {
         std::fs::write(directory.path().join("stackstead.yaml"), "version: '1'").test()?;
         let nested = directory.path().join("a/b");
         std::fs::create_dir_all(&nested).test()?;
-        assert!(matches!(
-            discover(&nested).test()?,
-            Discovery::Project { .. }
-        ));
+        assert!(
+            matches!(discover(&nested).test()?, Discovery::Project { .. }),
+            "test contract condition failed"
+        );
         Ok(())
     }
 
@@ -163,7 +194,8 @@ mod tests {
             discover(&copied_root)
                 .test_err()?
                 .to_string()
-                .contains("does not match its manifest")
+                .contains("does not match its manifest"),
+            "test contract condition failed"
         );
         Ok(())
     }
@@ -181,8 +213,14 @@ mod tests {
                 manifest: discovered,
                 ..
             } => {
-                assert_eq!(pointer_path, manifest.pointer_file);
-                assert_eq!(discovered.stackstead_id, manifest.stackstead_id);
+                assert_eq!(
+                    pointer_path, manifest.pointer_file,
+                    "test contract values differ"
+                );
+                assert_eq!(
+                    discovered.stackstead_id, manifest.stackstead_id,
+                    "test contract values differ"
+                );
             }
             Discovery::Project { .. } => anyhow::bail!("expected stackstead discovery"),
         }

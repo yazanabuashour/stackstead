@@ -1,14 +1,12 @@
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeSet,
     ffi::OsString,
-    fs::{File, OpenOptions},
-    io::{BufReader, Write},
+    fs::OpenOptions,
+    io::Write,
     path::{Path, PathBuf},
 };
 
-use serde::{Deserialize, Serialize};
-
-use crate::{lock::LockGuard, manifest::write_json_atomic};
+use crate::lock::LockGuard;
 
 const REGISTRY_KIND: &str = "StacksteadPortLeaseRegistry";
 const REGISTRY_VERSION: &str = "1";
@@ -134,6 +132,7 @@ fn mark_initialized(path: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+#[derive(Debug)]
 pub struct PortLeaseTransaction {
     _lock: LockGuard,
     registry_path: PathBuf,
@@ -143,9 +142,9 @@ pub struct PortLeaseTransaction {
 impl PortLeaseTransaction {
     pub fn used_ports(&self) -> BTreeSet<u16> {
         self.registry
-            .leases
+            .leases()
             .iter()
-            .map(|lease| lease.port)
+            .map(registry::Lease::port)
             .collect()
     }
 
@@ -156,25 +155,19 @@ impl PortLeaseTransaction {
         ports: &BTreeSet<u16>,
     ) -> anyhow::Result<()> {
         validate_request(owner, identity, ports)?;
-        for lease in &self.registry.leases {
-            if ports.contains(&lease.port) {
+        for lease in self.registry.leases() {
+            if ports.contains(&lease.port()) {
                 anyhow::bail!(
                     "port {} is already leased to stackstead `{}` in project `{}`",
-                    lease.port,
-                    lease.stackstead_id,
-                    lease.project
+                    lease.port(),
+                    lease.stackstead_id(),
+                    lease.project()
                 );
             }
         }
 
         let mut updated = self.registry.clone();
-        updated.leases.extend(ports.iter().map(|port| Lease {
-            port: *port,
-            owner: owner.to_owned(),
-            stackstead_id: identity.stackstead_id.clone(),
-            project: identity.project.clone(),
-        }));
-        updated.leases.sort_by_key(|lease| lease.port);
+        updated.add(owner, identity, ports);
         updated.validate(&self.registry_path)?;
         updated.save(&self.registry_path)?;
         self.registry = updated;
@@ -188,11 +181,12 @@ impl PortLeaseTransaction {
         ports: &BTreeSet<u16>,
     ) -> anyhow::Result<()> {
         validate_request(owner, identity, ports)?;
-        if self.registry.leases.iter().any(|lease| {
-            lease.owner == owner
-                && (lease.stackstead_id != identity.stackstead_id
-                    || lease.project != identity.project)
-        }) {
+        if self
+            .registry
+            .leases()
+            .iter()
+            .any(|lease| lease.owner() == owner && !lease.belongs_to(identity))
+        {
             anyhow::bail!(
                 "port leases for owner `{owner}` do not belong to stackstead `{}` in project `{}`",
                 identity.stackstead_id,
@@ -201,10 +195,10 @@ impl PortLeaseTransaction {
         }
         let actual = self
             .registry
-            .leases
+            .leases()
             .iter()
-            .filter(|lease| lease.owner == owner)
-            .map(|lease| lease.port)
+            .filter(|lease| lease.owner() == owner)
+            .map(registry::Lease::port)
             .collect::<BTreeSet<_>>();
         if actual != *ports {
             anyhow::bail!(
@@ -235,19 +229,20 @@ impl PortLeaseTransaction {
         validate_request(owner, identity, ports)?;
         let actual = self
             .registry
-            .leases
+            .leases()
             .iter()
-            .filter(|lease| lease.owner == owner)
-            .map(|lease| lease.port)
+            .filter(|lease| lease.owner() == owner)
+            .map(registry::Lease::port)
             .collect::<BTreeSet<_>>();
         if actual.is_empty() {
             return Ok(());
         }
-        if self.registry.leases.iter().any(|lease| {
-            lease.owner == owner
-                && (lease.stackstead_id != identity.stackstead_id
-                    || lease.project != identity.project)
-        }) {
+        if self
+            .registry
+            .leases()
+            .iter()
+            .any(|lease| lease.owner() == owner && !lease.belongs_to(identity))
+        {
             anyhow::bail!(
                 "port leases for owner `{owner}` do not belong to stackstead `{}` in project `{}` during destroy recovery",
                 identity.stackstead_id,
@@ -266,466 +261,18 @@ impl PortLeaseTransaction {
 
     fn remove_owner(&mut self, owner: &str) -> anyhow::Result<()> {
         let mut updated = self.registry.clone();
-        updated.leases.retain(|lease| lease.owner != owner);
+        updated.remove(owner);
         updated.save(&self.registry_path)?;
         self.registry = updated;
         Ok(())
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Registry {
-    kind: String,
-    version: String,
-    leases: Vec<Lease>,
-}
+mod registry;
+use registry::Registry;
 
-impl Registry {
-    fn empty() -> Self {
-        Self {
-            kind: REGISTRY_KIND.into(),
-            version: REGISTRY_VERSION.into(),
-            leases: Vec::new(),
-        }
-    }
-
-    fn read(path: &Path) -> anyhow::Result<Self> {
-        match std::fs::symlink_metadata(path) {
-            Ok(metadata) if metadata.file_type().is_symlink() => {
-                anyhow::bail!("port lease registry {} is a symlink", path.display())
-            }
-            Ok(metadata) if !metadata.is_file() => {
-                anyhow::bail!(
-                    "port lease registry {} is not a regular file",
-                    path.display()
-                )
-            }
-            Ok(_) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Self::empty()),
-            Err(error) => {
-                return Err(anyhow::anyhow!(
-                    "cannot inspect port lease registry {}: {error}",
-                    path.display()
-                ));
-            }
-        }
-
-        let registry: Self = serde_json::from_reader(BufReader::new(open_registry(path)?))
-            .map_err(|error| {
-                anyhow::anyhow!(
-                    "cannot parse port lease registry {}: {error}",
-                    path.display()
-                )
-            })?;
-        registry.validate(path)?;
-        Ok(registry)
-    }
-
-    fn validate(&self, path: &Path) -> anyhow::Result<()> {
-        if self.kind != REGISTRY_KIND || self.version != REGISTRY_VERSION {
-            anyhow::bail!(
-                "unsupported port lease registry contract in {}: kind={} version={}",
-                path.display(),
-                self.kind,
-                self.version
-            );
-        }
-
-        let mut ports = BTreeSet::new();
-        let mut owners = BTreeMap::<&str, (&str, &str)>::new();
-        for lease in &self.leases {
-            if lease.port == 0
-                || lease.owner.is_empty()
-                || lease.stackstead_id.is_empty()
-                || lease.project.is_empty()
-            {
-                anyhow::bail!("invalid port lease entry in {}", path.display());
-            }
-            if !ports.insert(lease.port) {
-                anyhow::bail!(
-                    "duplicate port {} in port lease registry {}",
-                    lease.port,
-                    path.display()
-                );
-            }
-            let identity = (lease.stackstead_id.as_str(), lease.project.as_str());
-            if let Some(existing) = owners.insert(lease.owner.as_str(), identity)
-                && existing != identity
-            {
-                anyhow::bail!(
-                    "ambiguous identity for lease owner `{}` in {}",
-                    lease.owner,
-                    path.display()
-                );
-            }
-        }
-        Ok(())
-    }
-
-    fn save(&self, path: &Path) -> anyhow::Result<()> {
-        match std::fs::symlink_metadata(path) {
-            Ok(metadata) if metadata.file_type().is_symlink() => {
-                anyhow::bail!("port lease registry {} is a symlink", path.display())
-            }
-            Ok(metadata) if !metadata.is_file() => {
-                anyhow::bail!(
-                    "port lease registry {} is not a regular file",
-                    path.display()
-                )
-            }
-            Ok(_) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => {
-                return Err(anyhow::anyhow!(
-                    "cannot inspect port lease registry {}: {error}",
-                    path.display()
-                ));
-            }
-        }
-        write_json_atomic(path, self)
-    }
-}
-
-fn open_registry(path: &Path) -> anyhow::Result<File> {
-    let mut options = OpenOptions::new();
-    options.read(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-
-        options.custom_flags(libc::O_NOFOLLOW);
-    }
-    let file = options.open(path).map_err(|error| {
-        anyhow::anyhow!(
-            "cannot open port lease registry {}: {error}",
-            path.display()
-        )
-    })?;
-    if !file.metadata()?.is_file() {
-        anyhow::bail!(
-            "port lease registry {} is not a regular file",
-            path.display()
-        );
-    }
-    Ok(file)
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Lease {
-    port: u16,
-    owner: String,
-    stackstead_id: String,
-    project: String,
-}
-
-fn validate_request(
-    owner: &str,
-    identity: &LeaseIdentity,
-    ports: &BTreeSet<u16>,
-) -> anyhow::Result<()> {
-    validate_owner_and_ports(owner, ports)?;
-    if identity.stackstead_id.is_empty() || identity.project.is_empty() {
-        anyhow::bail!("port lease identity must include a stackstead id and project");
-    }
-    Ok(())
-}
-
-fn validate_owner_and_ports(owner: &str, ports: &BTreeSet<u16>) -> anyhow::Result<()> {
-    if owner.is_empty() {
-        anyhow::bail!("port lease owner must not be empty");
-    }
-    if ports.is_empty() || ports.contains(&0) {
-        anyhow::bail!("port lease set must contain at least one nonzero port");
-    }
-    Ok(())
-}
-
-fn display_ports(ports: &BTreeSet<u16>) -> String {
-    ports
-        .iter()
-        .map(u16::to_string)
-        .collect::<Vec<_>>()
-        .join(", ")
-}
+mod request;
+use request::{display_ports, validate_request};
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::test_support::{TestResultErrorExt as _, TestResultExt as _};
-
-    fn store(directory: &tempfile::TempDir) -> PortLeaseStore {
-        PortLeaseStore::at(directory.path().join("state"))
-    }
-
-    fn identity(name: &str) -> LeaseIdentity {
-        LeaseIdentity::new(name, "demo")
-    }
-
-    fn ports(values: &[u16]) -> BTreeSet<u16> {
-        values.iter().copied().collect()
-    }
-
-    #[test]
-    fn resolves_per_user_state_paths_without_mutating_the_environment() -> anyhow::Result<()> {
-        let xdg = PortLeaseStore::from_environment(Some("/state".into()), Some("/home/me".into()))
-            .test()?;
-        assert_eq!(xdg.state_dir, Path::new("/state/stackstead"));
-
-        let home =
-            PortLeaseStore::from_environment(Some("relative".into()), Some("/home/me".into()))
-                .test()?;
-        assert_eq!(
-            home.state_dir,
-            Path::new("/home/me/.local/state/stackstead")
-        );
-        assert!(PortLeaseStore::from_environment(None, Some("relative".into())).is_err());
-        assert!(PortLeaseStore::from_environment(None, None).is_err());
-        Ok(())
-    }
-
-    #[test]
-    fn independent_owners_conflict_but_disjoint_ports_succeed() -> anyhow::Result<()> {
-        let directory = tempfile::tempdir().test()?;
-        let store = store(&directory);
-        let mut transaction = store.transaction().test()?;
-        transaction
-            .reserve("owner-a", &identity("alpha"), &ports(&[39000, 39001]))
-            .test()?;
-
-        let error = transaction
-            .reserve("owner-b", &identity("beta"), &ports(&[39001]))
-            .test_err()?;
-        assert!(error.to_string().contains("alpha"));
-        transaction
-            .reserve("owner-b", &identity("beta"), &ports(&[39002]))
-            .test()?;
-        assert_eq!(transaction.used_ports(), ports(&[39000, 39001, 39002]));
-        Ok(())
-    }
-
-    #[test]
-    fn destroy_release_is_idempotent_only_after_the_exact_owner_is_gone() -> anyhow::Result<()> {
-        let directory = tempfile::tempdir().test()?;
-        let store = store(&directory);
-        let leased = ports(&[39000, 39001]);
-        let mut transaction = store.transaction().test()?;
-        transaction
-            .reserve("owner-a", &identity("alpha"), &leased)
-            .test()?;
-        assert!(
-            transaction
-                .release_if_owned_or_absent("owner-a", &identity("alpha"), &ports(&[39000]))
-                .is_err()
-        );
-        transaction
-            .release_if_owned_or_absent("owner-a", &identity("alpha"), &leased)
-            .test()?;
-        transaction
-            .release_if_owned_or_absent("owner-a", &identity("alpha"), &leased)
-            .test()?;
-        Ok(())
-    }
-
-    #[test]
-    fn transaction_holds_the_global_lock_for_its_lifetime() -> anyhow::Result<()> {
-        let directory = tempfile::tempdir().test()?;
-        let store = store(&directory);
-        let transaction = store.transaction().test()?;
-        assert!(store.transaction().is_err());
-        drop(transaction);
-        assert!(store.transaction().is_ok());
-        Ok(())
-    }
-
-    #[test]
-    fn leases_persist_across_reopen_until_exact_release() -> anyhow::Result<()> {
-        let directory = tempfile::tempdir().test()?;
-        let store = store(&directory);
-        {
-            let mut transaction = store.transaction().test()?;
-            transaction
-                .reserve("owner-a", &identity("alpha"), &ports(&[39000, 39001]))
-                .test()?;
-        }
-
-        let mut transaction = store.transaction().test()?;
-        assert_eq!(transaction.used_ports(), ports(&[39000, 39001]));
-        transaction
-            .verify("owner-a", &identity("alpha"), &ports(&[39000, 39001]))
-            .test()?;
-        assert!(
-            transaction
-                .release("owner-a", &identity("alpha"), &ports(&[39000]))
-                .is_err()
-        );
-        assert_eq!(transaction.used_ports(), ports(&[39000, 39001]));
-        transaction
-            .release("owner-a", &identity("alpha"), &ports(&[39000, 39001]))
-            .test()?;
-        assert!(transaction.used_ports().is_empty());
-        Ok(())
-    }
-
-    #[test]
-    fn verify_and_release_reject_wrong_owner_or_mismatched_sets() -> anyhow::Result<()> {
-        let directory = tempfile::tempdir().test()?;
-        let store = store(&directory);
-        let mut transaction = store.transaction().test()?;
-        transaction
-            .reserve("owner-a", &identity("alpha"), &ports(&[39000, 39001]))
-            .test()?;
-
-        assert!(
-            transaction
-                .verify("owner-b", &identity("alpha"), &ports(&[39000, 39001]))
-                .is_err()
-        );
-        assert!(
-            transaction
-                .verify("owner-a", &identity("other"), &ports(&[39000, 39001]))
-                .is_err()
-        );
-        assert!(
-            transaction
-                .verify("owner-a", &identity("alpha"), &ports(&[39000]))
-                .is_err()
-        );
-        assert!(
-            transaction
-                .release("owner-b", &identity("alpha"), &ports(&[39000, 39001]),)
-                .is_err()
-        );
-        assert!(
-            transaction
-                .release("owner-a", &identity("alpha"), &ports(&[39001]))
-                .is_err()
-        );
-        assert_eq!(transaction.used_ports(), ports(&[39000, 39001]));
-        Ok(())
-    }
-
-    #[test]
-    fn malformed_duplicate_and_ambiguous_registries_fail_closed() -> anyhow::Result<()> {
-        let directory = tempfile::tempdir().test()?;
-        let store = store(&directory);
-        std::fs::create_dir_all(&store.state_dir).test()?;
-        let path = store.state_dir.join(REGISTRY_FILE);
-
-        std::fs::write(&path, b"not json").test()?;
-        assert!(store.transaction().is_err());
-
-        std::fs::write(
-            &path,
-            br#"{"kind":"StacksteadPortLeaseRegistry","version":"1","leases":[{"port":39000,"owner":"a","stackstead_id":"alpha","project":"demo"},{"port":39000,"owner":"b","stackstead_id":"beta","project":"demo"}]}"#,
-        )
-        .test()?;
-        let Err(error) = store.transaction() else {
-            anyhow::bail!("duplicate registry was accepted");
-        };
-        assert!(error.to_string().contains("duplicate"));
-
-        std::fs::write(
-            &path,
-            br#"{"kind":"StacksteadPortLeaseRegistry","version":"1","leases":[{"port":39000,"owner":"a","stackstead_id":"alpha","project":"demo"},{"port":39001,"owner":"a","stackstead_id":"other","project":"demo"}]}"#,
-        )
-        .test()?;
-        let Err(error) = store.transaction() else {
-            anyhow::bail!("ambiguous registry was accepted");
-        };
-        assert!(error.to_string().contains("ambiguous"));
-
-        std::fs::write(
-            &path,
-            br#"{"kind":"StacksteadPortLeaseRegistry","version":"2","leases":[]}"#,
-        )
-        .test()?;
-        assert!(store.transaction().is_err());
-
-        std::fs::write(
-            &path,
-            br#"{"kind":"StacksteadPortLeaseRegistry","version":"1","leases":[],"extra":true}"#,
-        )
-        .test()?;
-        assert!(store.transaction().is_err());
-        Ok(())
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn symlinked_registry_fails_closed_without_reading_its_target() -> anyhow::Result<()> {
-        use std::os::unix::fs::symlink;
-
-        let directory = tempfile::tempdir().test()?;
-        let store = store(&directory);
-        std::fs::create_dir_all(&store.state_dir).test()?;
-        let target = directory.path().join("target.json");
-        std::fs::write(&target, b"not json").test()?;
-        symlink(&target, store.state_dir.join(REGISTRY_FILE)).test()?;
-
-        let Err(error) = store.transaction() else {
-            anyhow::bail!("symlinked registry was accepted");
-        };
-        assert!(error.to_string().contains("symlink"));
-        assert_eq!(std::fs::read(&target).test()?, b"not json");
-        Ok(())
-    }
-
-    #[test]
-    fn first_transaction_initializes_a_durable_empty_registry() -> anyhow::Result<()> {
-        let directory = tempfile::tempdir().test()?;
-        let store = store(&directory);
-        let path = store.state_dir.join(REGISTRY_FILE);
-        let mut transaction = store.transaction().test()?;
-        assert!(transaction.used_ports().is_empty());
-        assert!(path.is_file());
-
-        assert!(
-            transaction
-                .reserve("", &identity("alpha"), &ports(&[39000]))
-                .is_err()
-        );
-        assert!(path.is_file());
-
-        transaction
-            .reserve("owner-a", &identity("alpha"), &ports(&[39000]))
-            .test()?;
-        assert!(path.is_file());
-        assert!(store.state_dir.join(INITIALIZED_FILE).is_file());
-        transaction
-            .verify("owner-a", &identity("alpha"), &ports(&[39000]))
-            .test()?;
-        Ok(())
-    }
-
-    #[test]
-    fn interrupted_lock_creation_does_not_wedge_first_initialization() -> anyhow::Result<()> {
-        let directory = tempfile::tempdir().test()?;
-        let store = store(&directory);
-        std::fs::create_dir_all(&store.state_dir).test()?;
-        std::fs::write(store.state_dir.join(LOCK_FILE), b"").test()?;
-
-        let transaction = store.transaction().test()?;
-        assert!(transaction.registry_path.is_file());
-        assert!(store.state_dir.join(INITIALIZED_FILE).is_file());
-        Ok(())
-    }
-
-    #[test]
-    fn initialized_registry_cannot_silently_reinitialize_after_deletion() -> anyhow::Result<()> {
-        let directory = tempfile::tempdir().test()?;
-        let store = store(&directory);
-        drop(store.transaction().test()?);
-        std::fs::remove_file(store.state_dir.join(REGISTRY_FILE)).test()?;
-        let Err(error) = store.transaction() else {
-            anyhow::bail!("missing initialized registry was recreated");
-        };
-        assert!(
-            error
-                .to_string()
-                .contains("initialized port lease registry")
-        );
-        Ok(())
-    }
-}
+mod tests;

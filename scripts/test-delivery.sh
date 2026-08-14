@@ -10,6 +10,31 @@ for file in LICENSE SECURITY.md CONTRIBUTING.md docs/quickstart.md docs/agent-se
   [[ -s "$repo_root/$file" ]]
 done
 
+output_sources=("$repo_root/src/output.rs")
+if [[ -d "$repo_root/src/output" ]]; then
+  while IFS= read -r source; do
+    output_sources+=("$source")
+  done < <(find "$repo_root/src/output" -type f -name '*.rs' -print | LC_ALL=C sort)
+fi
+mapfile -t json_kinds < <(
+  cat "${output_sources[@]}" |
+    tr '\n' ' ' |
+    grep -oE 'kind[[:space:]]*:[[:space:]]*"[^"]+"' |
+    sed -E 's/.*"([^"]+)"/\1/' |
+    LC_ALL=C sort -u
+)
+[[ "${#json_kinds[@]}" -gt 0 ]] || {
+  printf 'error: no top-level JSON kind literals found in the src/output module\n' >&2
+  exit 1
+}
+for kind in "${json_kinds[@]}"; do
+  grep -Eq '^\| `stackstead --json [^|]+` \| `'"$kind"'` \|' \
+    "$repo_root/docs/agent-contract.md" || {
+    printf 'error: CLI JSON table omits implementation kind: %s\n' "$kind" >&2
+    exit 1
+  }
+done
+
 while IFS= read -r document; do
   [[ -f "$repo_root/$document" ]] || continue
   while IFS= read -r link; do
@@ -49,56 +74,106 @@ output="$(cd "$tmp" && STACKSTEAD_BIN="$fake" "$repo_root/integrations/hooks/ado
 manager="$tmp/manager-owned"
 git -C "$tmp" worktree add -b manager-feature "$manager" main >/dev/null
 mkdir -p "$manager/.stackstead"
-printf '%s\n' \
-  '{"stackstead_id":"manager-cell-a123","manifest":"/attacker/manifest.json","repo_root":"/attacker/repo"}' \
-  >"$manager/.stackstead/stackstead.json"
-inspection="$tmp/inspection.json"
-write_inspection() {
-  printf '{"kind":"StacksteadInspection","version":"%s","stackstead":{"stackstead_id":"manager-cell-a123","worktree":"%s","files":{"pointer":"%s"},"repo_root":"%s","source_ownership":"external"},"live":{},"warnings":[]}\n' \
-    "$1" "$manager" "$manager/.stackstead/stackstead.json" "$tmp" >"$inspection"
+: >"$manager/.stackstead/stackstead.json"
+
+plain_calls="$tmp/plain-current-calls"
+plain_fake="$tmp/fake-plain-current-stackstead"
+cat >"$plain_fake" <<'EOF'
+#!/bin/sh
+printf '[' >>"$FAKE_CALLS"
+for argument in "$@"; do printf '<%s>' "$argument" >>"$FAKE_CALLS"; done
+printf ']\n' >>"$FAKE_CALLS"
+if [ "$1" = current ]; then printf '%s\n' manager-cell-a123; exit 0; fi
+if [ "$1" = run ] || [ "$1" = stop ]; then exit 0; fi
+exit 2
+EOF
+chmod +x "$plain_fake"
+no_jq_path="$tmp/no-jq-path"
+mkdir "$no_jq_path"
+ln -s "$(command -v bash)" "$no_jq_path/bash"
+(cd "$manager" && PATH="$no_jq_path" STACKSTEAD_BIN="$plain_fake" FAKE_CALLS="$plain_calls" \
+  "$repo_root/integrations/hooks/run-current.sh" agent-command 'argument with spaces')
+[[ "$(cat "$plain_calls")" == $'[<current>]\n[<run><manager-cell-a123><--><agent-command><argument with spaces>]' ]]
+: >"$plain_calls"
+(cd "$manager" && PATH="$no_jq_path" STACKSTEAD_BIN="$plain_fake" FAKE_CALLS="$plain_calls" \
+  "$repo_root/integrations/hooks/stop-current.sh")
+[[ "$(cat "$plain_calls")" == $'[<current>]\n[<stop><manager-cell-a123>]' ]]
+
+current="$tmp/current.json"
+write_current() {
+  jq -n \
+    --arg kind "$1" \
+    --arg version "$2" \
+    --arg worktree "$3" \
+    --arg pointer "$4" \
+    --arg repo_root "$5" \
+    --arg source_ownership "$6" \
+    '{kind: $kind, version: $version, stackstead_id: "manager-cell-a123",
+      source_ownership: $source_ownership, repo_root: $repo_root,
+      worktree: $worktree, pointer: $pointer}' >"$current"
 }
-destroy_marker="$tmp/destroy-was-called"
-up_marker="$tmp/up-was-called"
+mutation_marker="$tmp/manager-mutation-call"
 manager_fake="$tmp/fake-manager-stackstead"
 cat >"$manager_fake" <<'EOF'
 #!/bin/sh
-if [ "$1 $2" = "--json inspect" ]; then cat "$FAKE_INSPECTION"; exit 0; fi
-if [ "$1" = up ]; then touch "$FAKE_UP_MARKER"; exit 0; fi
-if [ "$1" = destroy ]; then touch "$FAKE_DESTROY_MARKER"; exit 0; fi
+if [ "$1 $2" = "--json current" ]; then
+  [ "$PWD" = "$EXPECTED_WORKTREE" ] || exit 3
+  cat "$FAKE_CURRENT"
+  exit 0
+fi
+if [ "$1" = up ] || [ "$1" = destroy ]; then
+  [ "$PWD" = "$EXPECTED_PROJECT_ROOT" ] || exit 4
+  printf '%s\n' "$*" >"$FAKE_MUTATION_MARKER"
+  exit 0
+fi
 exit 2
 EOF
 chmod +x "$manager_fake"
-write_inspection 3
-(cd "$manager" && STACKSTEAD_BIN="$manager_fake" FAKE_INSPECTION="$inspection" \
-  FAKE_UP_MARKER="$up_marker" "$repo_root/integrations/hooks/adopt-current.sh")
-[[ -e "$up_marker" ]]
-rm -f "$up_marker"
-cp "$inspection" "$inspection.good"
-sed "s|\"worktree\":\"$manager\"|\"worktree\":\"$tmp/wrong-worktree\"|" \
-  "$inspection.good" >"$inspection"
-if (cd "$manager" && STACKSTEAD_BIN="$manager_fake" FAKE_INSPECTION="$inspection" \
-  FAKE_UP_MARKER="$up_marker" "$repo_root/integrations/hooks/adopt-current.sh") >/dev/null 2>&1; then
-  printf 'error: adoption hook reused a mismatched pointer\n' >&2
-  exit 1
-fi
-[[ ! -e "$up_marker" ]]
-cp "$inspection.good" "$inspection"
-write_inspection 3
-(cd "$manager" && STACKSTEAD_MANAGER_TEARDOWN=1 STACKSTEAD_BIN="$manager_fake" \
-  FAKE_INSPECTION="$inspection" FAKE_DESTROY_MARKER="$destroy_marker" FAKE_UP_MARKER="$up_marker" \
-  "$repo_root/integrations/hooks/destroy-adopted-current.sh")
-[[ -e "$destroy_marker" ]]
-rm -f "$destroy_marker"
-sed "s|\"worktree\":\"$manager\"|\"worktree\":\"$tmp/wrong-worktree\"|" \
-  "$inspection" >"$inspection.next"
-mv "$inspection.next" "$inspection"
-if (cd "$manager" && STACKSTEAD_MANAGER_TEARDOWN=1 STACKSTEAD_BIN="$manager_fake" \
-  FAKE_INSPECTION="$inspection" FAKE_DESTROY_MARKER="$destroy_marker" \
-  "$repo_root/integrations/hooks/destroy-adopted-current.sh") >/dev/null 2>&1; then
-  printf 'error: manager teardown trusted a mismatched manifest\n' >&2
-  exit 1
-fi
-[[ ! -e "$destroy_marker" ]]
+
+run_current_hook() {
+  local hook="$1"
+  local teardown=
+  case "$hook" in
+    destroy-adopted-current.sh) teardown=1 ;;
+  esac
+  (cd "$manager" && STACKSTEAD_MANAGER_TEARDOWN="$teardown" \
+    STACKSTEAD_BIN="$manager_fake" FAKE_CURRENT="$current" \
+    EXPECTED_WORKTREE="$manager" EXPECTED_PROJECT_ROOT="$tmp" \
+    FAKE_MUTATION_MARKER="$mutation_marker" "$repo_root/integrations/hooks/$hook")
+}
+
+pointer="$manager/.stackstead/stackstead.json"
+write_current StacksteadCurrent 1 "$manager" "$pointer" "$tmp" external
+run_current_hook adopt-current.sh
+[[ "$(cat "$mutation_marker")" == 'up manager-cell-a123' ]]
+run_current_hook destroy-adopted-current.sh
+[[ "$(cat "$mutation_marker")" == 'destroy manager-cell-a123 --yes' ]]
+
+for variant in kind version worktree pointer repo ownership; do
+  kind=StacksteadCurrent
+  version=1
+  dto_worktree="$manager"
+  dto_pointer="$pointer"
+  dto_repo="$tmp"
+  ownership=external
+  case "$variant" in
+    kind) kind=WrongKind ;;
+    version) version=999 ;;
+    worktree) dto_worktree="$tmp/wrong-worktree" ;;
+    pointer) dto_pointer="$tmp/wrong-pointer" ;;
+    repo) dto_repo="$tmp/wrong-repository" ;;
+    ownership) ownership=stackstead ;;
+  esac
+  write_current "$kind" "$version" "$dto_worktree" "$dto_pointer" "$dto_repo" "$ownership"
+  for hook in adopt-current.sh destroy-adopted-current.sh; do
+    rm -f "$mutation_marker"
+    if run_current_hook "$hook" >/dev/null 2>&1; then
+      printf 'error: %s accepted wrong current %s\n' "$hook" "$variant" >&2
+      exit 1
+    fi
+    [[ ! -e "$mutation_marker" ]]
+  done
+done
 
 owned_fake="$tmp/fake-owned-stackstead"
 cat >"$owned_fake" <<'EOF'

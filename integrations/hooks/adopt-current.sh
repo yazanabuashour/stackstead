@@ -26,23 +26,20 @@ name="${STACKSTEAD_NAME:-$(printf '%s' "$branch" | LC_ALL=C sed 's/[^A-Za-z0-9._
 
 if [ -f "$worktree/.stackstead/stackstead.json" ]; then
   pointer="$worktree/.stackstead/stackstead.json"
-  id="$(jq -er '.stackstead_id' "$pointer")"
-  inspection="$(mktemp "${TMPDIR:-/tmp}/stackstead-inspect.XXXXXX")"
-  trap 'rm -f "$inspection"' EXIT
-  (cd "$primary" && "$stackstead_bin" --json inspect "$id") >"$inspection"
-  jq -e \
-    --arg id "$id" \
+  current="$(cd "$worktree" && "$stackstead_bin" --json current)"
+  id="$(jq -er \
     --arg worktree "$worktree" \
     --arg pointer "$pointer" \
     --arg primary "$primary" \
-    '.kind == "StacksteadInspection" and .version == "3" and
-     (.stackstead |
-      .stackstead_id == $id and
+    'select(
+      .kind == "StacksteadCurrent" and .version == "1" and
+      (.stackstead_id | type == "string" and length > 0) and
       .worktree == $worktree and
-      .files.pointer == $pointer and
+      .pointer == $pointer and
       .repo_root == $primary and
-      .source_ownership == "external")' \
-    "$inspection" >/dev/null || die "existing pointer does not bind this exact external worktree"
+      .source_ownership == "external"
+    ) | .stackstead_id' \
+    <<<"$current")" || die "existing contract does not bind this exact external worktree"
   (cd "$primary" && "$stackstead_bin" up "$id")
   exit 0
 fi

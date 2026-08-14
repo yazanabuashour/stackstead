@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-repo_root="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+repo_root="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/stackstead-policy-test.XXXXXX")"
 trap 'rm -rf "$tmp"' EXIT
 
@@ -15,46 +15,24 @@ reset_policy_fixture() {
   rm -rf "$policy_fixture"
   mkdir -p "$policy_fixture/scripts" "$policy_fixture/src"
   cp "$repo_root/scripts/check-policy.sh" "$policy_fixture/scripts/"
+  cp "$repo_root/Cargo.toml" "$repo_root/Cargo.lock" "$repo_root/clippy.toml" \
+    "$repo_root/README.md" "$policy_fixture/"
   printf 'fn main() {}\n' >"$policy_fixture/src/main.rs"
-  cat >"$policy_fixture/Cargo.toml" <<'EOF'
-[package]
-name = "policy-fixture"
-version = "0.0.0"
-edition = "2024"
-autolib = false
-
-[lints.rust]
-unfulfilled_lint_expectations = "deny"
-unsafe_code = "deny"
-unsafe_op_in_unsafe_fn = "deny"
-
-[lints.clippy]
-pedantic = { level = "deny", priority = -1 }
-nursery = { level = "deny", priority = -1 }
-allow_attributes = "deny"
-allow_attributes_without_reason = "deny"
-arithmetic_side_effects = "deny"
-as_conversions = "deny"
-exit = "deny"
-expect_used = "deny"
-indexing_slicing = "deny"
-multiple_unsafe_ops_per_block = "deny"
-panic = "deny"
-panic_in_result_fn = "deny"
-string_slice = "deny"
-todo = "deny"
-unchecked_duration_subtraction = "deny"
-undocumented_unsafe_blocks = "deny"
-unnecessary_safety_comment = "deny"
-unimplemented = "deny"
-unreachable = "deny"
-unwrap_used = "deny"
-
-[[bin]]
-name = "policy-fixture"
-path = "src/main.rs"
-EOF
 }
+
+mapfile -t manifest_settings < <(
+  sed -n "s/^require_setting \([^[:space:]]*\) '\(.*\)'$/\1|\2/p" \
+    "$repo_root/scripts/check-policy.sh"
+)
+mapfile -t file_settings < <(
+  sed -n "s/^require_file_setting \([^[:space:]]*\) '\(.*\)'$/\1|\2/p" \
+    "$repo_root/scripts/check-policy.sh"
+)
+mapfile -t policy_files < <(
+  printf '%s\n' "${file_settings[@]}" | cut -d'|' -f1 | LC_ALL=C sort -u
+)
+((${#manifest_settings[@]} > 0)) || fail 'no checked Cargo.toml settings found'
+((${#file_settings[@]} > 0)) || fail 'no checked policy file settings found'
 
 expect_policy_failure() {
   local description="$1"
@@ -78,32 +56,7 @@ while IFS='|' read -r section setting; do
   mv "$policy_fixture/Cargo.toml.next" "$policy_fixture/Cargo.toml"
   validate_policy_manifest
   expect_policy_failure "missing [$section] $setting"
-done <<'EOF'
-package|autolib = false
-lints.rust|unfulfilled_lint_expectations = "deny"
-lints.rust|unsafe_code = "deny"
-lints.rust|unsafe_op_in_unsafe_fn = "deny"
-lints.clippy|pedantic = { level = "deny", priority = -1 }
-lints.clippy|nursery = { level = "deny", priority = -1 }
-lints.clippy|allow_attributes = "deny"
-lints.clippy|allow_attributes_without_reason = "deny"
-lints.clippy|arithmetic_side_effects = "deny"
-lints.clippy|as_conversions = "deny"
-lints.clippy|exit = "deny"
-lints.clippy|expect_used = "deny"
-lints.clippy|indexing_slicing = "deny"
-lints.clippy|multiple_unsafe_ops_per_block = "deny"
-lints.clippy|panic = "deny"
-lints.clippy|panic_in_result_fn = "deny"
-lints.clippy|string_slice = "deny"
-lints.clippy|todo = "deny"
-lints.clippy|unchecked_duration_subtraction = "deny"
-lints.clippy|undocumented_unsafe_blocks = "deny"
-lints.clippy|unnecessary_safety_comment = "deny"
-lints.clippy|unimplemented = "deny"
-lints.clippy|unreachable = "deny"
-lints.clippy|unwrap_used = "deny"
-EOF
+done < <(printf '%s\n' "${manifest_settings[@]}")
 
 while IFS='|' read -r section setting; do
   reset_policy_fixture
@@ -116,11 +69,21 @@ while IFS='|' read -r section setting; do
   mv "$policy_fixture/Cargo.toml.next" "$policy_fixture/Cargo.toml"
   validate_policy_manifest
   expect_policy_failure "misplaced [$section] $setting"
-done <<'EOF'
-package|autolib = false
-lints.rust|unfulfilled_lint_expectations = "deny"
-lints.clippy|pedantic = { level = "deny", priority = -1 }
-EOF
+done < <(printf '%s\n' "${manifest_settings[@]}")
+
+for policy_file in "${policy_files[@]}"; do
+  reset_policy_fixture
+  rm "$policy_fixture/$policy_file"
+  expect_policy_failure "missing policy file $policy_file"
+done
+
+while IFS='|' read -r policy_file setting; do
+  reset_policy_fixture
+  awk -v drop="$setting" '$0 != drop' "$policy_fixture/$policy_file" \
+    >"$policy_fixture/$policy_file.next"
+  mv "$policy_fixture/$policy_file.next" "$policy_fixture/$policy_file"
+  expect_policy_failure "missing $policy_file setting $setting"
+done < <(printf '%s\n' "${file_settings[@]}")
 
 reset_policy_fixture
 printf 'pub fn library() {}\n' >"$policy_fixture/src/lib.rs"
@@ -167,7 +130,7 @@ if [ "${CI_FAIL:-}" = "cargo $*" ]; then
   exit 19
 fi
 EOF
-for script in test-policy.sh test-install.sh test-release-install.sh test-delivery.sh docker-integration.sh; do
+for script in check-rust-source-size.sh test-policy.sh test-install.sh test-release-install.sh test-delivery.sh docker-integration.sh; do
   cat >"$ci_fixture/scripts/$script" <<'EOF'
 #!/usr/bin/env bash
 printf '%s' "${0##*/}" >>"$CI_LOG"
@@ -194,6 +157,7 @@ export PATH="$ci_fixture/fake-bin:$PATH"
 "$ci_fixture/scripts/ci.sh" rust
 cat >"$tmp/rust.expected" <<'EOF'
 check-policy.sh
+check-rust-source-size.sh
 cargo fmt --check
 cargo clippy --locked --all-targets --all-features -- -D warnings
 cargo test --locked
@@ -228,6 +192,7 @@ assert_log "$tmp/macos.expected"
 "$ci_fixture/scripts/ci.sh"
 cat >"$tmp/all.expected" <<'EOF'
 check-policy.sh
+check-rust-source-size.sh
 cargo fmt --check
 cargo clippy --locked --all-targets --all-features -- -D warnings
 cargo test --locked
@@ -260,6 +225,7 @@ if CI_FAIL='cargo test --locked' "$ci_fixture/scripts/ci.sh" rust >/dev/null 2>&
 fi
 cat >"$tmp/failure.expected" <<'EOF'
 check-policy.sh
+check-rust-source-size.sh
 cargo fmt --check
 cargo clippy --locked --all-targets --all-features -- -D warnings
 cargo test --locked

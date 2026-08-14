@@ -23,6 +23,7 @@ Run the checks relevant to the change; run the complete set before requesting a
 release:
 
 ```sh
+scripts/check-rust-source-size.sh
 cargo fmt --check
 cargo clippy --locked --all-targets --all-features -- -D warnings
 cargo test --locked

@@ -54,11 +54,12 @@ teardown recovery formats are not imported across releases.
 
 If a worktree manager uses trusted Stackstead hooks, pause its lifecycle
 automation and update the binary plus every installed hook copy as one
-maintenance operation. Mixed inspection-contract versions fail closed, and a
+maintenance operation. Mismatched hook and binary contracts fail closed, and a
 rollback must restore the matching pair. Follow the release-specific upgrade
-guide before replacing either side; for 0.1.3, use the complete
+guide before replacing either side. For 0.1.3, use the complete
 [0.1.4 upgrade procedure](upgrade-0.1.4.md), including exact-target recovery for
-an already failed teardown.
+an already failed teardown. For 0.1.4, follow the
+[0.1.5 binary and hook rollout](upgrade-0.1.5.md).
 
 After upgrading, run `stackstead doctor` and compare the repository policy in
 your agent instruction file with the current

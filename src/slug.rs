@@ -111,22 +111,27 @@ pub fn normalize_short_id(short_id: &str) -> Result<String, SlugError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::TestResultExt as _;
+    use crate::test_support::{TestResultErrorExt as _, TestResultExt as _};
 
     #[test]
     fn sanitizes_human_names() -> anyhow::Result<()> {
         assert_eq!(
             sanitize_slug(" Fix Checkout_timeout... ").test()?,
-            "fix-checkout-timeout"
+            "fix-checkout-timeout",
+            "test contract values differ"
         );
-        assert_eq!(sanitize_slug("feature-a").test()?, "feature-a");
+        assert_eq!(
+            sanitize_slug("feature-a").test()?,
+            "feature-a",
+            "test contract values differ"
+        );
         Ok(())
     }
 
     #[test]
     fn rejects_dangerous_names() -> anyhow::Result<()> {
         for name in ["", " ", ".", "..", "/tmp/cell", "feature/a", "feature\\a"] {
-            assert!(sanitize_slug(name).is_err(), "accepted {name:?}");
+            (sanitize_slug(name)).test_err()?;
         }
         for name in [
             "feature;rm",
@@ -144,10 +149,15 @@ mod tests {
 
     #[test]
     fn rejects_non_ascii_and_unrecognized_punctuation() -> anyhow::Result<()> {
-        assert_eq!(sanitize_slug("café"), Err(SlugError::UnsafeCharacter('é')));
+        assert_eq!(
+            sanitize_slug("café"),
+            Err(SlugError::UnsafeCharacter('é')),
+            "test contract values differ"
+        );
         assert_eq!(
             sanitize_slug("feature:one"),
-            Err(SlugError::UnsafeCharacter(':'))
+            Err(SlugError::UnsafeCharacter(':')),
+            "test contract values differ"
         );
         Ok(())
     }
@@ -157,11 +167,13 @@ mod tests {
         let short_id = "A17C0123456789ABCDEF0123456789AB";
         assert_eq!(
             make_stackstead_id("Feature A", short_id).test()?,
-            "feature-a-a17c0123456789abcdef0123456789ab"
+            "feature-a-a17c0123456789abcdef0123456789ab",
+            "test contract values differ"
         );
         assert_eq!(
             make_stackstead_id("feature-a", "xyz1"),
-            Err(SlugError::InvalidShortId)
+            Err(SlugError::InvalidShortId),
+            "test contract values differ"
         );
         Ok(())
     }
@@ -169,10 +181,11 @@ mod tests {
     #[test]
     fn generated_short_ids_have_the_contract_shape() -> anyhow::Result<()> {
         let id = new_short_id().test()?;
-        assert_eq!(id.len(), SHORT_ID_LEN);
+        assert_eq!(id.len(), SHORT_ID_LEN, "test contract values differ");
         assert!(
             id.bytes()
-                .all(|value| value.is_ascii_digit() || (b'a'..=b'f').contains(&value))
+                .all(|value| value.is_ascii_digit() || (b'a'..=b'f').contains(&value)),
+            "test contract condition failed"
         );
         Ok(())
     }
@@ -181,7 +194,8 @@ mod tests {
     fn rejects_correctly_sized_non_hex_short_id() -> anyhow::Result<()> {
         assert_eq!(
             normalize_short_id("0123456789abcdef0123456789abcdeg"),
-            Err(SlugError::InvalidShortId)
+            Err(SlugError::InvalidShortId),
+            "test contract values differ"
         );
         Ok(())
     }

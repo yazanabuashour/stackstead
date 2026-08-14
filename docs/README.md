@@ -10,6 +10,8 @@ Start with the guide that matches what you are trying to do.
   upgrades, and source builds.
 - [Upgrade from 0.1.3 to 0.1.4](upgrade-0.1.4.md) covers the inspection transport,
   hook rollout, and exact-target recovery for an already failed teardown.
+- [Upgrade from 0.1.4 to 0.1.5](upgrade-0.1.5.md) covers the current-worktree
+  identity contract and matching manager-hook rollout.
 - [Quickstart](quickstart.md) configures and launches a first environment.
 - [Agent setup](agent-setup.md) is the copyable setup contract for coding agents.
 

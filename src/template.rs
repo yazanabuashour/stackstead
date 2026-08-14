@@ -156,7 +156,8 @@ mod tests {
                 &context()
             )
             .test()?,
-            "loan-platform:39100/loan-platform"
+            "loan-platform:39100/loan-platform",
+            "test contract values differ"
         );
         Ok(())
     }
@@ -165,9 +166,14 @@ mod tests {
     fn leaves_plain_text_unchanged() -> anyhow::Result<()> {
         assert_eq!(
             render_template("plain text", &context()).test()?,
-            "plain text"
+            "plain text",
+            "test contract values differ"
         );
-        assert_eq!(render_template("", &context()).test()?, "");
+        assert_eq!(
+            render_template("", &context()).test()?,
+            "",
+            "test contract values differ"
+        );
         Ok(())
     }
 
@@ -175,11 +181,13 @@ mod tests {
     fn renders_url_and_env_values() -> anyhow::Result<()> {
         assert_eq!(
             render_template("http://127.0.0.1:{{ ports.web }}", &context()).test()?,
-            "http://127.0.0.1:39100"
+            "http://127.0.0.1:39100",
+            "test contract values differ"
         );
         assert_eq!(
             render_template("WEB_PORT={{ ports.web }}", &context()).test()?,
-            "WEB_PORT=39100"
+            "WEB_PORT=39100",
+            "test contract values differ"
         );
         Ok(())
     }
@@ -188,7 +196,8 @@ mod tests {
     fn rejects_unknown_keys() -> anyhow::Result<()> {
         assert_eq!(
             render_template("{{ ports.api }}", &context()),
-            Err(TemplateError::UnknownKey("ports.api".to_owned()))
+            Err(TemplateError::UnknownKey("ports.api".to_owned())),
+            "test contract values differ"
         );
         Ok(())
     }
@@ -197,35 +206,38 @@ mod tests {
     fn rejects_malformed_expressions() -> anyhow::Result<()> {
         assert_eq!(
             render_template("{{ ports.web", &context()),
-            Err(TemplateError::UnclosedExpression)
+            Err(TemplateError::UnclosedExpression),
+            "test contract values differ"
         );
         assert_eq!(
             render_template("ports.web }}", &context()),
-            Err(TemplateError::UnexpectedClosingDelimiter)
+            Err(TemplateError::UnexpectedClosingDelimiter),
+            "test contract values differ"
         );
         assert_eq!(
             render_template("{{ }}", &context()),
-            Err(TemplateError::EmptyKey)
+            Err(TemplateError::EmptyKey),
+            "test contract values differ"
         );
         assert_eq!(
             render_template("{{ ports web }}", &context()),
-            Err(TemplateError::InvalidKey("ports web".to_owned()))
+            Err(TemplateError::InvalidKey("ports web".to_owned())),
+            "test contract values differ"
         );
         Ok(())
     }
 
     #[test]
     fn validates_keys_without_rendering() -> anyhow::Result<()> {
-        assert!(
-            validate_template_keys(
-                "{{ project.name }}-{{ ports.web }}",
-                ["project.name", "ports.web"]
-            )
-            .is_ok()
-        );
+        (validate_template_keys(
+            "{{ project.name }}-{{ ports.web }}",
+            ["project.name", "ports.web"],
+        ))
+        .test()?;
         assert_eq!(
             validate_template_keys("{{ paths.unknown }}", ["project.name"]),
-            Err(TemplateError::UnknownKey("paths.unknown".to_owned()))
+            Err(TemplateError::UnknownKey("paths.unknown".to_owned())),
+            "test contract values differ"
         );
         Ok(())
     }

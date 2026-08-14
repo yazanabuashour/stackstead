@@ -58,7 +58,7 @@ stackstead up feature-a
 `up` locks the stackstead, regenerates the env and Compose ownership contracts, runs configured dependency/link setup, runs `pre_up` hooks, verifies or creates the runtime-token claim and rejects foreign resources in the target namespace, starts the exact Compose project from the manifest, verifies the created resources carry the runtime token, waits for configured Postgres reachability, runs a configured seed command and `post_up` hooks, waits for all HTTP/custom health checks, and refreshes manifest status. Failures retain inspectable state and event history.
 
 Successful human output reports timings for the configured phases and the total.
-JSON output remains the version 1 `StacksteadChange` document.
+See the [CLI JSON reference](agent-contract.md#cli-json) for the response contract.
 
 Use these commands before editing service startup code or database setup:
 
@@ -91,7 +91,7 @@ stackstead run <full-id> -- npm test
 stackstead exec <full-id> web -- nginx -t
 ```
 
-Structured commands accept `--json`; every document has command-owned `kind` and `version` fields and never serializes a persistence type directly. `StacksteadInspection` version 3 separates the recorded manifest status, live observations, and an `effective` status with its basis and observation timestamps. The remaining current documents are version 1. Lifecycle mutations return a `StacksteadChange` envelope with an `action` and a `stackstead` view. `run`, `exec`, `launch`, and `logs --follow` reject JSON because they own stdout, while `destroy --json` requires `--yes` to prevent prompt output from contaminating JSON. `stackstead open ... --print` returns a configured URL without launching a browser. `stackstead env --print` redacts secret-like values and credential-bearing DSNs unless `--show-secrets` is explicitly supplied.
+The [CLI JSON reference](agent-contract.md#cli-json) lists supported commands and their response contracts. `run`, `exec`, `launch`, and `logs --follow` reject JSON because they own stdout, while `destroy --json` requires `--yes` to prevent prompt output from contaminating JSON. `stackstead open ... --print` returns a configured URL without launching a browser. `stackstead env --print` redacts secret-like values and credential-bearing DSNs unless `--show-secrets` is explicitly supplied.
 
 ## Stop
 

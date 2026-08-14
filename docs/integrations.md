@@ -17,8 +17,10 @@ branch. When the manager must create source, use `adopt`. When the manager can
 attach to an existing checkout, prefer Stackstead ownership and pass the
 machine-readable `.stackstead.worktree` path from the `StacksteadChange` response to it.
 
-The checked-in hooks require Bash, `jq`, and Stackstead on `PATH` (or
-`STACKSTEAD_BIN`). Install them outside every branch-controlled checkout, then
+All checked-in hooks require Bash and Stackstead on `PATH` (or
+`STACKSTEAD_BIN`). The adoption and destruction hooks also require `jq` to
+validate command-owned JSON; `run-current.sh` and `stop-current.sh` do not.
+Install them outside every branch-controlled checkout, then
 replace `/absolute/trusted/stackstead-hooks` in the fragments with that absolute
 owner-controlled directory:
 
@@ -27,15 +29,9 @@ install -d "$HOME/.local/libexec/stackstead-hooks"
 install -m 0755 integrations/hooks/*.sh "$HOME/.local/libexec/stackstead-hooks/"
 ```
 
-When upgrading across an inspection JSON version change, pause manager lifecycle
-automation and install the matching binary plus every trusted hook copy as one
-maintenance operation from a reviewed release checkout. Verify the binary,
-inspection contract, and every installed hook before resuming. The current hooks
-require inspection version 3; this pre-release contract does not include
-mixed-version rollout or rollback bridges. A rollback must restore the matching
-pair, and an older binary must not resume teardown started by a newer one. The
-[0.1.4 upgrade procedure](upgrade-0.1.4.md) provides the exact verification for
-the 0.1.3 transition.
+Install the binary and trusted hooks together. These hooks require
+`StacksteadCurrent` version 1 and fail closed when `current` is unavailable.
+Pause manager lifecycle automation while replacing or rolling back the pair.
 
 Do not invoke a relative hook script from a managed worktree: a branch could
 replace it before a manager lifecycle event. `adopt-current.sh` is idempotent:
@@ -44,9 +40,11 @@ second adoption. It converts Git ref separators to safe Stackstead separators;
 set `STACKSTEAD_NAME` when a manager needs an explicit name. The hook detects the
 primary Git worktree and exits without adopting it, so a normal switch to
 `main` cannot turn the repository checkout into an external Stackstead. Before
-reusing an existing pointer, the hook asks the primary checkout for trusted
-`inspect --json` output and requires the exact external worktree, pointer, and
-ID; a copied branch pointer cannot start another environment.
+reusing an existing contract, the hook runs `stackstead --json current` in the
+managed worktree and requires the exact external worktree, pointer, repository,
+and ID. It then starts the environment through configuration-rooted discovery
+in the primary checkout; a copied branch pointer cannot select another state
+root.
 
 ## Worktrunk
 
@@ -85,9 +83,10 @@ Source: [webmux lifecycle and runtime reference](https://webmux.dev/docs/).
 See `integrations/generic/README.md`. A launcher can consume the JSON returned
 by `create-stackstead-owned.sh` and invoke `stackstead run <full-id> -- claude` (or
 another agent/command). For manager panes already inside the checkout, use the
-trusted installed `run-current.sh claude`; it reads the pointer instead of
-guessing from a branch name. The agent should read the generated context and use
-`stackstead inspect <full-id> --json` before touching ports, logs, databases,
+trusted installed `run-current.sh claude`; it asks `stackstead current` for a
+validated full ID instead of guessing from a branch name. The agent should read
+the generated context and use `stackstead inspect <full-id> --json` before
+touching ports, logs, databases,
 recovery, or teardown.
 
 For externally owned worktrees the lifecycle is:
@@ -102,10 +101,12 @@ manager creates source
 ```
 
 The teardown script requires `STACKSTEAD_MANAGER_TEARDOWN=1`. It derives the
-primary repository independently from Git, reads only the candidate ID from the
-branch-writable pointer, and asks that primary checkout for `inspect --json`.
-The trusted result must bind the exact current worktree, pointer, repository,
-ID, and `source_ownership: external` before the script passes the full ID to
-`destroy --yes`. It then verifies that Stackstead did not delete manager-owned source.
-Do not put it in background or post-remove hooks: Stackstead must inspect the
-checkout and may refuse dirty or tampered state before the manager deletes it.
+worktree and primary repository independently from Git, then validates
+`stackstead --json current` against those exact paths and
+`source_ownership: external` before passing the full ID to `destroy --yes` from
+the primary repository, where project configuration anchors state lookup. An
+active teardown journal does not block identity lookup while the worktree
+pointer remains. The script then verifies that Stackstead did not delete
+manager-owned source. Do not put it in background or post-remove hooks: Stackstead must
+validate the checkout and may refuse dirty or tampered state before the manager
+deletes it.

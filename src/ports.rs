@@ -3,6 +3,7 @@ use std::error::Error;
 use std::fmt;
 use std::io;
 use std::net::TcpListener;
+use std::num::TryFromIntError;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PortAllocation {
@@ -17,7 +18,7 @@ pub enum PortAllocationError {
     StrideTooSmall { stride: u16, service_count: usize },
     EmptyServiceName,
     DuplicateService(String),
-    PortRangeOverflow,
+    PortRangeOverflow { source: Option<TryFromIntError> },
     NoAvailableSlot,
     Probe { port: u16, source: io::Error },
 }
@@ -38,7 +39,9 @@ impl fmt::Display for PortAllocationError {
             Self::DuplicateService(service) => {
                 write!(f, "duplicate exposed service name `{service}`")
             }
-            Self::PortRangeOverflow => write!(f, "port slot exceeds the valid TCP port range"),
+            Self::PortRangeOverflow { .. } => {
+                write!(f, "port slot exceeds the valid TCP port range")
+            }
             Self::NoAvailableSlot => write!(f, "no deterministic port slot is available"),
             Self::Probe { port, source } => {
                 write!(f, "failed to probe 127.0.0.1:{port}: {source}")
@@ -50,8 +53,17 @@ impl fmt::Display for PortAllocationError {
 impl Error for PortAllocationError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
+            Self::PortRangeOverflow {
+                source: Some(source),
+            } => Some(source),
             Self::Probe { source, .. } => Some(source),
-            _ => None,
+            Self::InvalidBase
+            | Self::InvalidStride
+            | Self::StrideTooSmall { .. }
+            | Self::EmptyServiceName
+            | Self::DuplicateService(_)
+            | Self::PortRangeOverflow { source: None }
+            | Self::NoAvailableSlot => None,
         }
     }
 }
@@ -88,13 +100,17 @@ where
         });
     }
 
-    let last_service_offset = u32::try_from(service_names.len().saturating_sub(1))
-        .map_err(|_| PortAllocationError::PortRangeOverflow)?;
+    let last_service_offset =
+        u32::try_from(service_names.len().saturating_sub(1)).map_err(|source| {
+            PortAllocationError::PortRangeOverflow {
+                source: Some(source),
+            }
+        })?;
     if u32::from(base)
         .checked_add(last_service_offset)
         .is_none_or(|last| last > u32::from(u16::MAX))
     {
-        return Err(PortAllocationError::PortRangeOverflow);
+        return Err(PortAllocationError::PortRangeOverflow { source: None });
     }
     let available_span = u32::from(u16::MAX) - u32::from(base) - last_service_offset;
     let max_slot = available_span / u32::from(stride);
@@ -136,20 +152,25 @@ pub fn ports_for_slot(
     let slot_start = u32::from(base)
         .checked_add(
             slot.checked_mul(u32::from(stride))
-                .ok_or(PortAllocationError::PortRangeOverflow)?,
+                .ok_or(PortAllocationError::PortRangeOverflow { source: None })?,
         )
-        .ok_or(PortAllocationError::PortRangeOverflow)?;
+        .ok_or(PortAllocationError::PortRangeOverflow { source: None })?;
 
     service_names
         .iter()
         .enumerate()
         .map(|(index, service)| {
             let port = slot_start
-                .checked_add(
-                    u32::try_from(index).map_err(|_| PortAllocationError::PortRangeOverflow)?,
-                )
-                .ok_or(PortAllocationError::PortRangeOverflow)?;
-            let port = u16::try_from(port).map_err(|_| PortAllocationError::PortRangeOverflow)?;
+                .checked_add(u32::try_from(index).map_err(|source| {
+                    PortAllocationError::PortRangeOverflow {
+                        source: Some(source),
+                    }
+                })?)
+                .ok_or(PortAllocationError::PortRangeOverflow { source: None })?;
+            let port =
+                u16::try_from(port).map_err(|source| PortAllocationError::PortRangeOverflow {
+                    source: Some(source),
+                })?;
             Ok((service.clone(), port))
         })
         .collect()
@@ -195,90 +216,4 @@ fn validate_inputs(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::test_support::TestResultExt as _;
-
-    fn services() -> Vec<String> {
-        ["web", "api", "postgres", "redis"]
-            .map(str::to_owned)
-            .to_vec()
-    }
-
-    fn available(_: u16) -> io::Result<bool> {
-        Ok(true)
-    }
-
-    #[test]
-    fn allocates_first_and_second_slots_deterministically() -> anyhow::Result<()> {
-        let first = allocate_ports_with_probe(39000, 50, &services(), &BTreeSet::new(), available)
-            .test()?;
-        assert_eq!(first.slot, 0);
-        assert_eq!(first.ports["web"], 39000);
-        assert_eq!(first.ports["redis"], 39003);
-
-        let used = first.ports.values().copied().collect();
-        let second = allocate_ports_with_probe(39000, 50, &services(), &used, available).test()?;
-        assert_eq!(second.slot, 1);
-        assert_eq!(second.ports["web"], 39050);
-        Ok(())
-    }
-
-    #[test]
-    fn reuses_a_hole_at_the_first_slot() -> anyhow::Result<()> {
-        let used = BTreeSet::from([39050, 39051, 39052, 39053]);
-        let allocation =
-            allocate_ports_with_probe(39000, 50, &services(), &used, available).test()?;
-        assert_eq!(allocation.slot, 0);
-        Ok(())
-    }
-
-    #[test]
-    fn skips_a_slot_with_an_occupied_os_port() -> anyhow::Result<()> {
-        let allocation =
-            allocate_ports_with_probe(39000, 50, &services(), &BTreeSet::new(), |port| {
-                Ok(port != 39002)
-            })
-            .test()?;
-        assert_eq!(allocation.slot, 1);
-        Ok(())
-    }
-
-    #[test]
-    fn rejects_invalid_base_stride_and_duplicate_services() -> anyhow::Result<()> {
-        assert!(matches!(
-            ports_for_slot(0, 50, &services(), 0),
-            Err(PortAllocationError::InvalidBase)
-        ));
-        assert!(matches!(
-            ports_for_slot(39000, 0, &services(), 0),
-            Err(PortAllocationError::InvalidStride)
-        ));
-        assert!(matches!(
-            ports_for_slot(39000, 2, &services(), 0),
-            Err(PortAllocationError::StrideTooSmall { .. })
-        ));
-        assert!(matches!(
-            ports_for_slot(39000, 50, &["web".to_owned(), "web".to_owned()], 0),
-            Err(PortAllocationError::DuplicateService(service)) if service == "web"
-        ));
-        Ok(())
-    }
-
-    #[test]
-    fn reports_port_range_overflow() -> anyhow::Result<()> {
-        assert!(matches!(
-            ports_for_slot(65535, 1, &["web".to_owned(), "api".to_owned()], 0),
-            Err(PortAllocationError::StrideTooSmall { .. })
-        ));
-        assert!(matches!(
-            ports_for_slot(65535, 2, &["web".to_owned(), "api".to_owned()], 0),
-            Err(PortAllocationError::PortRangeOverflow)
-        ));
-        assert!(matches!(
-            ports_for_slot(65000, 50, &services(), 20),
-            Err(PortAllocationError::PortRangeOverflow)
-        ));
-        Ok(())
-    }
-}
+mod tests;

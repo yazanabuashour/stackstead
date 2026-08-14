@@ -1,7 +1,5 @@
 use std::{
     collections::BTreeMap,
-    fs::OpenOptions,
-    io::Write,
     path::{Path, PathBuf},
 };
 
@@ -23,53 +21,31 @@ pub fn repo_root(cwd: &Path) -> anyhow::Result<PathBuf> {
     Ok(PathBuf::from(String::from_utf8(output.stdout)?.trim()))
 }
 
-pub fn registered_worktree_branch(repo_root: &Path, worktree: &Path) -> anyhow::Result<String> {
-    let worktree = std::fs::canonicalize(worktree).map_err(|error| {
-        anyhow::anyhow!("cannot access worktree {}: {error}", worktree.display())
-    })?;
-    let top_level = self::repo_root(&worktree)?;
-    if std::fs::canonicalize(&top_level)? != worktree {
-        anyhow::bail!(
-            "worktree path must be its Git checkout root: {}",
-            worktree.display()
-        );
-    }
-    if git_common_dir(repo_root)? != git_common_dir(&worktree)? {
-        anyhow::bail!(
-            "{} is not a registered worktree of {}",
-            worktree.display(),
-            repo_root.display()
-        );
-    }
+pub fn primary_worktree(cwd: &Path) -> anyhow::Result<PathBuf> {
     let output = command::run(
         "git",
         &[
-            "symbolic-ref".into(),
-            "--quiet".into(),
-            "--short".into(),
-            "HEAD".into(),
-        ],
-        &worktree,
-        &empty_env(),
-    )
-    .map_err(|_| anyhow::anyhow!("worktree must have a checked-out branch"))?;
-    Ok(String::from_utf8(output.stdout)?.trim().into())
-}
-
-fn git_common_dir(cwd: &Path) -> anyhow::Result<PathBuf> {
-    let output = command::run(
-        "git",
-        &[
-            "rev-parse".into(),
-            "--path-format=absolute".into(),
-            "--git-common-dir".into(),
+            "worktree".into(),
+            "list".into(),
+            "--porcelain".into(),
+            "-z".into(),
         ],
         cwd,
         &empty_env(),
     )?;
-    std::fs::canonicalize(PathBuf::from(String::from_utf8(output.stdout)?.trim()))
-        .map_err(Into::into)
+    let record = output
+        .stdout
+        .split(|byte| *byte == 0)
+        .next()
+        .context("Git did not report a primary worktree")?;
+    let path = record
+        .strip_prefix(b"worktree ")
+        .context("Git did not report a primary worktree")?;
+    std::fs::canonicalize(String::from_utf8(path.to_vec())?).context("resolve primary Git worktree")
 }
+
+mod worktree;
+pub use worktree::registered_worktree_branch;
 
 pub fn ensure_repository_ready(repo_root: &Path, base: &str) -> anyhow::Result<String> {
     command::run(
@@ -104,9 +80,9 @@ pub fn ensure_revision_ancestor(checkout: &Path, revision: &str) -> anyhow::Resu
         &empty_env(),
     )
     .map(|_| ())
-    .map_err(|_| {
+    .map_err(|error| {
         anyhow::anyhow!(
-            "source checkout {} is not based on pinned commit {revision}; update or recreate the manager worktree before adoption",
+            "source checkout {} is not based on pinned commit {revision}; update or recreate the manager worktree before adoption: {error}",
             checkout.display()
         )
     })
@@ -127,9 +103,9 @@ pub fn ensure_contract_on_revision(
             checkout,
             &empty_env(),
         )
-        .map_err(|_| {
+        .map_err(|error| {
             anyhow::anyhow!(
-                "runtime contract file `{}` is not present on source.base commit `{revision}`; commit or merge stackstead.yaml and its Compose files before provisioning",
+                "runtime contract file `{}` is not present on source.base commit `{revision}`; commit or merge stackstead.yaml and its Compose files before provisioning: {error}",
                 file.display()
             )
         })?;
@@ -193,9 +169,9 @@ pub fn create_worktree(
             repo_root,
             &empty_env(),
         )
-        .map_err(|_| {
+        .map_err(|error| {
             anyhow::anyhow!(
-                "existing branch `{branch}` does not contain pinned source.base commit `{base}`; merge or rebase it before recreating the stackstead"
+                "existing branch `{branch}` does not contain pinned source.base commit `{base}`; merge or rebase it before recreating the stackstead: {error}"
             )
         })?;
         vec![
@@ -282,144 +258,10 @@ pub fn ensure_worktree_clean(worktree: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn ensure_stackstead_excluded(worktree: &Path) -> anyhow::Result<PathBuf> {
-    ensure_excluded(worktree, ".stackstead/")
-}
-
-pub fn ensure_excluded(repository: &Path, pattern: &str) -> anyhow::Result<PathBuf> {
-    let output = command::run(
-        "git",
-        &[
-            "rev-parse".into(),
-            "--path-format=absolute".into(),
-            "--git-path".into(),
-            "info/exclude".into(),
-        ],
-        repository,
-        &empty_env(),
-    )?;
-    let path = PathBuf::from(String::from_utf8(output.stdout)?.trim());
-    let existing = match std::fs::read_to_string(&path) {
-        Ok(existing) => existing,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
-        Err(error) => {
-            return Err(error)
-                .with_context(|| format!("cannot read Git exclude file {}", path.display()));
-        }
-    };
-    if !existing.lines().any(|line| line.trim() == pattern) {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let mut file = OpenOptions::new().create(true).append(true).open(&path)?;
-        if !existing.is_empty() && !existing.ends_with('\n') {
-            writeln!(file)?;
-        }
-        writeln!(file, "{pattern}")?;
-    }
-    Ok(path)
-}
-
-pub fn is_stackstead_ignored(worktree: &Path) -> bool {
-    command::run(
-        "git",
-        &[
-            "check-ignore".into(),
-            "--quiet".into(),
-            ".stackstead/stackstead.json".into(),
-        ],
-        worktree,
-        &empty_env(),
-    )
-    .is_ok()
-}
+mod exclude;
+#[cfg(test)]
+pub use exclude::ensure_excluded;
+pub use exclude::{ensure_stackstead_excluded, is_stackstead_ignored};
 
 #[cfg(all(test, unix))]
-mod tests {
-    use crate::test_support::{TestResultErrorExt as _, TestResultExt as _};
-    use std::os::unix::fs::symlink;
-    use std::process::Command;
-
-    use super::*;
-
-    fn git(repository: &Path, arguments: &[&str]) -> anyhow::Result<()> {
-        assert!(
-            Command::new("git")
-                .args(arguments)
-                .current_dir(repository)
-                .status()
-                .test()?
-                .success()
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn registered_worktree_parser_preserves_newlines_in_paths() -> anyhow::Result<()> {
-        let directory = tempfile::tempdir().test()?;
-        let repository = directory.path().join("repository");
-        let worktrees = directory.path().join("worktrees");
-        let worktree_alias = directory.path().join("worktree-alias");
-        std::fs::create_dir(&repository).test()?;
-        std::fs::create_dir(&worktrees).test()?;
-        symlink(&worktrees, &worktree_alias).test()?;
-        git(&repository, &["init", "-q"])?;
-        git(
-            &repository,
-            &["config", "user.email", "stackstead-tests@example.invalid"],
-        )?;
-        git(&repository, &["config", "user.name", "Stackstead Tests"])?;
-        std::fs::write(repository.join("README.md"), "test\n").test()?;
-        git(&repository, &["add", "README.md"])?;
-        git(&repository, &["commit", "-qm", "initial"])?;
-
-        let worktree = worktree_alias.join("line\nbreak");
-        let output = Command::new("git")
-            .args(["worktree", "add", "-q", "-b", "newline-path"])
-            .arg(&worktree)
-            .current_dir(&repository)
-            .status()
-            .test()?;
-        assert!(output.success());
-        assert!(is_registered_worktree(&repository, &worktree).test()?);
-        std::fs::remove_dir_all(&worktree).test()?;
-        assert!(is_registered_worktree(&repository, &worktree).test()?);
-        Ok(())
-    }
-
-    #[test]
-    fn registered_worktree_check_propagates_canonicalization_errors() -> anyhow::Result<()> {
-        let directory = tempfile::tempdir().test()?;
-        let repository = directory.path().join("repository");
-        std::fs::create_dir(&repository).test()?;
-        git(&repository, &["init", "-q"])?;
-        let loop_path = directory.path().join("loop");
-        symlink(&loop_path, &loop_path).test()?;
-
-        let error = is_registered_worktree(&repository, &loop_path)
-            .test_err()?
-            .to_string();
-
-        assert!(error.contains("cannot resolve worktree path"));
-        Ok(())
-    }
-
-    #[test]
-    fn ensure_excluded_preserves_invalid_utf8_on_error() -> anyhow::Result<()> {
-        let directory = tempfile::tempdir().test()?;
-        let repository = directory.path().join("repository");
-        std::fs::create_dir(&repository).test()?;
-        git(&repository, &["init", "-q"])?;
-        let exclude = repository.join(".git/info/exclude");
-        let original = b"existing\n\xffinvalid\n";
-        std::fs::write(&exclude, original).test()?;
-
-        let error = ensure_excluded(&repository, ".stackstead/")
-            .test_err()?
-            .to_string();
-
-        assert!(error.contains("cannot read Git exclude file"));
-        assert_eq!(std::fs::read(exclude).test()?, original);
-        Ok(())
-    }
-}
+mod tests;

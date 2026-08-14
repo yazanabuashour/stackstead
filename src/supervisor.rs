@@ -97,7 +97,12 @@ where
         .next()
         .ok_or_else(|| anyhow::anyhow!("private supervisor {label} is missing"))?
         .into_string()
-        .map_err(|_| anyhow::anyhow!("private supervisor {label} is not UTF-8"))?
+        .map_err(|value| {
+            anyhow::anyhow!(
+                "private supervisor {label} is not UTF-8: {}",
+                value.to_string_lossy()
+            )
+        })?
         .parse()
         .map_err(Into::into)
 }
@@ -130,8 +135,8 @@ impl TargetGuard {
 impl Drop for TargetGuard {
     fn drop(&mut self) {
         if self.armed {
-            let _ = cancel_target(&mut self.child, self.group);
-            let _ = cleanup_adopted_children();
+            drop(cancel_target(&mut self.child, self.group));
+            drop(cleanup_adopted_children());
         }
     }
 }

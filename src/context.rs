@@ -140,8 +140,14 @@ mod tests {
             &manifest(false, serde_json::json!({}))?,
             &["Run stackstead db status before migrations.".into()],
         );
-        assert!(!without_database.contains("db status"));
-        assert!(!without_database.contains("open a web"));
+        assert!(
+            !without_database.contains("db status"),
+            "test contract condition failed"
+        );
+        assert!(
+            !without_database.contains("open a web"),
+            "test contract condition failed"
+        );
 
         let configured = render_agent_context(
             &manifest(
@@ -153,20 +159,62 @@ mod tests {
             )?,
             &[],
         );
-        assert!(configured.contains("stackstead db status a-b123\n```"));
-        assert!(configured.contains("Service: postgres"));
-        assert!(configured.contains("Endpoint: 127.0.0.1:39001"));
-        assert!(configured.contains("Database: app"));
-        assert!(configured.contains("stackstead open a-b123 api --print"));
-        assert!(configured.contains("stackstead open a-b123 dashboard --print"));
-        assert!(configured.contains("stackstead context a-b123 --print"));
-        assert!(configured.contains("stackstead up a-b123"));
-        assert!(configured.contains("may rerun configured dependency installation"));
-        assert!(configured.contains("stackstead repair a-b123"));
-        assert!(configured.contains("stackstead stop a-b123"));
-        assert!(configured.contains("stackstead destroy a-b123 --yes"));
-        assert!(!configured.contains("stackstead inspect a\n"));
-        assert!(!configured.contains("postgres://"));
+        assert!(
+            configured.contains("stackstead db status a-b123\n```"),
+            "test contract condition failed"
+        );
+        assert!(
+            configured.contains("Service: postgres"),
+            "test contract condition failed"
+        );
+        assert!(
+            configured.contains("Endpoint: 127.0.0.1:39001"),
+            "test contract condition failed"
+        );
+        assert!(
+            configured.contains("Database: app"),
+            "test contract condition failed"
+        );
+        assert!(
+            configured.contains("stackstead open a-b123 api --print"),
+            "test contract condition failed"
+        );
+        assert!(
+            configured.contains("stackstead open a-b123 dashboard --print"),
+            "test contract condition failed"
+        );
+        assert!(
+            configured.contains("stackstead context a-b123 --print"),
+            "test contract condition failed"
+        );
+        assert!(
+            configured.contains("stackstead up a-b123"),
+            "test contract condition failed"
+        );
+        assert!(
+            configured.contains("may rerun configured dependency installation"),
+            "test contract condition failed"
+        );
+        assert!(
+            configured.contains("stackstead repair a-b123"),
+            "test contract condition failed"
+        );
+        assert!(
+            configured.contains("stackstead stop a-b123"),
+            "test contract condition failed"
+        );
+        assert!(
+            configured.contains("stackstead destroy a-b123 --yes"),
+            "test contract condition failed"
+        );
+        assert!(
+            !configured.contains("stackstead inspect a\n"),
+            "test contract condition failed"
+        );
+        assert!(
+            !configured.contains("postgres://"),
+            "test contract condition failed"
+        );
         Ok(())
     }
 }

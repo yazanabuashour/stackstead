@@ -1,0 +1,266 @@
+use super::*;
+
+pub(super) fn assert_manifest_identity(
+    project: &Project,
+    manifest: &StacksteadManifest,
+) -> anyhow::Result<()> {
+    assert_manifest_metadata(project, manifest)?;
+    assert_manifest_files(project, manifest)
+}
+
+fn assert_manifest_metadata(
+    project: &Project,
+    manifest: &StacksteadManifest,
+) -> anyhow::Result<()> {
+    assert_eq!(
+        manifest.kind, "StacksteadManifest",
+        "generated manifest identity broke its contract"
+    );
+    assert_eq!(
+        manifest.version, "2",
+        "generated manifest identity broke its contract"
+    );
+    assert_eq!(
+        manifest.project, "demo-project",
+        "generated manifest identity broke its contract"
+    );
+    assert_eq!(
+        manifest.slug, "feature-a",
+        "generated manifest identity broke its contract"
+    );
+    assert_eq!(
+        manifest.branch, "feature-a",
+        "generated manifest identity broke its contract"
+    );
+    assert_eq!(
+        manifest.base,
+        git(&project.repo, &["rev-parse", "main"])?.trim(),
+        "generated manifest identity broke its contract"
+    );
+    assert!(
+        manifest.stackstead_id.starts_with("feature-a-"),
+        "generated manifest identity broke its contract"
+    );
+    assert_eq!(
+        manifest
+            .stackstead_id
+            .strip_prefix("feature-a-")
+            .map(str::len),
+        Some(32),
+        "generated manifest identity broke its contract"
+    );
+    assert_eq!(
+        manifest.runtime_token.len(),
+        32,
+        "generated manifest identity broke its contract"
+    );
+    assert!(
+        manifest
+            .runtime_token
+            .chars()
+            .all(|character| character.is_ascii_hexdigit() && !character.is_ascii_uppercase()),
+        "generated manifest identity broke its contract"
+    );
+    assert_eq!(
+        manifest.compose_project,
+        format!("demo-project-{}", manifest.stackstead_id),
+        "generated manifest identity broke its contract"
+    );
+    Ok(())
+}
+
+fn assert_manifest_files(project: &Project, manifest: &StacksteadManifest) -> anyhow::Result<()> {
+    assert!(
+        manifest.worktree.is_dir(),
+        "generated manifest identity broke its contract"
+    );
+    assert!(
+        manifest.state_dir.is_dir(),
+        "generated manifest identity broke its contract"
+    );
+    assert!(
+        manifest.state_dir.join("lock").is_file(),
+        "generated manifest identity broke its contract"
+    );
+    assert!(
+        manifest.state_dir.join("run.lock").is_file(),
+        "generated manifest identity broke its contract"
+    );
+    assert!(
+        manifest.manifest_path().is_file(),
+        "generated manifest identity broke its contract"
+    );
+    assert!(
+        manifest.pointer_file.is_file(),
+        "generated manifest identity broke its contract"
+    );
+    assert!(
+        manifest.env_file.is_file(),
+        "generated manifest identity broke its contract"
+    );
+    assert!(
+        manifest.agent_context.is_file(),
+        "generated manifest identity broke its contract"
+    );
+    assert!(
+        manifest.event_log.is_file(),
+        "generated manifest identity broke its contract"
+    );
+
+    let persisted =
+        StacksteadManifest::read(&manifest.manifest_path()).test_context("read manifest")?;
+    assert_eq!(
+        persisted.stackstead_id, manifest.stackstead_id,
+        "generated manifest identity broke its contract"
+    );
+    assert_eq!(
+        persisted.ports, manifest.ports,
+        "generated manifest identity broke its contract"
+    );
+    assert_eq!(
+        persisted.urls, manifest.urls,
+        "generated manifest identity broke its contract"
+    );
+
+    let pointer: StacksteadPointer = serde_json::from_slice(
+        &fs::read(&manifest.pointer_file).test_context("read generated pointer")?,
+    )
+    .test_context("parse generated pointer")?;
+    assert_eq!(
+        pointer.kind, "StacksteadPointer",
+        "generated manifest identity broke its contract"
+    );
+    assert_eq!(
+        pointer.version, "2",
+        "generated manifest identity broke its contract"
+    );
+    assert_eq!(
+        pointer.stackstead_id, manifest.stackstead_id,
+        "generated manifest identity broke its contract"
+    );
+    assert_eq!(
+        pointer.manifest,
+        manifest.manifest_path(),
+        "generated manifest identity broke its contract"
+    );
+    assert_eq!(
+        pointer.repo_root, project.repo,
+        "generated manifest identity broke its contract"
+    );
+    assert_eq!(
+        pointer.stackstead_root, manifest.stackstead_root,
+        "generated manifest identity broke its contract"
+    );
+    Ok(())
+}
+
+pub(super) fn assert_generated_agent_contract(manifest: &StacksteadManifest) -> anyhow::Result<()> {
+    let environment = fs::read_to_string(&manifest.env_file).test_context("read generated env")?;
+    assert!(
+        environment.contains("# Generated by Stackstead. Do not edit by hand."),
+        "generated agent files broke their contract"
+    );
+    assert!(
+        environment.contains(&format!("# Stackstead: {}", manifest.stackstead_id)),
+        "generated agent files broke their contract"
+    );
+    assert!(
+        environment.contains(&format!("STACKSTEAD_ID={}", manifest.stackstead_id)),
+        "generated agent files broke their contract"
+    );
+    assert!(
+        environment.contains(&format!("WEB_PORT={}", manifest.ports["web"])),
+        "generated agent files broke their contract"
+    );
+    assert!(
+        environment.contains(&format!("POSTGRES_PORT={}", manifest.ports["postgres"])),
+        "generated agent files broke their contract"
+    );
+
+    let context = fs::read_to_string(&manifest.agent_context).test_context("read agent context")?;
+    assert!(
+        context.contains(&format!("# Stackstead: {}", manifest.stackstead_id)),
+        "generated agent files broke their contract"
+    );
+    assert!(
+        context.contains(manifest.manifest_path().to_string_lossy().as_ref()),
+        "generated agent files broke their contract"
+    );
+    for command in [
+        format!("stackstead inspect {}", manifest.stackstead_id),
+        format!("stackstead context {} --print", manifest.stackstead_id),
+        format!("stackstead logs {} --tail 200", manifest.stackstead_id),
+        format!("stackstead db status {}", manifest.stackstead_id),
+        format!("stackstead open {} web --print", manifest.stackstead_id),
+        format!("stackstead up {}", manifest.stackstead_id),
+        format!("stackstead repair {}", manifest.stackstead_id),
+        format!("stackstead stop {}", manifest.stackstead_id),
+        format!("stackstead destroy {} --yes", manifest.stackstead_id),
+    ] {
+        assert!(
+            context.lines().any(|line| line == command),
+            "missing exact context command: {command}"
+        );
+    }
+    assert!(
+        !context
+            .lines()
+            .any(|line| line == "stackstead inspect feature-a"),
+        "generated agent files broke their contract"
+    );
+    assert!(
+        context.contains(&format!(
+            "Endpoint: 127.0.0.1:{}",
+            manifest.ports["postgres"]
+        )),
+        "generated agent files broke their contract"
+    );
+    assert!(
+        context.contains("Database: app"),
+        "generated agent files broke their contract"
+    );
+    assert!(
+        !context.contains("postgres://app:app"),
+        "generated agent files broke their contract"
+    );
+    assert!(
+        context.contains("runtime identity and state are isolated from peer stacksteads"),
+        "generated agent files broke their contract"
+    );
+    Ok(())
+}
+
+pub(super) fn assert_source_publication(
+    project: &Project,
+    manifest: &StacksteadManifest,
+) -> anyhow::Result<()> {
+    git(
+        &manifest.worktree,
+        &["check-ignore", "--quiet", ".stackstead/stackstead.json"],
+    )?;
+    assert!(
+        git(
+            &manifest.worktree,
+            &["status", "--short", "--untracked-files=all"]
+        )?
+        .trim()
+        .is_empty(),
+        "generated contract appears in Git status"
+    );
+    assert_eq!(
+        git(&project.repo, &["branch", "--list", "feature-a"])?.trim(),
+        "+ feature-a",
+        "source publication broke its contract"
+    );
+    assert_eq!(
+        event_types(&manifest.event_log)?,
+        [
+            "create",
+            "pointer_generate",
+            "environment_generate",
+            "context_generate"
+        ],
+        "source publication broke its contract"
+    );
+    Ok(())
+}

@@ -2,6 +2,106 @@
 
 Stackstead's agent-native surface consists of one machine-readable artifact and one human-readable artifact, both tied to the same runtime identity.
 
+## Current worktree identity
+
+From any directory beneath a generated worktree, resolve its validated full ID
+before composing another command:
+
+```sh
+id="$(stackstead current)"
+stackstead run "$id" -- true
+```
+
+Plain output is exactly the full `stackstead_id` plus one newline.
+`stackstead --json current` returns a `StacksteadCurrent` version 1 object with
+exactly `kind`, `version`, `stackstead_id`, `source_ownership`, `repo_root`,
+`worktree`, and `pointer`. Consumers must validate `kind` and `version` before
+using the other fields.
+
+`current` works only through generated worktree discovery. It validates the
+manifest's durable layout, exact reciprocal pointer path, registered Git branch,
+and pinned base commit. It also requires the manifest's project and state root
+to match `stackstead.yaml` in Git's primary worktree, so branch-written state
+cannot select an unrelated registered identity. It does not read generated
+environment, inspect Docker, or report mutable runtime status. An active
+teardown journal does not by itself block identity lookup, but the worktree
+pointer and primary project configuration must still exist. `destroy --yes`
+still owns mutation safety.
+
+## CLI JSON
+
+Use `stackstead --json …` for automation. Although the argument parser also
+accepts the global `--json` flag after a subcommand, consumers should use the
+canonical form shown here. CLI JSON is a versioned command contract, not a
+serialized manifest or internal type.
+
+| Invocation | Top-level `kind` | `version` | Mutation `action` |
+| --- | --- | --- | --- |
+| `stackstead --json init [--compose-file <repo-relative-path>]` | `StacksteadInit` | `"1"` | — |
+| `stackstead --json compose plan [--compose-file <repo-relative-path>]` | `ComposePlan` | `"1"` | — |
+| `stackstead --json compose apply --yes [--compose-file <repo-relative-path>]` | `ComposeApply` | `"1"` | — (no `action` field) |
+| `stackstead --json create <name>` | `StacksteadChange` | `"1"` | `created` |
+| `stackstead --json adopt <name> --worktree <absolute-path>` | `StacksteadChange` | `"1"` | `adopted` |
+| `stackstead --json up <full-id>` | `StacksteadChange` | `"1"` | `started` |
+| `stackstead --json ps` | `StacksteadList` | `"1"` | — |
+| `stackstead --json current` | `StacksteadCurrent` | `"1"` | — |
+| `stackstead --json inspect <full-id>` | `StacksteadInspection` | `"3"` | — |
+| `stackstead --json env <full-id> [--print [--show-secrets]]` | `StacksteadEnvironment` | `"1"` | — |
+| `stackstead --json logs <full-id> [--service <service>] [--tail <lines>]` | `StacksteadLogs` | `"1"` | — |
+| `stackstead --json context <full-id> [--print]` | `StacksteadContext` | `"1"` | — |
+| `stackstead --json open <full-id> [service] [--print]` | `StacksteadOpen` | `"1"` | — |
+| `stackstead --json db status <full-id>` | `DatabaseStatus` | `"1"` | — |
+| `stackstead --json stop <full-id>` | `StacksteadChange` | `"1"` | `stopped` |
+| `stackstead --json destroy <full-id> --yes` | `StacksteadChange` | `"1"` | `destroyed` |
+| `stackstead --json doctor [--fail-on-error]` | `DoctorReport` | `"1"` | — |
+| `stackstead --json repair <full-id>` | `StacksteadChange` | `"1"` | `repaired` |
+
+### Consume responses safely
+
+- Every successful response is a top-level object with string `kind` and
+  `version` fields. Validate both before reading command-specific fields.
+  `StacksteadInspection` alone uses version `"3"`; every other current response
+  uses version `"1"`.
+- Only `StacksteadChange` has an `action` field. Validate its exact value before
+  acting on `stackstead`. The supported values are `created`, `adopted`,
+  `started`, `stopped`, `destroyed`, and `repaired`.
+- Capture the durable full `stackstead_id` returned by `create` or `adopt` and
+  use it for later automation. Do not infer an identity from a slug.
+- No command returns a bare top-level array. The collection fields are
+  `ComposePlan.ports`, `ComposePlan.warnings`, `StacksteadList.stacksteads`,
+  `StacksteadInspection.live.services`, `StacksteadInspection.warnings`, and
+  `DoctorReport.diagnostics`; stackstead views also contain `compose_files`.
+- `run`, `exec`, and `launch` always reject JSON because the child owns stdout
+  and stderr. `logs --follow` rejects JSON because it streams. Public help still
+  shows the global option for these commands, so help output alone does not
+  establish JSON compatibility.
+- JSON `destroy` requires `--yes` and fails with empty stdout before it can
+  prompt when that flag is absent. Plain `destroy` prompts. `compose apply` also
+  requires `--yes`, but it never prompts.
+- `env` redacts values whose case-insensitive key contains `PASSWORD`, `TOKEN`,
+  `SECRET`, `KEY`, `CREDENTIAL`, or `AUTH`. It also redacts URLs with nonempty
+  user information and a host around `@`. `--show-secrets` is valid only with
+  `--print`; in JSON mode that combination puts unredacted values in `values`,
+  while `--print` alone remains redacted.
+- JSON `open` never launches a browser and always reports `opened: false`;
+  `--print` does not change that behavior. `context --print` includes `content`,
+  while `content` is `null` without `--print`.
+- `doctor --fail-on-error` emits the complete `DoctorReport`, then exits 1 only
+  if it contains an error diagnostic. Runtime command failures have no JSON
+  error envelope: Stackstead writes the error to stderr and exits 1. Argument
+  usage errors, including `--show-secrets` without `--print`, exit 2.
+
+### Inspection version 3
+
+Inspection version 3 keeps recorded status under `stackstead.status`, reports
+Compose, database, and passive HTTP observations under `live`, and adds
+`effective`. Each effective component has a `status` and a `basis` of `live`,
+`recorded`, or `lifecycle`; the envelope includes `phase`, `recorded_at`, and
+`observed_at`. Divergence is explicit in `warnings`. A stopped service targeted
+by an HTTP check is live-unhealthy even when another service is running. Service
+rows remain deterministically sorted. Stackstead is pre-release and does not
+emit older inspection versions or provide an output-version switch.
+
 ## Manifest JSON
 
 Every stackstead has a durable manifest at `<stackstead-root>/state/manifest.json`. It is the source of truth for lifecycle operations and machine integration.
@@ -20,24 +120,7 @@ The only manifest contract is version 2. It requires explicit `source_ownership`
 
 The manifest records where generated environment lives, but it does not copy environment values that may contain secrets. Writes are atomic where practical.
 
-Use stable JSON output for automation:
-
-```sh
-stackstead inspect feature-a --json
-stackstead ps --json
-stackstead db status feature-a --json
-```
-
-Agent managers and wrappers can consume these commands without parsing human output. CLI JSON is not the manifest: each command owns a versioned response DTO, so persistence-only fields cannot appear accidentally. Lifecycle mutations use `{ "kind": "StacksteadChange", "version": "1", "action": "...", "stackstead": { ... } }`; inspection uses `StacksteadInspection` version 3, while lists and doctor remain version 1. Consumers should validate `kind` and `version` before reading the command-specific body.
-
-Inspection version 3 keeps recorded status under `stackstead.status`, reports
-Compose, database, and passive HTTP observations under `live`, and adds
-`effective`. Each effective component has a `status` and a `basis` of `live`,
-`recorded`, or `lifecycle`; the envelope includes `phase`, `recorded_at`, and
-`observed_at`. Divergence is explicit in `warnings`. A stopped service targeted
-by an HTTP check is live-unhealthy even when another service is running. Service
-rows remain deterministically sorted. Stackstead is pre-release and does not
-emit older inspection versions or provide an output-version switch.
+## Process boundaries
 
 Stackstead also supplies direct host and service process boundaries:
 

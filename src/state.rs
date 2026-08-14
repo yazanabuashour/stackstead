@@ -123,11 +123,13 @@ mod tests {
             resolve_manifest(&manifests, "feature-a-a17c")
                 .test()?
                 .short_id,
-            "a17c"
+            "a17c",
+            "test contract values differ"
         );
         assert_eq!(
             resolve_manifest(&manifests, "feature-a").test()?.short_id,
-            "a17c"
+            "a17c",
+            "test contract values differ"
         );
         Ok(())
     }
@@ -141,8 +143,14 @@ mod tests {
         let error = resolve_manifest(&manifests, "feature-a")
             .test_err()?
             .to_string();
-        assert!(error.contains("feature-a-a17c"));
-        assert!(error.contains("feature-a-b92d"));
+        assert!(
+            error.contains("feature-a-a17c"),
+            "test contract condition failed"
+        );
+        assert!(
+            error.contains("feature-a-b92d"),
+            "test contract condition failed"
+        );
         Ok(())
     }
 
@@ -155,9 +163,18 @@ mod tests {
         let error = resolve_manifest(&manifests, "feature-a-a17c")
             .test_err()?
             .to_string();
-        assert!(error.contains("ambiguous"));
-        assert!(error.contains("feature-a-a17c"));
-        assert!(error.contains("other-b92d"));
+        assert!(
+            error.contains("ambiguous"),
+            "test contract condition failed"
+        );
+        assert!(
+            error.contains("feature-a-a17c"),
+            "test contract condition failed"
+        );
+        assert!(
+            error.contains("other-b92d"),
+            "test contract condition failed"
+        );
         Ok(())
     }
 }

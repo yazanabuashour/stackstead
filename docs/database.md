@@ -73,7 +73,7 @@ stackstead db status feature-a
 stackstead db status feature-a --json
 ```
 
-The version 1 `DatabaseStatus` response reports the configured strategy, service, host, allocated port, database, known seed state, and `reachable` TCP probe. `identity_status` is `reachable` only when the manifest's exact Compose project is running, the configured service and container port publish the allocated host endpoint, and that endpoint accepts a TCP connection; it is otherwise `unreachable` or `unknown`. `StacksteadInspection` exposes the same proof under `live.database.{reachable,status}`. Human output labels the raw TCP probe separately and uses the identity-aware status, so a listener owned by another process is not presented as the stackstead database. Status does not connect with a SQL client or expose the configured password.
+The [`DatabaseStatus` JSON response](agent-contract.md#cli-json) reports the configured strategy, service, host, allocated port, database, known seed state, and `reachable` TCP probe. `identity_status` is `reachable` only when the manifest's exact Compose project is running, the configured service and container port publish the allocated host endpoint, and that endpoint accepts a TCP connection; it is otherwise `unreachable` or `unknown`. `StacksteadInspection` exposes the same proof under `live.database.{reachable,status}`. Human output labels the raw TCP probe separately and uses the identity-aware status, so a listener owned by another process is not presented as the stackstead database. Status does not connect with a SQL client or expose the configured password.
 
 ## State ownership
 

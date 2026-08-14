@@ -113,7 +113,7 @@ fn check_passes(
 
 #[cfg(test)]
 mod tests {
-    use crate::test_support::TestResultExt as _;
+    use crate::test_support::{TestResultErrorExt as _, TestResultExt as _};
     use std::{
         io::{Read, Write},
         net::{TcpListener, TcpStream},
@@ -199,7 +199,8 @@ mod tests {
         };
         assert_eq!(
             healthy_passive(&config, &manifest(port), &BTreeMap::new()),
-            Some(true)
+            Some(true),
+            "test contract values differ"
         );
         server.join().test()??;
         Ok(())
@@ -227,7 +228,8 @@ mod tests {
         };
         assert_eq!(
             healthy_passive(&config, &manifest(port), &BTreeMap::new()),
-            Some(true)
+            Some(true),
+            "test contract values differ"
         );
         server.join().test()??;
         Ok(())
@@ -249,7 +251,8 @@ mod tests {
         };
         assert_eq!(
             healthy_passive(&config, &manifest(1), &BTreeMap::new()),
-            None
+            None,
+            "test contract values differ"
         );
         Ok(())
     }
@@ -271,8 +274,11 @@ mod tests {
             }],
         };
         let started = Instant::now();
-        assert!(wait(&config, &manifest(1), &BTreeMap::new()).is_err());
-        assert!(started.elapsed() < Duration::from_secs(2));
+        (wait(&config, &manifest(1), &BTreeMap::new())).test_err()?;
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "test contract condition failed"
+        );
         Ok(())
     }
 }
