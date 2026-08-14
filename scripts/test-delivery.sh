@@ -16,7 +16,10 @@ if [[ -d "$repo_root/src/output" ]]; then
     output_sources+=("$source")
   done < <(find "$repo_root/src/output" -type f -name '*.rs' -print | LC_ALL=C sort)
 fi
-mapfile -t json_kinds < <(
+json_kinds=()
+while IFS= read -r kind; do
+  json_kinds+=("$kind")
+done < <(
   cat "${output_sources[@]}" |
     tr '\n' ' ' |
     grep -oE 'kind[[:space:]]*:[[:space:]]*"[^"]+"' |
