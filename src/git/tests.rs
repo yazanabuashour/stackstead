@@ -46,7 +46,7 @@ fn worktree_parsers_preserve_newlines_in_paths() -> anyhow::Result<()> {
     assert!(output.success(), "test contract condition failed");
     assert_eq!(
         primary_worktree(&worktree).test()?,
-        repository,
+        std::fs::canonicalize(&repository).test()?,
         "test contract values differ"
     );
     assert!(
