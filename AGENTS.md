@@ -1,6 +1,34 @@
 <!-- stackstead-policy: 1 -->
 # Stackstead Project Rules
 
+Stackstead is a single Rust command-line interface that gives parallel coding
+agents isolated Git worktrees, Docker Compose runtimes, ports, and data under
+one durable identity. It has no daemon, server, plugin loader, or hidden
+database; lifecycle commands fail closed when persisted ownership cannot be
+proved.
+
+## Code Map
+
+- `src/main.rs` and `src/cli/` define the process entry point, command surface,
+  dispatch, presentation, and runtime wiring.
+- `src/lifecycle/` sequences create, adopt, up, stop, inspect, and destroy work.
+- `src/config/`, `src/manifest/`, `src/state.rs`, and `src/discovery.rs` own
+  configuration, durable contracts, state roots, and identity lookup.
+- `src/paths/`, `src/lock/`, `src/lease/`, and `src/ports/` enforce filesystem,
+  concurrency, lease, and allocation safety.
+- `src/compose/` owns Compose planning, supported rewrites, runtime control,
+  resource naming, and ownership checks; `src/command/` runs and redacts
+  external commands.
+- `src/output/`, `src/context.rs`, and `src/agent/` own versioned JSON, generated
+  agent context, and host-command execution.
+- `src/doctor/`, `src/repair.rs`, `src/health.rs`, `src/database.rs`, and
+  `src/events/` cover diagnostics, recovery, readiness, database support, and
+  lifecycle receipts.
+- `tests/cli_acceptance.rs` and `tests/cli_acceptance/` hold command-level
+  contracts; focused module tests live beside implementation. `scripts/ci.sh`
+  is the project-owned readiness entry point, and `docs/` is the operator and
+  integration reference.
+
 ## Runtime Identity And Safety
 
 - Treat generated Stackstead state as authoritative. Read `STACKSTEAD_CONTEXT` or
@@ -49,6 +77,7 @@
 - Changes to manifests, pointers, generated context, CLI/JSON, config, ports,
   Compose identity, locks, or teardown need both happy-path and ambiguous,
   tampered, or corrupt-state regression coverage.
-- When reviewing changes at a checkpoint, use `api-compat` for
+- During checkpoint review, request `api-compat` for
   CLI/config/schema/generated-output contracts and `concurrency` for lifecycle
-  races; otherwise use no extras.
+  races; request no other focused reviews. If checkpoint tooling does not
+  support a required focused review, report that review as unavailable.
