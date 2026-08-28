@@ -55,11 +55,21 @@ jobs:
     with:
       revision: ${{ needs.preflight.outputs.revision }}
 
+  audit:
+    name: Audit exact release revision
+    needs: preflight
+    permissions:
+      contents: read
+    uses: ./.github/workflows/rustsec.yml
+    with:
+      revision: ${{ needs.preflight.outputs.revision }}
+
   build:
     name: Build ${{ matrix.target }}
     needs:
       - preflight
       - validate
+      - audit
     permissions:
       contents: read
     strategy:
@@ -85,9 +95,12 @@ jobs:
         with:
           ref: ${{ needs.preflight.outputs.revision }}
           persist-credentials: false
+      - name: Resolve Rust toolchain
+        id: rust-toolchain
+        run: printf 'version=%s\n' "$(scripts/check-rust-toolchain.sh --print)" >> "$GITHUB_OUTPUT"
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # 2026-07-09
         with:
-          toolchain: 1.91.1
+          toolchain: ${{ steps.rust-toolchain.outputs.version }}
           targets: ${{ matrix.target }}
       - name: Build and smoke-test locked release binary
         shell: bash

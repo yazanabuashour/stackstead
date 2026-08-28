@@ -32,7 +32,16 @@ if [ "$#" -gt 1 ]; then
   printf 'usage: %s [all|rust|docker|macos]\n' "$0" >&2
   exit 2
 fi
+case "$mode" in
+all | rust | docker | macos) ;;
+*)
+  printf 'error: unknown CI mode: %s\n' "$mode" >&2
+  printf 'usage: %s [all|rust|docker|macos]\n' "$0" >&2
+  exit 2
+  ;;
+esac
 
+scripts/check-rust-toolchain.sh
 scripts/check-policy.sh
 case "$mode" in
 all)
@@ -47,10 +56,5 @@ docker)
   ;;
 macos)
   macos_checks
-  ;;
-*)
-  printf 'error: unknown CI mode: %s\n' "$mode" >&2
-  printf 'usage: %s [all|rust|docker|macos]\n' "$0" >&2
-  exit 2
   ;;
 esac

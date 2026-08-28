@@ -26,9 +26,12 @@ jobs:
         with:
           ref: ${{ inputs.revision || github.sha }}
           persist-credentials: false
+      - name: Resolve Rust toolchain
+        id: rust-toolchain
+        run: printf 'version=%s\n' "$(scripts/check-rust-toolchain.sh --print)" >> "$GITHUB_OUTPUT"
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # 2026-07-09
         with:
-          toolchain: 1.91.1
+          toolchain: ${{ steps.rust-toolchain.outputs.version }}
           components: clippy,rustfmt
       - run: scripts/ci.sh rust
 
@@ -40,9 +43,12 @@ jobs:
         with:
           ref: ${{ inputs.revision || github.sha }}
           persist-credentials: false
+      - name: Resolve Rust toolchain
+        id: rust-toolchain
+        run: printf 'version=%s\n' "$(scripts/check-rust-toolchain.sh --print)" >> "$GITHUB_OUTPUT"
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # 2026-07-09
         with:
-          toolchain: 1.91.1
+          toolchain: ${{ steps.rust-toolchain.outputs.version }}
       - run: scripts/ci.sh docker
 
   macos:
@@ -54,7 +60,10 @@ jobs:
         with:
           ref: ${{ inputs.revision || github.sha }}
           persist-credentials: false
+      - name: Resolve Rust toolchain
+        id: rust-toolchain
+        run: printf 'version=%s\n' "$(scripts/check-rust-toolchain.sh --print)" >> "$GITHUB_OUTPUT"
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # 2026-07-09
         with:
-          toolchain: 1.91.1
+          toolchain: ${{ steps.rust-toolchain.outputs.version }}
       - run: scripts/ci.sh macos

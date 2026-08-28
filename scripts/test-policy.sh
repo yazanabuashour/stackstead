@@ -130,7 +130,7 @@ if [ "${CI_FAIL:-}" = "cargo $*" ]; then
   exit 19
 fi
 EOF
-for script in check-rust-source-size.sh test-policy.sh test-install.sh test-release-install.sh test-delivery.sh docker-integration.sh; do
+for script in check-rust-toolchain.sh check-rust-source-size.sh test-policy.sh test-install.sh test-release-install.sh test-delivery.sh docker-integration.sh; do
   cat >"$ci_fixture/scripts/$script" <<'EOF'
 #!/usr/bin/env bash
 printf '%s' "${0##*/}" >>"$CI_LOG"
@@ -156,6 +156,7 @@ export PATH="$ci_fixture/fake-bin:$PATH"
 : >"$CI_LOG"
 "$ci_fixture/scripts/ci.sh" rust
 cat >"$tmp/rust.expected" <<'EOF'
+check-rust-toolchain.sh
 check-policy.sh
 check-rust-source-size.sh
 cargo fmt --check
@@ -172,6 +173,7 @@ assert_log "$tmp/rust.expected"
 : >"$CI_LOG"
 "$ci_fixture/scripts/ci.sh" docker
 cat >"$tmp/docker.expected" <<'EOF'
+check-rust-toolchain.sh
 check-policy.sh
 cargo build --locked
 docker-integration.sh
@@ -181,6 +183,7 @@ assert_log "$tmp/docker.expected"
 : >"$CI_LOG"
 "$ci_fixture/scripts/ci.sh" macos
 cat >"$tmp/macos.expected" <<'EOF'
+check-rust-toolchain.sh
 check-policy.sh
 cargo test --locked
 test-install.sh
@@ -191,6 +194,7 @@ assert_log "$tmp/macos.expected"
 : >"$CI_LOG"
 "$ci_fixture/scripts/ci.sh"
 cat >"$tmp/all.expected" <<'EOF'
+check-rust-toolchain.sh
 check-policy.sh
 check-rust-source-size.sh
 cargo fmt --check
@@ -210,8 +214,7 @@ assert_log "$tmp/all.expected"
 if "$ci_fixture/scripts/ci.sh" unknown >/dev/null 2>&1; then
   fail 'CI accepted an unknown mode'
 fi
-printf 'check-policy.sh\n' >"$tmp/unknown.expected"
-assert_log "$tmp/unknown.expected"
+test ! -s "$CI_LOG" || fail 'CI ran commands before rejecting an unknown mode'
 
 : >"$CI_LOG"
 if "$ci_fixture/scripts/ci.sh" rust extra >/dev/null 2>&1; then
@@ -224,6 +227,7 @@ if CI_FAIL='cargo test --locked' "$ci_fixture/scripts/ci.sh" rust >/dev/null 2>&
   fail 'CI ignored a command failure'
 fi
 cat >"$tmp/failure.expected" <<'EOF'
+check-rust-toolchain.sh
 check-policy.sh
 check-rust-source-size.sh
 cargo fmt --check

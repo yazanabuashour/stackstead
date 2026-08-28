@@ -20,7 +20,7 @@ opener = "0.8"
 rustix = { version = "1", features = ["fs", "process"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-serde_yaml = "0.9"
+serde_yaml = { package = "yaml_serde", version = "0.10" }
 shell-words = "1"
 tempfile = "3"
 thiserror = "2"
@@ -38,6 +38,7 @@ unsafe_code = "deny"
 unsafe_op_in_unsafe_fn = "deny"
 
 [lints.clippy]
+all = { level = "deny", priority = -1 }
 pedantic = { level = "deny", priority = -1 }
 nursery = { level = "deny", priority = -1 }
 allow_attributes = "deny"
@@ -83,7 +84,7 @@ suspicious_xor_used_as_pow = "deny"
 todo = "deny"
 too_many_lines = "deny"
 try_err = "deny"
-unchecked_duration_subtraction = "deny"
+unchecked_time_subtraction = "deny"
 undocumented_unsafe_blocks = "deny"
 unimplemented = "deny"
 unnecessary_safety_comment = "deny"
