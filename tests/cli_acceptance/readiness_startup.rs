@@ -54,20 +54,28 @@ fn assert_startup_refuses_unsatisfied_requirements(
         "unknown"
     );
     let mut config = load_config(&fixture.project.repo.join("stackstead.yaml"))?;
+    // Reject model verification after a successful application check. Waiting for
+    // the deadline could instead leave a legitimately timed-out final probe.
     config["health"]["checks"] = serde_yaml::to_value([serde_json::json!({
-        "name": "application", "command": {"command": "true", "shell": false},
+        "name": "application",
+        "command": {"command": "touch \"$FAKE_STATE/fail-config\"", "shell": true},
     })])
     .test()?;
     fixture.project.write_config(
         &config,
-        "separate application health from missing runtime instances",
+        "separate application health from runtime verification failure",
     )?;
-    fixture
+    let rejected = fixture
         .docker
         .command(&fixture.manifest)
         .args(["up", &fixture.manifest.stackstead_id])
         .assert()
         .failure();
+    assert!(
+        output_text(&rejected.get_output().stderr)?
+            .contains("cannot verify effective Compose inputs after startup"),
+        "{rejected:?}"
+    );
     let failed = StacksteadManifest::read(&fixture.manifest.manifest_path())?;
     assert_eq!(failed.status.health, ComponentStatus::Ready);
     assert!(failed.readiness["resolved"].is_null());

@@ -159,18 +159,35 @@ fn guard_drop_joins_an_active_observer_after_termination() -> anyhow::Result<()>
 }
 
 #[test]
+#[expect(
+    unsafe_code,
+    reason = "change SIGCHLD only in the isolated fixture child before exec"
+)]
 fn automatic_reaping_policy_is_rejected_before_spawning() -> anyhow::Result<()> {
     let directory = tempfile::tempdir().test()?;
     let marker = directory.path().join("spawned");
-    let result = Command::new("sh")
-        .args(["-c", "trap '' CHLD; exec \"$TEST_BINARY\" --exact command::captured::tests::nonwaitable_fixture --nocapture"])
-        .env("TEST_BINARY", std::env::current_exe().test()?)
+    let mut command = Command::new(std::env::current_exe().test()?);
+    command
+        .args([
+            "--exact",
+            "command::captured::tests::nonwaitable_fixture",
+            "--nocapture",
+        ])
         .env("STACKSTEAD_NONWAITABLE_FIXTURE", "1")
-        .env("MARKER", &marker)
-        .output().test()?;
+        .env("MARKER", &marker);
+    let ignore_sigchld = || {
+        // SAFETY: SIG_IGN is a valid signal disposition, applied only in the fixture child.
+        if unsafe { libc::signal(libc::SIGCHLD, libc::SIG_IGN) } == libc::SIG_ERR {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(())
+    };
+    // SAFETY: the closure uses only async-signal-safe signal setup and errno access.
+    unsafe { command.pre_exec(ignore_sigchld) };
+    let result = command.output().test()?;
     assert!(
         result.status.success(),
-        "automatic-reaping subprocess fixture failed"
+        "automatic-reaping subprocess fixture failed: {result:?}"
     );
     assert!(!marker.exists());
     Ok(())
