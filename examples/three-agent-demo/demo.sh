@@ -42,9 +42,9 @@ prepare() {
     printf '%s\n' "$STACKSTEAD_PREPARE_OWNER_TOKEN" >"$destination/.stackstead-docker-test-owner"
   fi
   cp -R "$example_root/." "$destination/"
-  sed -i "s|\.stackstead-state-three-agent-demo|.stackstead-state-$destination_suffix|" \
+  sed -i.bak "s|\.stackstead-state-three-agent-demo|.stackstead-state-$destination_suffix|" \
     "$destination/stackstead.yaml"
-  rm -f "$destination/.demo-stacksteads.tsv"
+  rm -f "$destination/stackstead.yaml.bak" "$destination/.demo-stacksteads.tsv"
   git -C "$destination" init -b main >/dev/null
   [ ! -f "$destination/.stackstead-docker-test-owner" ] ||
     printf '/.stackstead-docker-test-owner\n' >>"$destination/.git/info/exclude"

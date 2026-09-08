@@ -218,7 +218,10 @@ for connection in host context; do
     ) >"$tmp/retry.out" 2>&1; then
         fail "fault-injected integration unexpectedly succeeded"
     fi
-    retry=$(grep '^Retry: ' "$tmp/retry.out") || fail "missing recovery command"
+    retry=$(grep '^Retry: ' "$tmp/retry.out") || {
+        cat "$tmp/retry.out" >&2
+        fail "missing recovery command"
+    }
     rm -f "$tmp/connection.actual"
     if HOME="$tmp/wrong-home" DOCKER_HOST=unix:///wrong.sock DOCKER_CONTEXT=wrong \
         DOCKER_CONFIG="$tmp/wrong-config" FAKE_CONNECTION_RECEIPT="$tmp/connection.actual" \
