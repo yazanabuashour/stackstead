@@ -26,18 +26,22 @@ require_runtime() {
 
 prepare() {
   [ "$#" -eq 1 ] || die "usage: $0 prepare <empty-destination>"
-  destination="$1"
+  destination_parent="$(CDPATH= cd -- "$(dirname -- "$1")" && pwd -P)" ||
+    die "destination parent must exist: $1"
+  destination="$destination_parent/$(basename -- "$1")"
+  case "$destination/" in
+    "$example_root/"*) die "destination must be outside the example source" ;;
+  esac
+  destination_suffix="$(printf '%s' "$(basename "$destination")" | tr -c 'A-Za-z0-9._-' '_')"
+  destination_state="$(dirname "$destination")/.stackstead-state-$destination_suffix"
+  [ ! -e "$destination_state" ] && [ ! -L "$destination_state" ] ||
+    die "sibling state already exists: $destination_state"
   (umask 077 && mkdir "$destination") 2>/dev/null ||
     die "destination already exists or cannot be created: $destination"
   if [ -n "${STACKSTEAD_PREPARE_OWNER_TOKEN:-}" ]; then
     printf '%s\n' "$STACKSTEAD_PREPARE_OWNER_TOKEN" >"$destination/.stackstead-docker-test-owner"
   fi
-  destination="$(CDPATH= cd -- "$destination" && pwd -P)"
-  case "$destination/" in
-    "$example_root/"*) die "destination must be outside the example source" ;;
-  esac
   cp -R "$example_root/." "$destination/"
-  destination_suffix="$(printf '%s' "$(basename "$destination")" | tr -c 'A-Za-z0-9._-' '_')"
   sed -i "s|\.stackstead-state-three-agent-demo|.stackstead-state-$destination_suffix|" \
     "$destination/stackstead.yaml"
   rm -f "$destination/.demo-stacksteads.tsv"
@@ -172,8 +176,10 @@ verify_three() {
       die "Compose project mismatch for $id"
     inspection="$(cd "$example_root" && "$stackstead_bin" --json inspect "$id")"
     jq -e '
-      .kind == "StacksteadInspection" and .version == "3" and
-      any(.live.services[]; .service == "setup" and .status == "completed (0)")
+      .kind == "StacksteadInspection" and .version == "4" and
+      .live.runtime.activity == "active" and .live.readiness.status == "ready" and
+      any(.live.readiness.required[]; .service == "setup" and .role == "job" and .status == "ready") and
+      any(.live.services[]; .service == "setup" and .state == "exited" and .exit_code == 0)
     ' <<<"$inspection" >/dev/null || die "inspect did not report the successful setup job for $id"
     container="$(compose_for "$manifest" ps -q postgres)"
     [ -n "$container" ] || die "Postgres is not running for $id"
@@ -452,7 +458,11 @@ corrupt_state_negative() (
       cp "$manifest_backup" "$CREATED_MANIFEST"
     [ -z "$pointer_backup" ] || [ ! -f "$pointer_backup" ] ||
       cp "$pointer_backup" "$CREATED_WORKTREE/.stackstead/stackstead.json"
-    [ -z "$victim_container" ] || docker rm -f "$victim_container" >/dev/null 2>&1 || true
+    if [ -n "$victim_container" ] && ! docker rm -f "$victim_container" >/dev/null; then
+      printf 'error: retained victim container %s; retry: docker rm -f %q\n' \
+        "$victim_container" "$victim_container" >&2
+      exit 1
+    fi
     [ -z "$corrupt_tmp" ] || rm -rf "$corrupt_tmp"
   }
   trap restore_corrupt_fixture EXIT
@@ -461,10 +471,13 @@ corrupt_state_negative() (
   assert_project_runtime_exists "$CREATED_PROJECT"
 
   victim_project="stackstead-negative-victim-$$"
-  victim_container="$victim_project-container"
-  docker run -d --name "$victim_container" \
+  if created_container="$(docker run -d --name "$victim_project-container" \
     --label "com.docker.compose.project=$victim_project" \
-    nginx:1.27-alpine >/dev/null
+    nginx:1.27-alpine)"; then
+    victim_container="$created_container"
+  else
+    die "failed to create unrelated victim container"
+  fi
   corrupt_tmp="$(mktemp -d "${TMPDIR:-/tmp}/stackstead-corrupt-negative.XXXXXX")"
   manifest_backup="$corrupt_tmp/manifest.json"
   pointer_backup="$corrupt_tmp/pointer.json"
@@ -507,14 +520,14 @@ corrupt_state_negative() (
   assert_project_runtime_exists "$CREATED_PROJECT"
   docker inspect "$victim_container" >/dev/null
 
+  manifest_backup=
+  pointer_backup=
   cleanup
   docker inspect "$victim_container" >/dev/null || die "exact cleanup removed the unrelated victim"
   docker rm -f "$victim_container" >/dev/null
   victim_container=
   rm -rf "$corrupt_tmp"
   corrupt_tmp=
-  manifest_backup=
-  pointer_backup=
   printf 'PASS project, worktree-path, and pointer corruption failed closed; intended and victim resources survived.\n'
 )
 

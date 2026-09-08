@@ -86,8 +86,7 @@ pub fn validate_port_contract(
         }
         debug_assert_eq!(
             port_template_name(&generated_environment[variable]).as_deref(),
-            Some(name.as_str()),
-            "test contract values differ"
+            Some(name.as_str())
         );
     }
     Ok(())

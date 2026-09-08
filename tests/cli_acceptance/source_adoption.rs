@@ -31,16 +31,9 @@ fn adopted_worktree_is_bound_but_preserved_on_destroy() -> anyhow::Result<()> {
         .assert()
         .success();
     let manifest = changed_manifest(&adopted.get_output().stdout, "adopted")?;
-    assert_eq!(
-        manifest.source_ownership,
-        SourceOwnership::External,
-        "test contract values differ"
-    );
-    assert_eq!(manifest.worktree, external, "test contract values differ");
-    assert!(
-        manifest.pointer_file.is_file(),
-        "test contract condition failed"
-    );
+    assert_eq!(manifest.source_ownership, SourceOwnership::External);
+    assert_eq!(manifest.worktree, external);
+    assert!(manifest.pointer_file.is_file());
 
     stackstead(&project.repo)
         .arg("adopt")
@@ -50,14 +43,8 @@ fn adopted_worktree_is_bound_but_preserved_on_destroy() -> anyhow::Result<()> {
         .assert()
         .failure();
 
-    assert!(
-        manifest.pointer_file.is_file(),
-        "test contract condition failed"
-    );
-    assert!(
-        manifest.manifest_path().is_file(),
-        "test contract condition failed"
-    );
+    assert!(manifest.pointer_file.is_file());
+    assert!(manifest.manifest_path().is_file());
 
     let path = fake_docker_path(
         project.repo.parent().test()?,
@@ -71,18 +58,11 @@ fn adopted_worktree_is_bound_but_preserved_on_destroy() -> anyhow::Result<()> {
         .success();
 
     assert!(external.is_dir(), "manager-owned worktree was removed");
-    assert!(
-        !external.join(".stackstead").exists(),
-        "test contract condition failed"
-    );
-    assert!(
-        !manifest.stackstead_root.exists(),
-        "test contract condition failed"
-    );
+    assert!(!external.join(".stackstead").exists());
+    assert!(!manifest.stackstead_root.exists());
     assert_eq!(
         git(&external, &["branch", "--show-current"])?.trim(),
-        "manager-feature",
-        "test contract values differ"
+        "manager-feature"
     );
     Ok(())
 }
@@ -115,18 +95,9 @@ fn adoption_rejects_a_manager_worktree_that_does_not_contain_the_pinned_base() -
         .arg(&external)
         .assert()
         .failure();
-    assert!(
-        output_text(&rejected.get_output().stderr)?.contains("not based on pinned commit"),
-        "test contract condition failed"
-    );
-    assert!(
-        !external.join(".stackstead").exists(),
-        "test contract condition failed"
-    );
-    assert!(
-        state_stackstead_directories(&project)?.is_empty(),
-        "test contract condition failed"
-    );
+    assert!(output_text(&rejected.get_output().stderr)?.contains("not based on pinned commit"));
+    assert!(!external.join(".stackstead").exists());
+    assert!(state_stackstead_directories(&project)?.is_empty());
     Ok(())
 }
 
@@ -209,52 +180,48 @@ fn adoption_rejects_nested_unrelated_and_detached_checkouts_without_state() -> a
         .assert()
         .failure();
 
-    assert!(registered.is_dir(), "test contract condition failed");
-    assert!(unrelated.is_dir(), "test contract condition failed");
-    assert!(detached.is_dir(), "test contract condition failed");
-    assert!(
-        state_stackstead_directories(&project)?.is_empty(),
-        "test contract condition failed"
-    );
-    assert!(
-        !registered.join(".stackstead").exists(),
-        "test contract condition failed"
-    );
-    assert!(
-        !unrelated.join(".stackstead").exists(),
-        "test contract condition failed"
-    );
-    assert!(
-        !detached.join(".stackstead").exists(),
-        "test contract condition failed"
-    );
+    assert!(registered.is_dir());
+    assert!(unrelated.is_dir());
+    assert!(detached.is_dir());
+    assert!(state_stackstead_directories(&project)?.is_empty());
+    assert!(!registered.join(".stackstead").exists());
+    assert!(!unrelated.join(".stackstead").exists());
+    assert!(!detached.join(".stackstead").exists());
     Ok(())
 }
 
+#[cfg(unix)]
 #[test]
-fn create_rejects_a_compose_template_that_omits_the_durable_identity() -> anyhow::Result<()> {
+fn up_rejects_a_compose_identity_that_omits_the_full_id() -> anyhow::Result<()> {
     let project = Project::initialized()?;
-    project.replace_config(
-        "{{ project.name }}-{{ stackstead.id }}",
-        "{{ project.name }}",
+    let mut manifest = project.create("feature-a")?;
+    manifest.compose_project = manifest.project.clone();
+    manifest
+        .write_fixture()
+        .test_context("write incomplete Compose identity")?;
+    let marker = project.repo.parent().test()?.join("docker-ran");
+    let path = fake_docker_path(
+        project.repo.parent().test()?,
+        "incomplete-identity-fake-bin",
+        &format!("#!/bin/sh\ntouch '{}'\nexit 0\n", marker.display()),
     )?;
-    let assert = stackstead(&project.repo)
-        .args(["create", "feature-a", "--json"])
+
+    let rejected = stackstead(&project.repo)
+        .env("PATH", path)
+        .args(["up", &manifest.stackstead_id, "--json"])
         .assert()
         .failure();
     assert!(
-        output_text(&assert.get_output().stderr)?.contains("must render the durable identity"),
-        "test contract condition failed"
+        output_text(&rejected.get_output().stderr)?
+            .contains("manifest Compose project does not match the durable stackstead identity")
     );
+    assert!(!marker.exists());
+    assert!(manifest.stackstead_root.is_dir());
+    assert!(manifest.worktree.is_dir());
     assert!(
-        state_stackstead_directories(&project)?.is_empty(),
-        "test contract condition failed"
-    );
-    assert!(
-        git(&project.repo, &["branch", "--list", "feature-a"])?
+        !git(&project.repo, &["branch", "--list", "feature-a"])?
             .trim()
-            .is_empty(),
-        "test contract condition failed"
+            .is_empty()
     );
     Ok(())
 }

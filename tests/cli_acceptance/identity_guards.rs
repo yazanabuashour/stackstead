@@ -10,15 +10,8 @@ fn create_rejects_a_slug_that_matches_an_existing_full_id() -> anyhow::Result<()
         .args(["create", &existing.stackstead_id, "--json"])
         .assert()
         .failure();
-    assert!(
-        output_text(&assert.get_output().stderr)?.contains("already exists"),
-        "test contract condition failed"
-    );
-    assert_eq!(
-        state_stackstead_directories(&project)?,
-        before,
-        "test contract values differ"
-    );
+    assert!(output_text(&assert.get_output().stderr)?.contains("already exists"));
+    assert_eq!(state_stackstead_directories(&project)?, before);
     Ok(())
 }
 
@@ -36,25 +29,19 @@ fn changed_worktree_branch_is_reported_and_rejected_before_agent_or_teardown() -
         .success();
     let inspected: Value = serde_json::from_slice(&inspected.get_output().stdout)
         .test_context("parse inspect output")?;
-    assert!(
-        inspected["warnings"].as_array().is_some_and(|warnings| {
-            warnings.iter().any(|warning| {
-                warning
-                    .as_str()
-                    .is_some_and(|warning| warning.contains("unexpected-source"))
-            })
-        }),
-        "test contract condition failed"
-    );
+    assert!(inspected["warnings"].as_array().is_some_and(|warnings| {
+        warnings.iter().any(|warning| {
+            warning
+                .as_str()
+                .is_some_and(|warning| warning.contains("unexpected-source"))
+        })
+    }));
 
     let current = stackstead(&manifest.worktree)
         .arg("current")
         .assert()
         .failure();
-    assert!(
-        current.get_output().stdout.is_empty(),
-        "test contract condition failed"
-    );
+    assert!(current.get_output().stdout.is_empty());
     let error = output_text(&current.get_output().stderr)?;
     assert!(
         error.contains("unexpected-source") && error.contains("refusing to use the wrong source"),
@@ -86,26 +73,17 @@ fn changed_worktree_branch_is_reported_and_rejected_before_agent_or_teardown() -
     let mut changed_base = manifest.clone();
     changed_base.base = unrelated.trim().into();
     changed_base
-        .save_atomic()
+        .write_fixture()
         .test_context("write changed pinned-base fixture")?;
     let current = stackstead(&manifest.worktree)
         .arg("current")
         .assert()
         .failure();
-    assert!(
-        current.get_output().stdout.is_empty(),
-        "test contract condition failed"
-    );
-    assert!(
-        output_text(&current.get_output().stderr)?.contains("not based on pinned commit"),
-        "test contract condition failed"
-    );
+    assert!(current.get_output().stdout.is_empty());
+    assert!(output_text(&current.get_output().stderr)?.contains("not based on pinned commit"));
 
-    assert!(
-        manifest.manifest_path().is_file(),
-        "test contract condition failed"
-    );
-    assert!(manifest.worktree.is_dir(), "test contract condition failed");
+    assert!(manifest.manifest_path().is_file());
+    assert!(manifest.worktree.is_dir());
     Ok(())
 }
 
@@ -128,14 +106,8 @@ fn all_resolved_commands_reject_redirected_manifest_contract_fields() -> anyhow:
         .args(["env", "feature-a", "--print", "--show-secrets"])
         .assert()
         .failure();
-    assert!(
-        !output_text(&assert.get_output().stdout)?.contains("must-not-leak"),
-        "test contract condition failed"
-    );
-    assert!(
-        output_text(&assert.get_output().stderr)?.contains("escapes worktree"),
-        "test contract condition failed"
-    );
+    assert!(!output_text(&assert.get_output().stdout)?.contains("must-not-leak"));
+    assert!(output_text(&assert.get_output().stderr)?.contains("escapes worktree"));
 
     tampered = manifest.clone();
     tampered.compose_project = "unrelated-valid-project".into();
@@ -151,8 +123,7 @@ fn all_resolved_commands_reject_redirected_manifest_contract_fields() -> anyhow:
         .failure();
     assert!(
         output_text(&assert.get_output().stderr)?
-            .contains("manifest Compose project does not match the durable stackstead identity"),
-        "test contract condition failed"
+            .contains("manifest Compose project does not match the durable stackstead identity")
     );
 
     tampered = manifest.clone();
@@ -169,8 +140,7 @@ fn all_resolved_commands_reject_redirected_manifest_contract_fields() -> anyhow:
         .failure();
     assert!(
         output_text(&assert.get_output().stderr)?
-            .contains("manifest stackstead ID does not match its slug and short ID"),
-        "test contract condition failed"
+            .contains("manifest stackstead ID does not match its slug and short ID")
     );
     Ok(())
 }
@@ -218,7 +188,7 @@ fn adopted_manifests_cannot_cross_bind_or_delete_another_checkout() -> anyhow::R
     redirected.agent_context = second.agent_context.clone();
     redirected.pointer_file = second.pointer_file.clone();
     redirected
-        .save_atomic()
+        .write_fixture()
         .test_context("redirect first manifest to second checkout")?;
 
     for args in [
@@ -234,18 +204,9 @@ fn adopted_manifests_cannot_cross_bind_or_delete_another_checkout() -> anyhow::R
             output_text(&assert.get_output().stderr)?
         );
     }
-    assert!(
-        second.pointer_file.is_file(),
-        "test contract condition failed"
-    );
-    assert!(
-        second.manifest_path().is_file(),
-        "test contract condition failed"
-    );
-    assert!(second.worktree.is_dir(), "test contract condition failed");
-    assert!(
-        first_path.join(".stackstead/stackstead.json").is_file(),
-        "test contract condition failed"
-    );
+    assert!(second.pointer_file.is_file());
+    assert!(second.manifest_path().is_file());
+    assert!(second.worktree.is_dir());
+    assert!(first_path.join(".stackstead/stackstead.json").is_file());
     Ok(())
 }

@@ -13,6 +13,12 @@ cd "$worktree"
 stackstead run "$id" -- claude
 ```
 
+The [creation wrapper](create-stackstead-owned.sh) validates `StacksteadChange`
+version 1 and action `created`, reads `.stackstead.stackstead_id`, and starts that
+exact environment. It emits a flattened projection of `.stackstead`, so the
+example above reads `.stackstead_id` and `.worktree` at the top level. Raw CLI
+`create` and `adopt` responses keep those fields under `.stackstead`.
+
 For a manager that must create its own worktree, run
 the trusted, absolute installed copy of `adopt-current.sh` once from its
 blocking post-create hook.
@@ -24,8 +30,8 @@ Use the trusted, absolute installed copy of
 `run-current.sh <agent-or-command> [args...]` as a pane or launcher command when
 the manager supports one. It delegates through the validated ID from
 `stackstead current`, then `stackstead run` sets the worktree and generated
-environment without parsing a branch name. The same primitive is directly
-composable:
+environment without parsing a branch name. A launcher can also call these
+commands directly:
 
 ```sh
 id="$(stackstead current)"; stackstead run "$id" -- true

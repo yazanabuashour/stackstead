@@ -27,6 +27,7 @@ bounty or a fixed service-level agreement.
 Stackstead prevents accidental runtime-identity collisions and wrong-target
 cleanup. It is not a hostile-code sandbox, secret manager, multi-user
 authorization boundary, or Docker-daemon isolation layer. A process launched by
-Stackstead has the permissions of the invoking user. External volumes, globally
-named volumes, bind mounts, host networking, and services outside the configured
-runtime can still share state.
+Stackstead has the permissions of the invoking user. External networks and
+volumes, shared host bind mounts, host networking, and services outside the
+configured runtime can still share state. Stackstead rejects custom `name`
+values on managed networks and volumes; see [Compose isolation](docs/compose.md#volume-isolation).

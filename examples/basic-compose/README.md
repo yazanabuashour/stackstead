@@ -2,6 +2,12 @@
 
 This example runs a static Nginx site and Postgres with Stackstead-generated host ports. The database volume is managed by the unique Compose project, so two stacksteads do not share it.
 
+The readiness declaration requires the actual `web` and `postgres` Compose
+services to stay running, with Postgres's container healthcheck healthy. Compose
+defines the instance counts; `stackstead.yaml` does not repeat them. This example
+has no application health checks, so application health remains unconfigured
+with status `unknown` even when runtime readiness is `ready`.
+
 Because `stackstead.yaml` belongs at a repository root, copy this directory into a small test repository:
 
 ```sh

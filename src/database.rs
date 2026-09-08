@@ -152,17 +152,14 @@ mod tests {
             .test()?;
 
         let probed = Cell::new(false);
-        assert!(
-            !wait_until_ready(
-                Duration::from_millis(10),
-                || false,
-                || {
-                    probed.set(true);
-                    false
-                }
-            ),
-            "test contract condition failed"
-        );
+        assert!(!wait_until_ready(
+            Duration::from_millis(10),
+            || false,
+            || {
+                probed.set(true);
+                false
+            }
+        ));
         assert!(
             !probed.get(),
             "Postgres probe ran without a reachable host port"
@@ -185,10 +182,9 @@ mod tests {
                     false
                 },
             ),
-            ComponentStatus::Unreachable,
-            "test contract values differ"
+            ComponentStatus::Unreachable
         );
-        assert!(!invoked.replace(false), "test contract condition failed");
+        assert!(!invoked.replace(false));
         assert_eq!(
             classify_live_status(
                 ComponentStatus::Unknown,
@@ -201,10 +197,9 @@ mod tests {
                     false
                 },
             ),
-            ComponentStatus::Unknown,
-            "test contract values differ"
+            ComponentStatus::Unknown
         );
-        assert!(!invoked.replace(false), "test contract condition failed");
+        assert!(!invoked.replace(false));
         assert_eq!(
             classify_live_status(
                 ComponentStatus::Running,
@@ -214,10 +209,9 @@ mod tests {
                     false
                 }
             ),
-            ComponentStatus::Unreachable,
-            "test contract values differ"
+            ComponentStatus::Unreachable
         );
-        assert!(!invoked.replace(false), "test contract condition failed");
+        assert!(!invoked.replace(false));
         assert_eq!(
             classify_live_status(
                 ComponentStatus::Running,
@@ -227,19 +221,16 @@ mod tests {
                     false
                 }
             ),
-            ComponentStatus::Unknown,
-            "test contract values differ"
+            ComponentStatus::Unknown
         );
-        assert!(!invoked.get(), "test contract condition failed");
+        assert!(!invoked.get());
         assert_eq!(
             classify_live_status(ComponentStatus::Running, || Ok(true), || false),
-            ComponentStatus::Unreachable,
-            "test contract values differ"
+            ComponentStatus::Unreachable
         );
         assert_eq!(
             classify_live_status(ComponentStatus::Running, || Ok(true), || true),
-            ComponentStatus::Reachable,
-            "test contract values differ"
+            ComponentStatus::Reachable
         );
         Ok(())
     }

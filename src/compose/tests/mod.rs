@@ -8,8 +8,9 @@ use crate::{
 
 fn manifest() -> anyhow::Result<StacksteadManifest> {
     serde_json::from_value(serde_json::json!({
-        "kind":"StacksteadManifest","version":"2","stackstead_id":"a-b123","slug":"a","short_id":"b123",
+        "kind":"StacksteadManifest","version":"3","stackstead_id":"a-b123","slug":"a","short_id":"b123",
         "runtime_token":"0123456789abcdef0123456789abcdef",
+        "readiness":{"configuration":"unconfigured"},
         "project":"demo","branch":"a","base":"main","repo_root":"/repo","project_state_root":"/state",
         "source_ownership":"stackstead",
         "stackstead_root":"/state/demo/a-b123","worktree":"/state/demo/a-b123/source","state_dir":"/state/demo/a-b123/state",

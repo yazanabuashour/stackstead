@@ -1,6 +1,10 @@
 use serde::Serialize;
 
-use super::{INSPECTION_VERSION, contract::StacksteadOutput};
+use super::{
+    INSPECTION_VERSION,
+    contract::StacksteadOutput,
+    runtime::{LiveServiceOutput, ReadinessOutput},
+};
 use crate::lifecycle;
 
 #[derive(Debug, Serialize)]
@@ -16,23 +20,17 @@ pub struct StacksteadInspectionOutput {
 #[derive(Debug, Serialize)]
 struct LiveOutput {
     runtime: LiveComponentOutput,
-    services: Vec<LiveServiceOutput>,
+    services: Option<Vec<LiveServiceOutput>>,
+    readiness: ReadinessOutput,
     database: Option<LiveDatabaseOutput>,
     health: Option<LiveHealthOutput>,
 }
 
 #[derive(Debug, Serialize)]
 struct LiveComponentOutput {
-    running: bool,
+    running: Option<bool>,
     status: String,
-}
-
-#[derive(Debug, Serialize)]
-struct LiveServiceOutput {
-    service: String,
-    container: String,
-    status: String,
-    exit_code: Option<i64>,
+    activity: &'static str,
 }
 
 #[derive(Debug, Serialize)]
@@ -86,21 +84,17 @@ impl StacksteadInspectionOutput {
             stackstead: (&inspection.manifest).into(),
             live: LiveOutput {
                 runtime: LiveComponentOutput {
-                    running: inspection.live.runtime_status
-                        == crate::manifest::ComponentStatus::Running,
-                    status: inspection.live.runtime_status.to_string(),
+                    running: inspection.live.runtime.running(),
+                    status: inspection.live.runtime.status().to_string(),
+                    activity: inspection.live.runtime.activity(),
                 },
                 services: inspection
                     .live
+                    .runtime
                     .services
-                    .iter()
-                    .map(|service| LiveServiceOutput {
-                        service: service.service.clone(),
-                        container: service.container.clone(),
-                        status: service.status(),
-                        exit_code: service.exit_code,
-                    })
-                    .collect(),
+                    .as_ref()
+                    .map(|services| services.iter().map(Into::into).collect()),
+                readiness: (&inspection.live.runtime.readiness).into(),
                 database,
                 health: inspection
                     .live

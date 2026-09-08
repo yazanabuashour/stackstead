@@ -69,7 +69,11 @@ while IFS='|' read -r section setting; do
   mv "$policy_fixture/Cargo.toml.next" "$policy_fixture/Cargo.toml"
   validate_policy_manifest
   expect_policy_failure "misplaced [$section] $setting"
-done < <(printf '%s\n' "${manifest_settings[@]}")
+done <<'EOF'
+package|autolib = false
+lints.rust|unsafe_code = "deny"
+lints.clippy|pedantic = { level = "deny", priority = -1 }
+EOF
 
 for policy_file in "${policy_files[@]}"; do
   reset_policy_fixture

@@ -7,9 +7,9 @@ use super::{
 };
 
 pub fn up(manifest: &StacksteadManifest) -> anyhow::Result<()> {
-    let resources_present = verify_runtime_resources(manifest)?;
-    if runtime_claim_exists(manifest)? {
-        verify_runtime_claim(manifest)?;
+    let resources_present = verify_runtime_resources(manifest, None)?;
+    if runtime_claim_exists(manifest, None)? {
+        verify_runtime_claim(manifest, None)?;
     } else if resources_present {
         anyhow::bail!(
             "Compose namespace `{}` has runtime resources but no Stackstead ownership claim",
@@ -18,18 +18,18 @@ pub fn up(manifest: &StacksteadManifest) -> anyhow::Result<()> {
     } else {
         ensure_runtime_claim(manifest)?;
     }
-    verify_runtime_claim(manifest)?;
-    verify_runtime_resources(manifest)?;
+    verify_runtime_claim(manifest, None)?;
+    verify_runtime_resources(manifest, None)?;
     let mut args = base_args(manifest);
     args.extend(["up".into(), "-d".into()]);
     run_docker_compose(manifest, &args)?;
-    verify_runtime_resources(manifest)?;
+    verify_runtime_resources(manifest, None)?;
     Ok(())
 }
 
 pub fn stop(manifest: &StacksteadManifest) -> anyhow::Result<()> {
-    let resources_present = verify_runtime_resources(manifest)?;
-    if !runtime_claim_exists(manifest)? {
+    let resources_present = verify_runtime_resources(manifest, None)?;
+    if !runtime_claim_exists(manifest, None)? {
         if resources_present {
             anyhow::bail!(
                 "Compose namespace `{}` has runtime resources but no Stackstead ownership claim",
@@ -38,7 +38,7 @@ pub fn stop(manifest: &StacksteadManifest) -> anyhow::Result<()> {
         }
         return Ok(());
     }
-    verify_runtime_claim(manifest)?;
+    verify_runtime_claim(manifest, None)?;
     if !resources_present {
         return Ok(());
     }
@@ -49,8 +49,8 @@ pub fn stop(manifest: &StacksteadManifest) -> anyhow::Result<()> {
 }
 
 pub fn down_volumes(manifest: &StacksteadManifest) -> anyhow::Result<()> {
-    let resources_present = verify_runtime_resources(manifest)?;
-    if !runtime_claim_exists(manifest)? {
+    let resources_present = verify_runtime_resources(manifest, None)?;
+    if !runtime_claim_exists(manifest, None)? {
         if resources_present {
             anyhow::bail!(
                 "Compose namespace `{}` has runtime resources but no Stackstead ownership claim",
@@ -59,7 +59,7 @@ pub fn down_volumes(manifest: &StacksteadManifest) -> anyhow::Result<()> {
         }
         return Ok(());
     }
-    verify_runtime_claim(manifest)?;
+    verify_runtime_claim(manifest, None)?;
     if !resources_present {
         return Ok(());
     }
@@ -72,10 +72,10 @@ pub fn down_volumes(manifest: &StacksteadManifest) -> anyhow::Result<()> {
         "local".into(),
     ]);
     run_docker_compose(manifest, &args)?;
-    if verify_runtime_resources(manifest)? {
+    if verify_runtime_resources(manifest, None)? {
         remove_labeled_runtime_resources(manifest)?;
     }
-    if verify_runtime_resources(manifest)? {
+    if verify_runtime_resources(manifest, None)? {
         anyhow::bail!(
             "Compose namespace `{}` still has Stackstead runtime resources after teardown; retaining recovery state and ownership claim",
             manifest.compose_project

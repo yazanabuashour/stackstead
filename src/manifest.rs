@@ -8,7 +8,7 @@ use std::{
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-pub const MANIFEST_VERSION: &str = "2";
+pub const MANIFEST_VERSION: &str = "3";
 pub const POINTER_VERSION: &str = "2";
 const RUNTIME_TOKEN_LEN: usize = 32;
 
@@ -34,6 +34,7 @@ pub struct StacksteadManifest {
     pub port_lease_state_dir: Option<PathBuf>,
     pub compose_project: String,
     pub compose_files: Vec<PathBuf>,
+    pub readiness: crate::readiness::Contract,
     pub ports: BTreeMap<String, u16>,
     pub container_ports: BTreeMap<String, u16>,
     pub urls: BTreeMap<String, String>,
@@ -190,11 +191,17 @@ impl StacksteadManifest {
                 path.display()
             );
         }
-        serde_json::from_value(value)
-            .map_err(|error| anyhow::anyhow!("cannot parse manifest {}: {error}", path.display()))
+        let manifest: Self = serde_json::from_value(value).map_err(|error| {
+            anyhow::anyhow!("cannot parse manifest {}: {error}", path.display())
+        })?;
+        manifest.readiness.validate().map_err(|error| {
+            anyhow::anyhow!("invalid manifest contract in {}: {error}", path.display())
+        })?;
+        Ok(manifest)
     }
 
     pub fn save_atomic(&mut self) -> anyhow::Result<()> {
+        self.readiness.validate()?;
         self.updated_at = Utc::now();
         write_json_atomic(&self.manifest_path(), self)
     }

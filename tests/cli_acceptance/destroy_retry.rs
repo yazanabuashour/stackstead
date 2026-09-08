@@ -17,7 +17,10 @@ case "$kind $verb" in
       *) test ! -f "$FAKE_STATE/runtime" || printf '%s\n' runtime-id ;;
     esac
     ;;
-  "container inspect"|"volume inspect")
+  "container inspect")
+    printf '{"io.stackstead.runtime-token":"%s","com.docker.compose.project":"%s"}\n' "$EXPECTED_TOKEN" "$COMPOSE_PROJECT_NAME"
+    ;;
+  "volume inspect")
     printf '{"io.stackstead.runtime-token":"%s"}\n' "$EXPECTED_TOKEN"
     ;;
   "network ls") ;;
@@ -67,32 +70,16 @@ fn destroy_retries_the_failed_runtime_phase_once_without_touching_a_peer() -> an
         .args(["destroy", &manifest.stackstead_id, "--yes"])
         .assert()
         .failure();
-    assert!(
-        output_text(&first.get_output().stderr)?.contains("injected-down-failure"),
-        "test contract condition failed"
-    );
+    assert!(output_text(&first.get_output().stderr)?.contains("injected-down-failure"));
     let teardown: Value =
         serde_json::from_slice(&fs::read(manifest.state_dir.join("teardown.json")).test()?)
             .test()?;
-    assert_eq!(
-        teardown["phase"], "runtime_remove",
-        "test contract values differ"
-    );
-    assert_eq!(
-        teardown["stackstead_id"], manifest.stackstead_id,
-        "test contract values differ"
-    );
-    assert_eq!(
-        teardown["runtime_token"], manifest.runtime_token,
-        "test contract values differ"
-    );
-    assert_eq!(
-        fs::read_to_string(&counter).test()?,
-        "x",
-        "test contract values differ"
-    );
-    assert!(manifest.worktree.is_dir(), "test contract condition failed");
-    assert!(peer.worktree.is_dir(), "test contract condition failed");
+    assert_eq!(teardown["phase"], "runtime_remove");
+    assert_eq!(teardown["stackstead_id"], manifest.stackstead_id);
+    assert_eq!(teardown["runtime_token"], manifest.runtime_token);
+    assert_eq!(fs::read_to_string(&counter).test()?, "x");
+    assert!(manifest.worktree.is_dir());
+    assert!(peer.worktree.is_dir());
 
     stackstead(&project.repo)
         .env("PATH", &path)
@@ -101,21 +88,11 @@ fn destroy_retries_the_failed_runtime_phase_once_without_touching_a_peer() -> an
         .args(["destroy", &manifest.stackstead_id, "--yes"])
         .assert()
         .success();
-    assert_eq!(
-        fs::read_to_string(&counter).test()?,
-        "x",
-        "test contract values differ"
-    );
-    assert!(
-        !manifest.stackstead_root.exists(),
-        "test contract condition failed"
-    );
-    assert!(peer.worktree.is_dir(), "test contract condition failed");
+    assert_eq!(fs::read_to_string(&counter).test()?, "x");
+    assert!(!manifest.stackstead_root.exists());
+    assert!(peer.worktree.is_dir());
     let commands = fs::read_to_string(state.join("commands")).test()?;
-    assert!(
-        !commands.contains(&peer.compose_project),
-        "test contract condition failed"
-    );
+    assert!(!commands.contains(&peer.compose_project));
     let command_count = commands.lines().count();
 
     stackstead(&project.repo)
@@ -130,8 +107,7 @@ fn destroy_retries_the_failed_runtime_phase_once_without_touching_a_peer() -> an
             .test()?
             .lines()
             .count(),
-        command_count,
-        "test contract values differ"
+        command_count
     );
     Ok(())
 }

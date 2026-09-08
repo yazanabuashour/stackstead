@@ -1,9 +1,10 @@
 use std::{collections::BTreeMap, path::Path, time::Instant};
 
 use crate::{
-    compose, events, health,
+    compose, events,
     lock::LockGuard,
     manifest::{ComponentStatus, StacksteadManifest},
+    readiness::Requirements,
 };
 
 use super::{
@@ -11,7 +12,7 @@ use super::{
     lease::verify_port_leases,
     project::load_project,
     types::{ProjectRuntime, UpOutcome, UpTimings},
-    up_database,
+    up_database, up_readiness,
     validation::{
         validate_configured_ports, validate_current_contract, validate_pointer_binding,
         validate_source_binding,
@@ -22,6 +23,8 @@ struct UpTransaction {
     runtime: ProjectRuntime,
     manifest: StacksteadManifest,
     environment: BTreeMap<String, String>,
+    profiles: Option<String>,
+    requirements: Option<Requirements>,
     timings: UpTimings,
     mutation_lock: LockGuard,
     run_lease: LockGuard,
@@ -67,6 +70,8 @@ fn begin(
     name: &str,
     mutation_lock: Option<LockGuard>,
 ) -> anyhow::Result<UpTransaction> {
+    // Reject non-UTF-8 profiles before the command runner enumerates its environment.
+    let profiles = up_readiness::capture_profiles()?;
     let runtime = load_project(cwd)?;
     let mut manifest = runtime.resolve(name)?;
     let mutation_lock = match mutation_lock {
@@ -82,6 +87,7 @@ fn begin(
     validate_pointer_binding(&manifest)?;
     validate_source_binding(&manifest)?;
     verify_port_leases(&manifest)?;
+    manifest.readiness.invalidate();
     manifest.status.health = ComponentStatus::Unknown;
     manifest.status.database = ComponentStatus::Unknown;
     manifest.save_atomic()?;
@@ -92,6 +98,8 @@ fn begin(
         runtime,
         manifest,
         environment,
+        profiles,
+        requirements: None,
         timings: UpTimings::default(),
         mutation_lock,
         run_lease,
@@ -171,7 +179,12 @@ fn runtime_phase(transaction: &mut UpTransaction) -> anyhow::Result<()> {
         events::EventStatus::Started,
         None,
     )?;
-    if let Err(error) = compose::up(&transaction.manifest) {
+    let result = (|| {
+        transaction.requirements =
+            up_readiness::resolve(&transaction.manifest, transaction.profiles.as_deref())?;
+        compose::up(&transaction.manifest)
+    })();
+    if let Err(error) = result {
         transaction.manifest.status.runtime = ComponentStatus::Failed;
         transaction.manifest.save_atomic()?;
         append_event(
@@ -204,8 +217,9 @@ fn database_phase(transaction: &mut UpTransaction) -> anyhow::Result<()> {
 }
 
 fn health_phase(transaction: &mut UpTransaction) -> anyhow::Result<()> {
-    if transaction.runtime.config.health.checks.is_empty() {
-        transaction.manifest.status.health = ComponentStatus::Unknown;
+    if transaction.runtime.config.health.checks.is_empty()
+        && transaction.manifest.readiness.required().is_none()
+    {
         return Ok(());
     }
     let started = Instant::now();
@@ -215,12 +229,13 @@ fn health_phase(transaction: &mut UpTransaction) -> anyhow::Result<()> {
         events::EventStatus::Started,
         None,
     )?;
-    if let Err(error) = health::wait(
+    if let Err(error) = up_readiness::wait(
         &transaction.runtime.config.health,
-        &transaction.manifest,
+        &mut transaction.manifest,
         &transaction.environment,
+        transaction.requirements.as_ref(),
     ) {
-        transaction.manifest.status.health = ComponentStatus::Failed;
+        transaction.manifest.readiness.invalidate();
         transaction.manifest.save_atomic()?;
         append_event(
             &transaction.manifest,
@@ -230,7 +245,6 @@ fn health_phase(transaction: &mut UpTransaction) -> anyhow::Result<()> {
         )?;
         return Err(error);
     }
-    transaction.manifest.status.health = ComponentStatus::Ready;
     transaction.timings.health = Some(started.elapsed());
     append_event(
         &transaction.manifest,

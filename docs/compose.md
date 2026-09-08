@@ -1,6 +1,6 @@
 # Docker Compose
 
-Stackstead uses the installed Docker Compose CLI as a narrow runtime adapter. It parses conventional Compose service/port declarations for onboarding and fixed-port safety; it does not rewrite arbitrary Compose models, Dockerfiles, or application configuration.
+Stackstead runs the installed Docker Compose command. It parses conventional Compose service/port declarations for onboarding and fixed-port safety; it does not rewrite arbitrary Compose models, Dockerfiles, or application configuration.
 
 ## Discover and review
 
@@ -29,15 +29,7 @@ nested candidates.
 
 ## Project identity
 
-Each manifest records one explicit Compose project name, normally rendered from:
-
-```yaml
-runtime:
-  provider: docker-compose
-  files:
-    - docker-compose.yml
-  project_name_template: "{{ project.name }}-{{ stackstead.id }}"
-```
+The Compose project name is always `project.name` + `"-"` + the full stackstead ID. Each manifest records that name. Lifecycle commands independently verify it against the manifest's project and ID, and reject another owner's claim to the same name.
 
 All Compose commands run from the generated source worktree and include the recorded project, generated env file, and configured files. Conceptually:
 
@@ -68,8 +60,43 @@ explicit resource names from the reviewed Compose model, then refuses any
 missing or mismatched token. A never-started stackstead with no claim and no
 resources remains a safe no-op; resources without the matching claim fail
 closed. Top-level `include`, service-level `extends`, anonymous volumes, and
-undeclared named volumes are rejected because Stackstead cannot attest the full
-resource set they introduce.
+undeclared named volumes are rejected because Stackstead cannot verify ownership
+of the full resource set they introduce.
+
+## Readiness evidence
+
+Declare required services and roles in
+[`runtime.readiness`](config.md#runtimereadiness). Stackstead resolves selected
+services and replica counts from the installed Compose command's normalized
+model, using the manifest project, file order, generated environment, and
+ownership override. Counts follow `scale`, then `deploy.replicas`, then Compose's
+default of one instance. Conflicting or invalid counts fail resolution.
+
+Startup captures the raw `COMPOSE_PROFILES` value. Later readiness captures reuse
+that value, including its absence, rather than the inspecting caller's profile
+selection. Other interpolation inputs must reproduce the startup model; drift
+or unavailable evidence prevents `ready`.
+
+The manifest stores a SHA-256 fingerprint of the full normalized model with
+canonical object ordering, plus Compose's native configuration hash for each
+required service. Native hashes alone omit fields such as build settings,
+replica counts, dependency edges, and profiles. Neither fingerprint attests
+application source, build-context contents, data, remote image freshness, or job
+business inputs. Stackstead does not retain or print the normalized model,
+container environment, or health logs as readiness evidence.
+
+Readiness uses ownership-verified container metadata, immutable IDs, current
+native hashes, and distinct positive instance ordinals. Ordinals need not be
+dense; instances numbered 2 and 3 can satisfy a two-instance requirement. Known
+one-off containers do not count. Duplicate or unprovable instance identities,
+stale expectations, and missing health or ownership evidence cannot yield
+`ready`. Check the requirement issues alongside raw service rows; an exit code
+zero remains `exited (0)` and counts as success only for an explicit job.
+
+`ps` and `inspect` are snapshots assembled from separate observations, not atomic
+snapshots or real-time guarantees. They share the readiness evaluator. Optional
+failures remain visible in service rows but do not alone block the required set.
+See the [inspection and list fields](agent-contract.md#inspection-version-4-and-list-version-2).
 
 ## Host ports must be variables
 
@@ -183,7 +210,7 @@ volumes:
   postgres-data: {}
 ```
 
-External volumes, bind mounts that point to shared host data, host networking, and services outside the Compose project remain outside this isolation guarantee. Managed networks and volumes must use Compose's project-scoped names; global custom `name` values, interpolated names, and cross-file network/volume redeclarations are rejected because they cannot be claimed atomically or safely attested against a different effective model. Stackstead does not rewrite these constructs. Avoid external state when branch-local isolation is required.
+External networks and volumes, bind mounts that point to shared host data, host networking, and services outside the Compose project remain outside this isolation guarantee. Managed networks and volumes must use Compose's project-scoped names; Stackstead rejects their custom `name` values. It also rejects interpolated resource names and cross-file network/volume redeclarations because they prevent safe ownership checks against the effective Compose model. Stackstead does not rewrite these constructs. Avoid external state when branch-local isolation is required.
 
 ## Service names and URLs
 

@@ -1,14 +1,26 @@
 # Three-agent state-isolation proof
 
-This is a reproducible failure-and-recovery demonstration, not a slideware
-example. Three Stackstead branches run the same Nginx/Postgres application at the
-same time. Each branch changes migration ID `202607090001` to a conflicting
-payload and seeds account `1` with a different owner. Those changes can coexist
-only if the agents have different databases.
+Run three Nginx/Postgres environments, stop one database, recover it, and verify
+its peers keep their own data. Each branch changes migration ID `202607090001`
+to a conflicting payload and seeds account `1` with a different owner. Those
+changes can coexist only if the agents have different databases.
 
 Prerequisites are `stackstead`, Git, Docker Compose, `jq`, and `curl`. Container
 images may be pulled on the first run. The demo never runs Docker prune and
 never constructs cleanup targets from branch names.
+
+## Readiness declaration
+
+`runtime.readiness.required` names the actual `web` and `postgres` services as
+`long-running` and the standalone `setup` service as a `job`. `setup` runs
+`true` in Alpine and has no dependency edge to another service. Its required
+successful exit comes from the declaration, not inference from `depends_on` or
+its command. Keep the exited container as observable job evidence; disappearance
+does not count as success. Compose defines instance counts without duplication
+in Stackstead config.
+
+Postgres must pass its container healthcheck. The configured web HTTP check
+reports application health separately from runtime readiness.
 
 ## One command
 
@@ -62,7 +74,8 @@ project and volume. Re-running cleanup after success is a no-op.
 - Three manifest IDs, Compose projects, worktrees, and pairs of host ports are
   distinct.
 - Every published Docker port binds only to loopback, never all host interfaces.
-- `inspect` reports the successful one-shot setup service as `completed (0)`.
+- `inspect` retains the setup service's raw `exited` state and `exited (0)` status;
+  its explicit job requirement is satisfied by the observed zero exit code.
 - Each Postgres container's Compose label equals its manifest project.
 - The same migration ID has the branch-specific payload in each database.
 - The same seed key has `alpha`, `beta`, or `gamma` as its branch-local value.

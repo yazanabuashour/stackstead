@@ -39,26 +39,37 @@ stackstead exec <full-id> <service> -- <command> [arguments...]
 The `--` ends Stackstead option parsing. Everything after it is passed directly
 without a shell, so spaces and command-specific flags retain their argument
 boundaries. Both commands inherit terminal input and output and return the child
-command's exit code. `run` starts the child from the manifest-owned source
-checkout. `exec` targets the manifest-owned Compose project and exact service
+command's exit code. `run` starts the child from the source checkout recorded
+in the manifest. `exec` targets the manifest-owned Compose project and exact service
 after verifying that the service is configured, owned, and running.
 
-The examples use a readable slug for onboarding. Automation should capture the
-full `stackstead_id` from `stackstead --json create` or `adopt` and use that full ID
-for `run`, `exec`, and every destructive command. Inside a `run` wrapper, the
-authoritative value is `$STACKSTEAD_ID`; do not resolve the slug again.
+The examples use a readable slug for onboarding. Automation should validate the
+`StacksteadChange` version 1 response and expected `created` or `adopted` action,
+then read `.stackstead.stackstead_id`. Use that full ID for `run`, `exec`, and
+every destructive command. `stackstead --json current` instead returns
+`.stackstead_id` at the top level. See the [CLI JSON contract](agent-contract.md#cli-json).
+Inside a `run` wrapper, the authoritative value is `$STACKSTEAD_ID`; do not resolve
+the slug again.
 
 `run`, `exec`, and `launch` reject `--json`: stdout and stderr belong directly to
 the child and cannot also be a stable Stackstead JSON document. `run` and `exec`
 hold a shared run lease, so lifecycle mutation waits for the active command.
 `exec` keeps the Compose client in the foreground and hands the lease into that
-process. On Unix the `run` wrapper instead uses a small supervisor that retains
-the lease and owns the host child's exact process group. If the wrapper is
-interrupted, the supervisor terminates and reaps that group before releasing the
-lease. Linux also uses child-subreaper support to clean descendants that detach
-into a new session. macOS has no equivalent portable subreaper API: process-group
-cleanup is exact, but cleanup of a child that deliberately calls `setsid` is best
-effort.
+process. On Linux and macOS, `run` uses a private supervisor that retains the
+lease and cleans the host child's original process group after normal completion
+or wrapper interruption. It observes exit without reaping the leader until all
+group signals have finished. Normal execution has no timed polling loop.
+
+Linux also adopts and reaps descendants that detach into another session. macOS
+does not reap grandchildren or guarantee cleanup of descendants that escape the
+original group. The supervisor never follows a child into an unrelated group.
+
+If the direct child cannot be terminated, the supervisor reports the failure and
+retains its lease until that child exits. Other descendant-cleanup failures return
+an error and can release the lease with unresolved work. Check those failures
+before proceeding with teardown. Supervised commands require the default
+`SIGCHLD` disposition without `SA_NOCLDWAIT`; incompatible child-reaping policies
+are rejected before target execution.
 
 ## Runtime contract
 

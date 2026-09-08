@@ -152,7 +152,7 @@ mod tests {
         let root = std::path::PathBuf::from("/tmp/cell");
         StacksteadManifest {
             kind: "StacksteadManifest".into(),
-            version: "2".into(),
+            version: crate::manifest::MANIFEST_VERSION.into(),
             stackstead_id: "a-a111".into(),
             slug: "a".into(),
             short_id: "a111".into(),
@@ -178,6 +178,7 @@ mod tests {
             event_log: root.join("events"),
             env_keys: vec![],
             status: ManifestStatus::default(),
+            readiness: crate::readiness::Contract::Unconfigured {},
             database: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
@@ -192,13 +193,11 @@ mod tests {
             OpenTarget {
                 contract_key: "dashboard".into(),
                 value: "http://127.0.0.1:39000".into()
-            },
-            "test contract values differ"
+            }
         );
         assert_eq!(
             resolve(&manifest, Some("dashboard")).test()?.contract_key,
-            "dashboard",
-            "test contract values differ"
+            "dashboard"
         );
         Ok(())
     }
@@ -242,8 +241,7 @@ mod tests {
                 .test()?
                 .endpoint
                 .port,
-            39000,
-            "test contract values differ"
+            39000
         );
 
         let stale = OpenTarget {
@@ -254,8 +252,7 @@ mod tests {
             launch_endpoint(&stale, &manifest)
                 .test_err()?
                 .to_string()
-                .contains("found 0 matches"),
-            "test contract condition failed"
+                .contains("found 0 matches")
         );
 
         manifest.ports.insert("api".into(), 39001);
@@ -267,8 +264,7 @@ mod tests {
             launch_endpoint(&wrong_service, &manifest)
                 .test_err()?
                 .to_string()
-                .contains("different service"),
-            "test contract condition failed"
+                .contains("different service")
         );
         Ok(())
     }
@@ -279,11 +275,7 @@ mod tests {
             contract_key: "dashboard".into(),
             value: "127.0.0.1:39000".into(),
         };
-        assert_eq!(
-            launch_endpoint(&target, &manifest()).test()?,
-            None,
-            "test contract values differ"
-        );
+        assert_eq!(launch_endpoint(&target, &manifest()).test()?, None);
         Ok(())
     }
 }

@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+pub(super) use crate::readiness::is_sha256;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum HostBinding {
     Fixed(u16),
@@ -47,14 +49,19 @@ pub struct ComposePortTarget {
 pub struct ServiceObservation {
     pub service: String,
     pub container: String,
+    pub id: String,
     pub state: String,
     pub exit_code: Option<i64>,
+    pub health: Option<String>,
+    pub healthcheck_enabled: Option<bool>,
+    pub oneoff: Option<bool>,
+    pub container_number: Option<u64>,
+    pub config_hash: Option<String>,
 }
 
 impl ServiceObservation {
     pub fn status(&self) -> String {
         match (self.state.as_str(), self.exit_code) {
-            ("exited", Some(0)) => "completed (0)".into(),
             ("exited", Some(code)) => format!("exited ({code})"),
             _ => self.state.clone(),
         }

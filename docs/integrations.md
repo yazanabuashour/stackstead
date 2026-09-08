@@ -1,9 +1,8 @@
 # Integrating existing agent and worktree managers
 
-Stackstead should be the runtime substrate, not another dashboard. An editor,
-tmux multiplexer, or agent manager can keep ownership of sessions and prompts
-while Stackstead supplies the exact Compose project, ports, database, URLs,
-context, recovery, and teardown contract.
+Let the editor, terminal multiplexer, or agent manager own sessions and prompts.
+Stackstead binds the worktree, Compose runtime, ports, and data to one validated
+identity, with generated context and exact-ID recovery and teardown.
 
 There are two valid ownership modes:
 

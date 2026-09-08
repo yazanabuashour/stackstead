@@ -9,7 +9,11 @@ use clap::{Args, Parser, Subcommand};
     about = "Isolated real application runtimes for parallel coding agents"
 )]
 pub struct Cli {
-    #[arg(long, global = true, help = "Emit stable machine-readable JSON")]
+    #[arg(
+        long,
+        global = true,
+        help = "Emit versioned JSON where supported; unavailable for run, exec, launch, or logs --follow"
+    )]
     json: bool,
     #[command(subcommand)]
     command: Commands,
@@ -30,13 +34,13 @@ enum Commands {
     },
     /// Create a branch, worktree, ports, env, manifest, and agent context.
     Create { name: String },
-    /// Bind an existing manager-owned worktree to an isolated runtime contract.
+    /// Create an environment for an existing manager-owned worktree.
     Adopt {
         name: String,
         #[arg(long)]
         worktree: PathBuf,
     },
-    /// Install dependencies and start the Compose runtime.
+    /// Install dependencies, start Compose, and verify declared readiness and health.
     Up { name: String },
     /// Run a host command from the exact stackstead worktree.
     Run {
@@ -72,13 +76,13 @@ enum Commands {
         )]
         command: Vec<OsString>,
     },
-    /// List known stacksteads for this project.
+    /// List project stacksteads with runtime activity and declared readiness.
     Ps,
     /// Print the validated identity of the current generated worktree.
     Current,
-    /// Show a durable contract plus computed live status.
+    /// Show runtime activity, readiness, application health, and environment details.
     Inspect { name: String },
-    /// Locate or print the generated environment.
+    /// Show the generated environment path and redacted values.
     Env {
         name: String,
         #[arg(long)]
@@ -108,7 +112,7 @@ enum Commands {
     },
     /// Stop Compose services without deleting state.
     Stop { name: String },
-    /// Delete the manifest-owned Compose project, volumes, worktree, and state.
+    /// Remove owned runtime, worktree, and state; preserve external/adopted worktrees.
     Destroy {
         name: String,
         #[arg(long)]
@@ -120,7 +124,7 @@ enum Commands {
         #[arg(long)]
         fail_on_error: bool,
     },
-    /// Conservatively regenerate contract files and dependency/link state.
+    /// Regenerate environment files and rerun configured dependency installation.
     Repair { name: String },
 }
 

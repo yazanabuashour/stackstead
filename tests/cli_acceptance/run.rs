@@ -41,8 +41,7 @@ exit 23
         .code(23);
     assert_eq!(
         output_text(&assert.get_output().stdout)?,
-        format!("{}|argument with spaces\n", manifest.stackstead_id),
-        "test contract values differ"
+        format!("{}|argument with spaces\n", manifest.stackstead_id)
     );
 
     let json_run = stackstead(&project.repo)
@@ -50,8 +49,7 @@ exit 23
         .assert()
         .failure();
     assert!(
-        output_text(&json_run.get_output().stderr)?.contains("--json cannot be combined with run"),
-        "test contract condition failed"
+        output_text(&json_run.get_output().stderr)?.contains("--json cannot be combined with run")
     );
     Ok(())
 }
@@ -74,10 +72,7 @@ fn generated_environment_cannot_add_process_control_keys() -> anyhow::Result<()>
         .args(["run", "feature-a", "--", "true"])
         .assert()
         .failure();
-    assert!(
-        output_text(&rejected.get_output().stderr)?.contains("do not match the manifest"),
-        "test contract condition failed"
-    );
+    assert!(output_text(&rejected.get_output().stderr)?.contains("do not match the manifest"));
     Ok(())
 }
 
@@ -123,24 +118,17 @@ fn queued_lifecycle_rechecks_teardown_after_the_run_lease_wait() -> anyhow::Resu
         .test()?,
     )
     .test()?;
-    assert!(
-        manifest.manifest_path().is_file(),
-        "test contract condition failed"
-    );
-    assert!(manifest.worktree.is_dir(), "test contract condition failed");
+    assert!(manifest.manifest_path().is_file());
+    assert!(manifest.worktree.is_dir());
 
     fs::remove_file(&ready).test_context("release agent probe")?;
     assert!(
         child
             .wait()
             .test_context("wait for agent command")?
-            .success(),
-        "test contract condition failed"
+            .success()
     );
-    assert!(
-        !waiting.wait().test_context("wait for repair")?.success(),
-        "test contract condition failed"
-    );
+    assert!(!waiting.wait().test_context("wait for repair")?.success());
     Ok(())
 }
 
@@ -202,10 +190,11 @@ fn killed_run_wrapper_cleans_direct_and_detached_children_before_releasing_destr
         .arg(&detached_pid_file)
         .spawn()
         .test_context("start stackstead wrapper")?;
-    assert!(
-        wait_for_file(&detached_pid_file, 100, Duration::from_millis(20)),
-        "test contract condition failed"
-    );
+    assert!(wait_for_file(
+        &detached_pid_file,
+        100,
+        Duration::from_millis(20)
+    ));
     let direct_pid = fs::read_to_string(&direct_pid_file)
         .test_context("direct child wrote PID")?
         .trim()
@@ -236,10 +225,7 @@ fn killed_run_wrapper_cleans_direct_and_detached_children_before_releasing_destr
         destroy.try_wait().test()?.is_none(),
         "destroy overtook cleanup"
     );
-    assert!(
-        destroy.wait().test_context("wait for destroy")?.success(),
-        "test contract condition failed"
-    );
+    assert!(destroy.wait().test_context("wait for destroy")?.success());
     for pid in [direct_pid, detached_pid] {
         for _ in 0..100 {
             if rustix::process::test_kill_process(rustix::process::Pid::from_raw(pid).test()?)
@@ -253,9 +239,6 @@ fn killed_run_wrapper_cleans_direct_and_detached_children_before_releasing_destr
             .test_err()
             .map_err(|error| anyhow::anyhow!("child {pid} survived: {error}"))?;
     }
-    assert!(
-        !manifest.stackstead_root.exists(),
-        "test contract condition failed"
-    );
+    assert!(!manifest.stackstead_root.exists());
     Ok(())
 }

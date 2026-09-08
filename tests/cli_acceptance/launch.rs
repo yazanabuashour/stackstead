@@ -47,30 +47,17 @@ exit 0
         .code(23);
 
     let directories = state_stackstead_directories(&project)?;
-    assert_eq!(directories.len(), 1, "test contract values differ");
+    assert_eq!(directories.len(), 1);
     let manifest = StacksteadManifest::read(&directories[0].join("state/manifest.json")).test()?;
-    assert_eq!(
-        manifest.status.runtime,
-        ComponentStatus::Running,
-        "test contract values differ"
-    );
+    assert_eq!(manifest.status.runtime, ComponentStatus::Running);
     let stdout = output_text(&launched.get_output().stdout)?;
-    assert!(
-        stdout.contains(&format!("Created {}", manifest.stackstead_id)),
-        "test contract condition failed"
-    );
-    assert!(
-        stdout.contains("Timings:"),
-        "test contract condition failed"
-    );
-    assert!(
-        stdout.contains(&format!(
-            "child:{}|{}",
-            manifest.stackstead_id,
-            manifest.worktree.display()
-        )),
-        "test contract condition failed"
-    );
+    assert!(stdout.contains(&format!("Created {}", manifest.stackstead_id)));
+    assert!(stdout.contains("Timings:"));
+    assert!(stdout.contains(&format!(
+        "child:{}|{}",
+        manifest.stackstead_id,
+        manifest.worktree.display()
+    )));
     Ok(())
 }
 
@@ -94,19 +81,14 @@ fn launch_preserves_the_created_cell_when_up_fails() -> anyhow::Result<()> {
         .failure();
 
     let directories = state_stackstead_directories(&project)?;
-    assert_eq!(directories.len(), 1, "test contract values differ");
+    assert_eq!(directories.len(), 1);
     let manifest = StacksteadManifest::read(&directories[0].join("state/manifest.json")).test()?;
-    assert_eq!(
-        manifest.status.dependencies,
-        ComponentStatus::Failed,
-        "test contract values differ"
-    );
+    assert_eq!(manifest.status.dependencies, ComponentStatus::Failed);
     assert!(
         output_text(&rejected.get_output().stdout)?
-            .contains(&format!("Created {}", manifest.stackstead_id)),
-        "test contract condition failed"
+            .contains(&format!("Created {}", manifest.stackstead_id))
     );
-    assert!(!child_marker.exists(), "test contract condition failed");
+    assert!(!child_marker.exists());
     Ok(())
 }
 
@@ -130,20 +112,10 @@ fn launch_refuses_to_reuse_an_existing_cell() -> anyhow::Result<()> {
         .assert()
         .failure();
 
-    assert!(
-        output_text(&rejected.get_output().stderr)?.contains("already exists"),
-        "test contract condition failed"
-    );
-    assert_eq!(
-        state_stackstead_directories(&project)?.len(),
-        1,
-        "test contract values differ"
-    );
-    assert!(
-        existing.manifest_path().is_file(),
-        "test contract condition failed"
-    );
-    assert!(!child_marker.exists(), "test contract condition failed");
+    assert!(output_text(&rejected.get_output().stderr)?.contains("already exists"));
+    assert_eq!(state_stackstead_directories(&project)?.len(), 1);
+    assert!(existing.manifest_path().is_file());
+    assert!(!child_marker.exists());
     Ok(())
 }
 
@@ -158,12 +130,8 @@ fn launch_rejects_json_before_creating_state() -> anyhow::Result<()> {
 
     assert!(
         output_text(&rejected.get_output().stderr)?
-            .contains("--json cannot be combined with launch"),
-        "test contract condition failed"
+            .contains("--json cannot be combined with launch")
     );
-    assert!(
-        state_stackstead_directories(&project)?.is_empty(),
-        "test contract condition failed"
-    );
+    assert!(state_stackstead_directories(&project)?.is_empty());
     Ok(())
 }

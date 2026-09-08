@@ -96,20 +96,14 @@ fn v2_manifest_requires_explicit_source_ownership() -> anyhow::Result<()> {
         .args(["inspect", "feature-a", "--json"])
         .assert()
         .failure();
-    assert!(
-        rejected.get_output().stdout.is_empty(),
-        "test contract condition failed"
-    );
+    assert!(rejected.get_output().stdout.is_empty());
     assert!(
         output_text(&rejected.get_output().stderr)?.contains("requires source_ownership"),
         "unexpected error: {}",
         output_text(&rejected.get_output().stderr)?
     );
-    assert!(manifest.worktree.is_dir(), "test contract condition failed");
-    assert!(
-        manifest.stackstead_root.is_dir(),
-        "test contract condition failed"
-    );
+    assert!(manifest.worktree.is_dir());
+    assert!(manifest.stackstead_root.is_dir());
     Ok(())
 }
 
@@ -130,7 +124,7 @@ fn current_rejects_a_self_consistent_identity_outside_the_configured_state_root(
     forged.event_log = forged.state_dir.join("events.jsonl");
     fs::create_dir_all(&forged.state_dir).test_context("create forged state directory")?;
     forged
-        .save_atomic()
+        .write_fixture()
         .test_context("write self-consistent forged manifest")?;
 
     let mut pointer: StacksteadPointer = serde_json::from_slice(
@@ -150,10 +144,7 @@ fn current_rejects_a_self_consistent_identity_outside_the_configured_state_root(
         .arg("current")
         .assert()
         .failure();
-    assert!(
-        rejected.get_output().stdout.is_empty(),
-        "test contract condition failed"
-    );
+    assert!(rejected.get_output().stdout.is_empty());
     assert!(
         output_text(&rejected.get_output().stderr)?.contains("configured state root"),
         "unexpected current identity error: {}",
@@ -190,10 +181,7 @@ fn pointer_project_identity_fields_are_checked_against_the_manifest() -> anyhow:
             .args(["context", "feature-a", "--json"])
             .assert()
             .failure();
-        assert!(
-            context.get_output().stdout.is_empty(),
-            "test contract condition failed"
-        );
+        assert!(context.get_output().stdout.is_empty());
         let stderr = output_text(&context.get_output().stderr)?;
         assert!(
             stderr.contains("does not match its manifest"),
@@ -266,18 +254,10 @@ fn copied_pointer_rejects_every_affected_command_before_external_mutation() -> a
             output_text(&rejected.get_output().stderr)?
         );
     }
-    assert!(!docker_marker.exists(), "test contract condition failed");
-    assert!(!probe.exists(), "test contract condition failed");
-    assert_eq!(
-        fs::read(manifest.manifest_path()).test()?,
-        manifest_before,
-        "test contract values differ"
-    );
-    assert_eq!(
-        fs::read(&manifest.event_log).test()?,
-        events_before,
-        "test contract values differ"
-    );
-    assert!(manifest.worktree.is_dir(), "test contract condition failed");
+    assert!(!docker_marker.exists());
+    assert!(!probe.exists());
+    assert_eq!(fs::read(manifest.manifest_path()).test()?, manifest_before);
+    assert_eq!(fs::read(&manifest.event_log).test()?, events_before);
+    assert!(manifest.worktree.is_dir());
     Ok(())
 }

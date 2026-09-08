@@ -1,11 +1,10 @@
-use serde::Deserialize;
-
 use crate::{command, manifest::StacksteadManifest};
 
 use super::{
-    docker::{base_args, docker_environment, run_docker_compose},
+    docker::{base_args, docker_environment, run_docker_compose, sanitize_generated_error},
     model::ServiceObservation,
     ownership::verify_ownership_override,
+    resources::owned_service_observations,
 };
 
 pub fn logs(
@@ -58,61 +57,19 @@ pub fn is_running(manifest: &StacksteadManifest) -> anyhow::Result<bool> {
     run_docker_compose(manifest, &args).map(|output| !output.stdout.is_empty())
 }
 
+/// The optional deadline includes all independent claim, inventory, and ownership reads.
 pub fn service_observations(
     manifest: &StacksteadManifest,
+    deadline: Option<std::time::Instant>,
 ) -> anyhow::Result<Vec<ServiceObservation>> {
-    let mut args = base_args(manifest);
-    args.extend([
-        "ps".into(),
-        "--all".into(),
-        "--format".into(),
-        "json".into(),
-    ]);
-    let output = run_docker_compose(manifest, &args)?;
-    parse_service_observations(&output.stdout)
-}
-
-pub(super) fn parse_service_observations(output: &[u8]) -> anyhow::Result<Vec<ServiceObservation>> {
-    let output = std::str::from_utf8(output)?.trim();
-    if output.is_empty() {
-        return Ok(vec![]);
-    }
-    let values = if output.starts_with('[') {
-        serde_json::from_str::<Vec<ComposeServiceObservation>>(output)
-    } else {
-        output
-            .lines()
-            .map(serde_json::from_str)
-            .collect::<Result<Vec<ComposeServiceObservation>, _>>()
-    }
-    .map_err(|error| {
-        anyhow::anyhow!("Docker Compose returned invalid service status JSON: {error}")
+    let generated = manifest.validated_environment().map_err(|_error| {
+        anyhow::anyhow!(
+            "cannot validate generated Compose environment; run Stackstead repair; details withheld"
+        )
     })?;
-    let mut observations = values
-        .into_iter()
-        .map(|value| {
-            let state = value.state.to_ascii_lowercase();
-            ServiceObservation {
-                service: value.service,
-                container: value.name,
-                exit_code: value.exit_code.filter(|_| state == "exited"),
-                state,
-            }
-        })
-        .collect::<Vec<_>>();
-    observations.sort_by(|left, right| {
-        (&left.service, &left.container).cmp(&(&right.service, &right.container))
-    });
-    Ok(observations)
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "PascalCase")]
-struct ComposeServiceObservation {
-    name: String,
-    service: String,
-    state: String,
-    exit_code: Option<i64>,
+    verify_ownership_override(manifest)
+        .and_then(|()| owned_service_observations(manifest, deadline))
+        .map_err(|error| sanitize_generated_error(&error, &generated))
 }
 
 pub fn service_is_running(manifest: &StacksteadManifest, service: &str) -> anyhow::Result<bool> {
@@ -183,11 +140,6 @@ pub(super) fn endpoint_matches(endpoint: &str, host: &str, port: u16) -> bool {
         ),
         Err(_) => false,
     }
-}
-
-#[cfg(test)]
-pub(super) fn endpoint_port(endpoint: &str) -> Option<u16> {
-    endpoint.trim().rsplit_once(':')?.1.parse().ok()
 }
 
 pub fn postgres_is_ready(

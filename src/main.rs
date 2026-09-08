@@ -34,6 +34,7 @@ mod open;
 mod output;
 mod paths;
 mod ports;
+mod readiness;
 mod repair;
 mod repository_policy;
 mod slug;

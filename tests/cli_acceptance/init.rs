@@ -9,42 +9,22 @@ fn init_writes_a_valid_config_and_refuses_to_overwrite_it() -> anyhow::Result<()
         .assert()
         .success();
     let initialized: Value = serde_json::from_slice(&assert.get_output().stdout).test()?;
-    assert_eq!(
-        initialized["kind"], "StacksteadInit",
-        "test contract values differ"
-    );
-    assert_eq!(initialized["version"], "1", "test contract values differ");
-    assert_eq!(
-        initialized["path"],
-        config_path.to_string_lossy().as_ref(),
-        "test contract values differ"
-    );
+    assert_eq!(initialized["kind"], "StacksteadInit");
+    assert_eq!(initialized["version"], "1");
+    assert_eq!(initialized["path"], config_path.to_string_lossy().as_ref());
 
     let original = fs::read(&config_path).test_context("read initialized config")?;
     let config = load_config(&config_path)?;
-    assert_eq!(config["version"], "1", "test contract values differ");
-    assert_eq!(
-        config["kind"], "StacksteadProject",
-        "test contract values differ"
-    );
-    assert_eq!(
-        config["project"]["name"], "demo-project",
-        "test contract values differ"
-    );
-    assert_eq!(
-        config["source"]["base"], "main",
-        "test contract values differ"
-    );
+    assert_eq!(config["version"], "2");
+    assert_eq!(config["kind"], "StacksteadProject");
+    assert_eq!(config["project"]["name"], "demo-project");
+    assert_eq!(config["source"]["base"], "main");
 
     let assert = stackstead(&project.repo).arg("init").assert().failure();
-    assert!(
-        String::from_utf8_lossy(&assert.get_output().stderr).contains("refusing to overwrite"),
-        "test contract condition failed"
-    );
+    assert!(String::from_utf8_lossy(&assert.get_output().stderr).contains("refusing to overwrite"));
     assert_eq!(
         fs::read(&config_path).test_context("reread initialized config")?,
-        original,
-        "test contract values differ"
+        original
     );
     Ok(())
 }
@@ -58,11 +38,7 @@ fn init_records_the_exact_commit_for_a_detached_head() -> anyhow::Result<()> {
     stackstead(&project.repo).arg("init").assert().success();
 
     let config = load_config(&project.repo.join("stackstead.yaml"))?;
-    assert_eq!(
-        config["source"]["base"],
-        head.trim(),
-        "test contract values differ"
-    );
+    assert_eq!(config["source"]["base"], head.trim());
     Ok(())
 }
 
@@ -92,19 +68,12 @@ fn human_init_recommends_but_does_not_edit_repository_instructions() -> anyhow::
             "init output omitted {expected:?}"
         );
     }
-    assert!(
-        !stdout.contains("stackstead --json ps"),
-        "test contract condition failed"
-    );
+    assert!(!stdout.contains("stackstead --json ps"));
     assert_eq!(
         fs::read_to_string(&instructions).test()?,
-        "# Human-owned policy\n",
-        "test contract values differ"
+        "# Human-owned policy\n"
     );
 
-    assert!(
-        !project.repo.join("CLAUDE.md").exists(),
-        "test contract condition failed"
-    );
+    assert!(!project.repo.join("CLAUDE.md").exists());
     Ok(())
 }

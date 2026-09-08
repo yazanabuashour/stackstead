@@ -44,6 +44,7 @@ fn manifest(id: &str, port: u16) -> anyhow::Result<StacksteadManifest> {
         event_log: root.join("state/events.jsonl"),
         env_keys: vec![],
         status: ManifestStatus::default(),
+        readiness: crate::readiness::Contract::Unconfigured {},
         database: None,
         created_at: Utc::now(),
         updated_at: Utc::now(),
@@ -52,11 +53,7 @@ fn manifest(id: &str, port: u16) -> anyhow::Result<StacksteadManifest> {
 
 #[test]
 fn diagnostic_severity_displays_stably() -> anyhow::Result<()> {
-    assert_eq!(
-        DiagnosticSeverity::Warning.to_string(),
-        "warning",
-        "test contract values differ"
-    );
+    assert_eq!(DiagnosticSeverity::Warning.to_string(), "warning");
     Ok(())
 }
 
@@ -65,16 +62,9 @@ fn repository_policy_reports_missing_and_current_files() -> anyhow::Result<()> {
     let directory = tempfile::tempdir().test()?;
     let mut diagnostics = Vec::new();
     diagnose_repository_policy(directory.path(), &mut diagnostics);
-    assert_eq!(diagnostics.len(), 1, "test contract values differ");
-    assert_eq!(
-        diagnostics[0].code, "repository_policy.missing",
-        "test contract values differ"
-    );
-    assert_eq!(
-        diagnostics[0].severity,
-        DiagnosticSeverity::Warning,
-        "test contract values differ"
-    );
+    assert_eq!(diagnostics.len(), 1);
+    assert_eq!(diagnostics[0].code, "repository_policy.missing");
+    assert_eq!(diagnostics[0].severity, DiagnosticSeverity::Warning);
 
     std::fs::write(
         directory.path().join("AGENTS.md"),
@@ -88,16 +78,9 @@ fn repository_policy_reports_missing_and_current_files() -> anyhow::Result<()> {
     std::fs::write(directory.path().join("CLAUDE.md"), "# Other policy\n").test()?;
     diagnostics.clear();
     diagnose_repository_policy(directory.path(), &mut diagnostics);
-    assert_eq!(diagnostics.len(), 1, "test contract values differ");
-    assert_eq!(
-        diagnostics[0].code, "repository_policy.current",
-        "test contract values differ"
-    );
-    assert_eq!(
-        diagnostics[0].severity,
-        DiagnosticSeverity::Info,
-        "test contract values differ"
-    );
+    assert_eq!(diagnostics.len(), 1);
+    assert_eq!(diagnostics[0].code, "repository_policy.current");
+    assert_eq!(diagnostics[0].severity, DiagnosticSeverity::Info);
     Ok(())
 }
 
@@ -118,13 +101,9 @@ fn repository_policy_reports_older_and_newer_markers() -> anyhow::Result<()> {
         .test()?;
         let mut diagnostics = Vec::new();
         diagnose_repository_policy(directory.path(), &mut diagnostics);
-        assert_eq!(diagnostics.len(), 1, "test contract values differ");
-        assert_eq!(diagnostics[0].code, code, "test contract values differ");
-        assert_eq!(
-            diagnostics[0].severity,
-            DiagnosticSeverity::Warning,
-            "test contract values differ"
-        );
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].code, code);
+        assert_eq!(diagnostics[0].severity, DiagnosticSeverity::Warning);
     }
     Ok(())
 }
@@ -145,13 +124,9 @@ fn repository_policy_reports_unversioned_and_invalid_markers() -> anyhow::Result
         std::fs::write(directory.path().join("CLAUDE.md"), contents).test()?;
         let mut diagnostics = Vec::new();
         diagnose_repository_policy(directory.path(), &mut diagnostics);
-        assert_eq!(diagnostics.len(), 1, "test contract values differ");
-        assert_eq!(diagnostics[0].code, code, "test contract values differ");
-        assert_eq!(
-            diagnostics[0].severity,
-            DiagnosticSeverity::Warning,
-            "test contract values differ"
-        );
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].code, code);
+        assert_eq!(diagnostics[0].severity, DiagnosticSeverity::Warning);
     }
     Ok(())
 }
@@ -164,19 +139,10 @@ fn reports_duplicate_port_allocations() -> anyhow::Result<()> {
     ];
     let mut diagnostics = Vec::new();
     diagnose_duplicate_ports(&manifests, &mut diagnostics);
-    assert_eq!(diagnostics.len(), 1, "test contract values differ");
-    assert_eq!(
-        diagnostics[0].code, "ports.duplicate_allocation",
-        "test contract values differ"
-    );
-    assert!(
-        diagnostics[0].message.contains("feature-a111:web"),
-        "test contract condition failed"
-    );
-    assert!(
-        diagnostics[0].message.contains("feature-b222:web"),
-        "test contract condition failed"
-    );
+    assert_eq!(diagnostics.len(), 1);
+    assert_eq!(diagnostics[0].code, "ports.duplicate_allocation");
+    assert!(diagnostics[0].message.contains("feature-a111:web"));
+    assert!(diagnostics[0].message.contains("feature-b222:web"));
     Ok(())
 }
 
@@ -186,7 +152,7 @@ fn project_doctor_finds_fixed_ports_without_requiring_docker() -> anyhow::Result
     std::fs::write(
         directory.path().join("stackstead.yaml"),
         r#"
-version: "1"
+version: "2"
 kind: StacksteadProject
 project: { name: demo }
 state: { root: ../state }
@@ -210,16 +176,12 @@ runtime: { files: [docker-compose.yml] }
     assert!(
         diagnostics
             .iter()
-            .any(|diagnostic| diagnostic.code == "compose.fixed_host_port"),
-        "test contract condition failed"
+            .any(|diagnostic| diagnostic.code == "compose.fixed_host_port")
     );
-    assert!(
-        diagnostics.iter().any(|diagnostic| {
-            diagnostic.code == "compose.all_interfaces_host_port"
-                && diagnostic.severity == DiagnosticSeverity::Error
-        }),
-        "test contract condition failed"
-    );
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "compose.all_interfaces_host_port"
+            && diagnostic.severity == DiagnosticSeverity::Error
+    }));
     Ok(())
 }
 
@@ -231,12 +193,11 @@ fn unreadable_manifest_becomes_a_diagnostic() -> anyhow::Result<()> {
     std::fs::write(project.join("manifest.json"), "not json").test()?;
     let mut diagnostics = Vec::new();
     let manifests = read_manifests(&directory.path().join("demo"), &mut diagnostics);
-    assert!(manifests.is_empty(), "test contract condition failed");
+    assert!(manifests.is_empty());
     assert!(
         diagnostics
             .iter()
-            .any(|diagnostic| diagnostic.code == "manifest.unreadable"),
-        "test contract condition failed"
+            .any(|diagnostic| diagnostic.code == "manifest.unreadable")
     );
     Ok(())
 }
@@ -246,19 +207,9 @@ fn missing_project_lock_is_an_error() -> anyhow::Result<()> {
     let directory = tempfile::tempdir().test()?;
     let mut diagnostics = Vec::new();
     diagnose_project_lock(directory.path(), &mut diagnostics);
-    assert_eq!(diagnostics.len(), 1, "test contract values differ");
-    assert_eq!(
-        diagnostics[0].code, "lock.project.missing",
-        "test contract values differ"
-    );
-    assert_eq!(
-        diagnostics[0].severity,
-        DiagnosticSeverity::Error,
-        "test contract values differ"
-    );
-    assert!(
-        !diagnostics[0].message.contains("stale"),
-        "test contract condition failed"
-    );
+    assert_eq!(diagnostics.len(), 1);
+    assert_eq!(diagnostics[0].code, "lock.project.missing");
+    assert_eq!(diagnostics[0].severity, DiagnosticSeverity::Error);
+    assert!(!diagnostics[0].message.contains("stale"));
     Ok(())
 }

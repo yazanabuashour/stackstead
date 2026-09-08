@@ -58,9 +58,6 @@ bash -n "$repo_root/scripts/test-policy.sh"
 for mode in rust docker macos; do
   grep -q "scripts/ci.sh $mode" "$repo_root/.github/workflows/ci.yml"
 done
-grep -q 'scripts/check-policy.sh' "$repo_root/scripts/ci.sh"
-grep -q 'scripts/test-policy.sh' "$repo_root/scripts/ci.sh"
-grep -q 'scripts/test-release-install.sh' "$repo_root/scripts/ci.sh"
 grep -q 'scripts/test-release-install.sh' "$repo_root/.github/workflows/release.yml"
 
 git -C "$tmp" init -b main >/dev/null
@@ -224,9 +221,144 @@ if PATH="$fake_bin:$PATH" FAKE_ROOT="$demo" STACKSTEAD_BIN="$fake_bin/stackstead
   exit 1
 fi
 [[ "$(wc -l <"$demo/.demo-stacksteads.tsv")" -eq 2 ]]
-! grep -q '^alpha' "$demo/.demo-stacksteads.tsv"
+if grep -q '^alpha' "$demo/.demo-stacksteads.tsv"; then
+  printf 'error: completed alpha entry remained in the cleanup ledger\n' >&2
+  exit 1
+fi
 PATH="$fake_bin:$PATH" FAKE_ROOT="$demo" STACKSTEAD_BIN="$fake_bin/stackstead" \
   "$demo/demo.sh" cleanup >/dev/null
 [[ ! -e "$demo/.demo-stacksteads.tsv" ]]
+
+# Run the real corruption scenario with recording commands, never a Docker daemon.
+cat >"$tmp/corrupt-fixture.sh" <<'EOF'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+source "$DEMO_SOURCE" help >/dev/null
+example_root="$FAKE_ROOT"
+ledger="$example_root/.demo-stacksteads.tsv"
+stackstead_bin="$FAKE_STACKSTEAD"
+require_runtime() { :; }
+register_cell() {
+  CREATED_ID=corrupt-id
+  CREATED_PROJECT=demo-corrupt
+  CREATED_WORKTREE="$example_root/worktree"
+  CREATED_MANIFEST="$example_root/manifest.json"
+}
+assert_project_runtime_exists() { :; }
+cleanup() {
+  cmp "$example_root/manifest.expected" "$CREATED_MANIFEST"
+  cmp "$example_root/pointer.expected" "$CREATED_WORKTREE/.stackstead/stackstead.json"
+  rm -rf "$CREATED_WORKTREE" "$CREATED_MANIFEST"
+  touch "$example_root/cleanup-completed"
+}
+docker() {
+  printf '%s\n' "$*" >>"$FAKE_CALLS"
+  case "$1" in
+    run) printf '%s\n' "$FAKE_CONTAINER"; [ "$FAIL_CREATE" != 1 ] || return 125 ;;
+    inspect) [ "$2" = "$FAKE_CONTAINER" ] ;;
+    rm) [ "$2" = -f ] && [ "$3" = "$FAKE_CONTAINER" ] && [ "$FAIL_REMOVE" != 1 ] ;;
+    *) return 99 ;;
+  esac
+}
+corrupt_state_negative
+EOF
+cat >"$tmp/corrupt-stackstead" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$*" >>"$FAKE_STACKSTEAD_CALLS"
+case "$1" in up) exit 0 ;; destroy) exit 19 ;; *) exit 99 ;; esac
+EOF
+chmod +x "$tmp/corrupt-stackstead"
+for scenario in create-fails success cleanup-fails; do
+  fail_create=0
+  fail_remove=0
+  case "$scenario" in create-fails) fail_create=1 ;; cleanup-fails) fail_remove=1 ;; esac
+  fixture="$tmp/corrupt-$scenario"
+  mkdir -p "$fixture/worktree/.stackstead"
+  printf '{"compose_project":"demo-corrupt","worktree":"%s/worktree"}\n' "$fixture" \
+    >"$fixture/manifest.json"
+  printf '{"stackstead_id":"corrupt-id"}\n' >"$fixture/worktree/.stackstead/stackstead.json"
+  cp "$fixture/manifest.json" "$fixture/manifest.expected"
+  cp "$fixture/worktree/.stackstead/stackstead.json" "$fixture/pointer.expected"
+  container_id="$(printf '%064d' 1)"
+  if DEMO_SOURCE="$repo_root/examples/three-agent-demo/demo.sh" FAKE_ROOT="$fixture" \
+    FAKE_STACKSTEAD="$tmp/corrupt-stackstead" FAKE_STACKSTEAD_CALLS="$fixture/stackstead.calls" \
+    FAKE_CALLS="$fixture/docker.calls" FAKE_CONTAINER="$container_id" \
+    FAIL_CREATE="$fail_create" FAIL_REMOVE="$fail_remove" \
+    bash "$tmp/corrupt-fixture.sh" >"$fixture/output" 2>&1; then
+    [[ "$scenario" = success ]]
+  else
+    [[ "$scenario" != success ]]
+    if [[ "$fail_create" = 1 ]]; then
+      grep -q 'failed to create unrelated victim container' "$fixture/output"
+    else
+      grep -q "retained victim container $container_id" "$fixture/output"
+    fi
+  fi
+  if [[ "$fail_create" = 1 ]]; then
+    [[ "$(wc -l <"$fixture/docker.calls")" -eq 1 ]]
+    [[ "$(cat "$fixture/stackstead.calls")" = 'up corrupt-id' ]]
+    cmp "$fixture/manifest.expected" "$fixture/manifest.json"
+    cmp "$fixture/pointer.expected" "$fixture/worktree/.stackstead/stackstead.json"
+  else
+    expected_removals=1
+    [[ "$fail_remove" = 0 ]] || expected_removals=2
+    [[ "$(grep -c '^rm ' "$fixture/docker.calls")" -eq "$expected_removals" ]]
+    grep -qx "rm -f $container_id" "$fixture/docker.calls"
+    [[ -e "$fixture/cleanup-completed" ]]
+    [[ ! -e "$fixture/manifest.json" && ! -e "$fixture/worktree" ]]
+  fi
+done
+
+# The repository recipe owns its link directory and must not use a caller's global registry.
+yarn_bin="$tmp/yarn-bin"
+yarn_worktree="$tmp/yarn-worktree"
+recipe="$repo_root/examples/yarn-classic/scripts/link-packages.sh"
+mkdir "$yarn_bin" "$yarn_worktree"
+cat >"$yarn_bin/yarn" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$PWD" "$YARN_LINK_FOLDER" "$*" >"$YARN_RECEIPT"
+exit "${YARN_FAIL:-0}"
+EOF
+chmod +x "$yarn_bin/yarn"
+for attempt in first repeat; do
+  (
+    cd "$yarn_worktree"
+    PATH="$yarn_bin:$PATH" STACKSTEAD_WORKTREE="$yarn_worktree" \
+      YARN_LINK_FOLDER=/not-the-fixture-registry YARN_RECEIPT="$tmp/yarn-$attempt.actual" YARN_FAIL=0 \
+      sh "$recipe"
+  ) >"$tmp/yarn.output" 2>&1
+  printf '%s\n' "$yarn_worktree" "$yarn_worktree/.stackstead/yarn-links" \
+    "install --frozen-lockfile --link-folder $yarn_worktree/.stackstead/yarn-links" \
+    >"$tmp/yarn.expected"
+  diff -u "$tmp/yarn.expected" "$tmp/yarn-$attempt.actual"
+  [[ -d "$yarn_worktree/.stackstead/yarn-links" ]]
+done
+for failure in wrong-cwd missing-worktree root-symlink link-file command; do
+  workspace="$tmp/yarn-$failure"
+  mkdir "$workspace"
+  receipt="$workspace/yarn-called"
+  if (
+    export PATH="$yarn_bin:$PATH" STACKSTEAD_WORKTREE="$workspace"
+    export YARN_RECEIPT="$receipt" YARN_FAIL=0
+    cd "$workspace"
+    case "$failure" in
+      wrong-cwd) cd "$tmp" ;;
+      missing-worktree) unset STACKSTEAD_WORKTREE ;;
+      root-symlink) ln -s "$workspace/missing-target" .stackstead ;;
+      link-file) mkdir .stackstead; : >.stackstead/yarn-links ;;
+      command) export YARN_FAIL=1 ;;
+    esac
+    sh "$recipe"
+  ) >"$workspace/output" 2>&1; then
+    printf 'error: Yarn recipe accepted %s\n' "$failure" >&2
+    exit 1
+  fi
+  if [[ "$failure" = command ]]; then
+    [[ -e "$receipt" ]]
+  else
+    [[ ! -e "$receipt" ]]
+  fi
+  [[ ! -e "$workspace/missing-target" ]]
+done
 
 printf 'Delivery contract tests passed.\n'

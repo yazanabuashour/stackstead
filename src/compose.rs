@@ -3,10 +3,12 @@ mod claim;
 mod contract;
 mod docker;
 mod model;
+mod observations;
 mod ownership;
 mod ownership_model;
 mod planning;
 mod ports;
+mod requirements;
 mod resource_config;
 mod resources;
 mod runtime;
@@ -24,6 +26,7 @@ pub use ownership::{
 };
 pub use planning::plan_at;
 pub use ports::{all_interface_ports_in_file, fixed_ports_in_file, unbound_ports_in_file};
+pub use requirements::resolve_requirements;
 pub use runtime::{down_volumes, stop, up};
 pub use services::{
     endpoint_is_published, ensure_endpoint_published, follow_logs, is_running, logs,
@@ -48,10 +51,7 @@ use ownership::render_ownership_override;
 #[cfg(test)]
 use runtime_names::expected_runtime_names;
 #[cfg(test)]
-use services::{
-    endpoint_matches, endpoint_port, parse_service_observations, running_service_output,
-    service_running_args,
-};
+use services::{endpoint_matches, running_service_output, service_running_args};
 #[cfg(test)]
 use yaml::{port_declarations, yaml_field};
 

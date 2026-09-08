@@ -1,7 +1,7 @@
 use std::{error::Error, fmt, path::PathBuf};
 
 pub const CONFIG_FILE: &str = "stackstead.yaml";
-pub const CONFIG_VERSION: &str = "1";
+pub const CONFIG_VERSION: &str = "2";
 
 #[derive(Debug)]
 pub enum ConfigError {

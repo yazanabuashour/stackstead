@@ -12,10 +12,10 @@ pub fn prepare_owned_source_removal(manifest: &StacksteadManifest) -> anyhow::Re
     if manifest.source_ownership != crate::manifest::SourceOwnership::Stackstead {
         return Ok(());
     }
-    if !runtime_claim_exists(manifest)? {
+    if !runtime_claim_exists(manifest, None)? {
         return Ok(());
     }
-    verify_runtime_claim(manifest)?;
+    verify_runtime_claim(manifest, None)?;
     if !manifest.worktree.is_dir() {
         anyhow::bail!(
             "managed worktree is missing at {}",
@@ -40,7 +40,7 @@ pub fn prepare_owned_source_removal(manifest: &StacksteadManifest) -> anyhow::Re
         "--format".into(),
         "{{.ID}}".into(),
     ];
-    let existing = String::from_utf8(run_docker_control(manifest, &list)?.stdout)?;
+    let existing = String::from_utf8(run_docker_control(manifest, &list, None)?.stdout)?;
     let existing = existing
         .lines()
         .filter(|line| !line.trim().is_empty())
@@ -52,7 +52,7 @@ pub fn prepare_owned_source_removal(manifest: &StacksteadManifest) -> anyhow::Re
         );
     }
     if let Some(identifier) = existing.first() {
-        verify_resource_label(manifest, "container", identifier, ".Config.Labels")?;
+        verify_resource_label(manifest, "container", identifier, ".Config.Labels", None)?;
         run_docker_control(
             manifest,
             &[
@@ -61,6 +61,7 @@ pub fn prepare_owned_source_removal(manifest: &StacksteadManifest) -> anyhow::Re
                 "--force".into(),
                 (*identifier).into(),
             ],
+            None,
         )?;
     }
     #[cfg(unix)]
@@ -97,7 +98,7 @@ pub fn prepare_owned_source_removal(manifest: &StacksteadManifest) -> anyhow::Re
         uid.to_string(),
         gid.to_string(),
     ]);
-    run_docker_control(manifest, &args)?;
+    run_docker_control(manifest, &args, None)?;
     Ok(())
 }
 
@@ -122,58 +123,69 @@ pub(super) fn ensure_runtime_claim(manifest: &StacksteadManifest) -> anyhow::Res
         format!("{RUNTIME_TOKEN_LABEL}={}", manifest.runtime_token),
         runtime_claim_name(manifest),
     ];
-    run_docker_control(manifest, &args)?;
+    run_docker_control(manifest, &args, None)?;
     Ok(())
 }
 
-pub(super) fn verify_runtime_claim(manifest: &StacksteadManifest) -> anyhow::Result<()> {
-    verify_resource_label(manifest, "volume", &runtime_claim_name(manifest), ".Labels").map_err(
-        |error| {
-            anyhow::anyhow!(
-                "Compose namespace `{}` is not owned by runtime token {}: {error}",
-                manifest.compose_project,
-                manifest.runtime_token
-            )
-        },
+pub(super) fn verify_runtime_claim(
+    manifest: &StacksteadManifest,
+    deadline: Option<std::time::Instant>,
+) -> anyhow::Result<()> {
+    verify_resource_label(
+        manifest,
+        "volume",
+        &runtime_claim_name(manifest),
+        ".Labels",
+        deadline,
     )
+    .map_err(|error| {
+        anyhow::anyhow!(
+            "Compose namespace `{}` is not owned by runtime token {}: {error}",
+            manifest.compose_project,
+            manifest.runtime_token
+        )
+    })
 }
 
 pub fn verify_owned_runtime(manifest: &StacksteadManifest) -> anyhow::Result<()> {
-    if !runtime_claim_exists(manifest)? {
+    if !runtime_claim_exists(manifest, None)? {
         anyhow::bail!(
             "Compose namespace `{}` has no Stackstead ownership claim",
             manifest.compose_project
         );
     }
-    verify_runtime_claim(manifest)?;
-    verify_runtime_resources(manifest)?;
+    verify_runtime_claim(manifest, None)?;
+    verify_runtime_resources(manifest, None)?;
     Ok(())
 }
 
 pub fn remove_runtime_claim(manifest: &StacksteadManifest) -> anyhow::Result<()> {
-    if !runtime_claim_exists(manifest)? {
+    if !runtime_claim_exists(manifest, None)? {
         return Ok(());
     }
-    verify_runtime_claim(manifest)?;
-    if verify_labeled_runtime_resources(manifest)? {
+    verify_runtime_claim(manifest, None)?;
+    if verify_labeled_runtime_resources(manifest, None)? {
         anyhow::bail!(
             "Compose namespace `{}` still has Stackstead runtime resources; refusing to remove its ownership claim",
             manifest.compose_project
         );
     }
     let args = vec!["volume".into(), "rm".into(), runtime_claim_name(manifest)];
-    run_docker_control(manifest, &args)?;
+    run_docker_control(manifest, &args, None)?;
     Ok(())
 }
 
-pub(super) fn runtime_claim_exists(manifest: &StacksteadManifest) -> anyhow::Result<bool> {
+pub(super) fn runtime_claim_exists(
+    manifest: &StacksteadManifest,
+    deadline: Option<std::time::Instant>,
+) -> anyhow::Result<bool> {
     let args = vec![
         "volume".into(),
         "ls".into(),
         "--format".into(),
         "{{.Name}}".into(),
     ];
-    let output = run_docker_control(manifest, &args)?;
+    let output = run_docker_control(manifest, &args, deadline)?;
     let names = String::from_utf8(output.stdout)?;
     Ok(names
         .lines()

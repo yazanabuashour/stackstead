@@ -15,8 +15,7 @@ fn finds_common_fixed_port_forms_but_not_variables() -> anyhow::Result<()> {
     );
     assert_eq!(
         ports.iter().map(|port| port.host_port).collect::<Vec<_>>(),
-        [3000, 4000, 5000, 6000],
-        "test contract values differ"
+        [3000, 4000, 5000, 6000]
     );
     Ok(())
 }
@@ -32,8 +31,7 @@ fn reports_ports_exposed_on_all_host_interfaces() -> anyhow::Result<()> {
     .test()?;
     assert_eq!(
         all_interface_ports_in_file(&file).test()?,
-        [("web".into(), 80), ("db".into(), 5432)],
-        "test contract values differ"
+        [("web".into(), 80), ("db".into(), 5432)]
     );
     Ok(())
 }

@@ -29,13 +29,9 @@ fn exec_targets_one_owned_running_service_and_preserves_command_arguments() -> a
         .code(23);
     assert_eq!(
         output_text(&executed.get_output().stdout)?,
-        "service=<web>\nargument=<program with spaces>\nargument=<--flag>\nargument=<two words>\n",
-        "test contract values differ"
+        "service=<web>\nargument=<program with spaces>\nargument=<--flag>\nargument=<two words>\n"
     );
-    assert!(
-        fake_state.join("exec-ran").is_file(),
-        "test contract condition failed"
-    );
+    assert!(fake_state.join("exec-ran").is_file());
     fs::remove_file(fake_state.join("exec-ran")).test()?;
     assert_exec_rejects_json(&project, &manifest)?;
     assert_exec_rejects_invalid_targets(&project, &manifest, &path, &fake_state)?;

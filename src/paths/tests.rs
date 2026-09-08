@@ -11,8 +11,7 @@ fn generated_paths_cannot_escape() -> anyhow::Result<()> {
     (safe_generated_path(Path::new("/tmp/cell/source"), Path::new("../other"))).test_err()?;
     assert_eq!(
         safe_generated_path(Path::new("/tmp/cell/source"), Path::new(".stackstead/.env")).test()?,
-        Path::new("/tmp/cell/source/.stackstead/.env"),
-        "test contract values differ"
+        Path::new("/tmp/cell/source/.stackstead/.env")
     );
     Ok(())
 }
@@ -47,6 +46,7 @@ fn destroy_requires_exact_layout() -> anyhow::Result<()> {
         project: "demo".into(),
         branch: "cell".into(),
         base: "main".into(),
+        readiness: crate::readiness::Contract::Unconfigured {},
         source_ownership: SourceOwnership::Stackstead,
         repo_root: "/tmp/repo".into(),
         project_state_root: "/tmp/state".into(),
@@ -100,6 +100,7 @@ fn destroy_rejects_a_symlinked_project_state_directory() -> anyhow::Result<()> {
         project: "demo".into(),
         branch: "cell".into(),
         base: "main".into(),
+        readiness: crate::readiness::Contract::Unconfigured {},
         source_ownership: SourceOwnership::Stackstead,
         repo_root: directory.path().join("repo"),
         project_state_root: state_root.clone(),

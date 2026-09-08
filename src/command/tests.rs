@@ -1,5 +1,7 @@
 use super::*;
 use crate::test_support::{TestResultErrorExt as _, TestResultExt as _};
+#[cfg(target_os = "linux")]
+use std::thread;
 
 #[cfg(unix)]
 #[test]
@@ -12,18 +14,9 @@ fn command_failures_redact_secret_assignments() -> anyhow::Result<()> {
         .test_err()?
         .to_string();
 
-    assert!(
-        error.contains("command failed: sh"),
-        "test contract condition failed"
-    );
-    assert!(
-        error.contains("AUTH_TOKEN=[REDACTED]"),
-        "test contract condition failed"
-    );
-    assert!(
-        !error.contains("stderr-secret"),
-        "test contract condition failed"
-    );
+    assert!(error.contains("command failed: sh"));
+    assert!(error.contains("AUTH_TOKEN=[REDACTED]"));
+    assert!(!error.contains("stderr-secret"));
     Ok(())
 }
 
@@ -34,8 +27,7 @@ fn redacts_quoted_and_multiline_assignments_without_reformatting_diagnostics() -
 
     assert_eq!(
         redact(input),
-        "before  AUTH_TOKEN=[REDACTED]  after\n'API_KEY=[REDACTED]'\nAPI_TOKEN+=[REDACTED]\nAPI_TOKEN[0]=[REDACTED]\nPUBLIC_NAME=visible\n",
-        "test contract values differ"
+        "before  AUTH_TOKEN=[REDACTED]  after\n'API_KEY=[REDACTED]'\nAPI_TOKEN+=[REDACTED]\nAPI_TOKEN[0]=[REDACTED]\nPUBLIC_NAME=visible\n"
     );
     Ok(())
 }
@@ -51,15 +43,8 @@ fn redacts_supported_sensitive_headers_case_insensitively() -> anyhow::Result<()
     ] {
         let diagnostic = format!("prefix {header} \t: Bearer private-value\nnext");
         let redacted = redact(&diagnostic);
-        assert_eq!(
-            redacted,
-            format!("prefix {header} \t: [REDACTED]\nnext"),
-            "test contract values differ"
-        );
-        assert!(
-            !redacted.contains("private-value"),
-            "test contract condition failed"
-        );
+        assert_eq!(redacted, format!("prefix {header} \t: [REDACTED]\nnext"));
+        assert!(!redacted.contains("private-value"));
     }
     Ok(())
 }
@@ -68,13 +53,11 @@ fn redacts_supported_sensitive_headers_case_insensitively() -> anyhow::Result<()
 fn redacts_credential_url_userinfo_but_preserves_the_endpoint() -> anyhow::Result<()> {
     assert_eq!(
         redact("fatal: https://alice:password@example.invalid/repo?retry=1"),
-        "fatal: https://[REDACTED]@example.invalid/repo?retry=1",
-        "test contract values differ"
+        "fatal: https://[REDACTED]@example.invalid/repo?retry=1"
     );
     assert_eq!(
         redact("fetch https://access-token@example.invalid/repo"),
-        "fetch https://[REDACTED]@example.invalid/repo",
-        "test contract values differ"
+        "fetch https://[REDACTED]@example.invalid/repo"
     );
     Ok(())
 }
@@ -90,14 +73,9 @@ fn environment_aware_redaction_masks_only_nonempty_known_secret_values() -> anyh
 
     assert_eq!(
         redact_with_env("long=secret-suffix short=secret port=39000", &env),
-        "long=[REDACTED] short=[REDACTED] port=39000",
-        "test contract values differ"
+        "long=[REDACTED] short=[REDACTED] port=39000"
     );
-    assert_eq!(
-        redact_with_env("ordinary text", &env),
-        "ordinary text",
-        "test contract values differ"
-    );
+    assert_eq!(redact_with_env("ordinary text", &env), "ordinary text");
     Ok(())
 }
 
@@ -105,7 +83,7 @@ fn environment_aware_redaction_masks_only_nonempty_known_secret_values() -> anyh
 fn harmless_diagnostics_remain_byte_for_byte_intact() -> anyhow::Result<()> {
     let input =
         "ready  PUBLIC_URL=https://example.invalid/path\r\nX-Request-Id: abc\nCookieJar: enabled\n";
-    assert_eq!(redact(input), input, "test contract values differ");
+    assert_eq!(redact(input), input);
     Ok(())
 }
 
@@ -121,22 +99,10 @@ fn command_failures_use_header_and_environment_aware_redaction() -> anyhow::Resu
         .test_err()?
         .to_string();
 
-    assert!(
-        error.contains("Authorization: [REDACTED]"),
-        "test contract condition failed"
-    );
-    assert!(
-        error.contains(">&2; exit"),
-        "test contract condition failed"
-    );
-    assert!(
-        !error.contains("header-secret"),
-        "test contract condition failed"
-    );
-    assert!(
-        !error.contains("known-value"),
-        "test contract condition failed"
-    );
+    assert!(error.contains("Authorization: [REDACTED]"));
+    assert!(error.contains(">&2; exit"));
+    assert!(!error.contains("header-secret"));
+    assert!(!error.contains("known-value"));
     Ok(())
 }
 
@@ -151,7 +117,7 @@ fn configured_status_kills_a_command_at_its_deadline() -> anyhow::Result<()> {
         Duration::from_millis(30),
     )
     .test()?;
-    assert!(status.is_none(), "test contract condition failed");
+    assert!(status.is_none());
     Ok(())
 }
 
@@ -170,8 +136,7 @@ fn configured_timeout_kills_descendants_in_the_process_group() -> anyhow::Result
             Duration::from_millis(100),
         )
         .test()?
-        .is_none(),
-        "test contract condition failed"
+        .is_none()
     );
     let pid = std::fs::read_to_string(pid_file)
         .test()?
@@ -204,8 +169,7 @@ fn configured_success_also_kills_background_descendants() -> anyhow::Result<()> 
         )
         .test()?
         .test()?
-        .success(),
-        "test contract condition failed"
+        .success()
     );
     let pid = std::fs::read_to_string(pid_file)
         .test()?

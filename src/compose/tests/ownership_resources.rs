@@ -27,22 +27,10 @@ fn ownership_and_runtime_names_accept_null_name_resets() -> anyhow::Result<()> {
             .map(|(_, _, _, names)| names)
             .test()
     };
-    assert!(
-        names("container")?.contains("demo-a-b123-web-1"),
-        "test contract condition failed"
-    );
-    assert!(
-        !names("container")?.contains("custom-web"),
-        "test contract condition failed"
-    );
-    assert!(
-        names("volume")?.contains("demo-a-b123_data"),
-        "test contract condition failed"
-    );
-    assert!(
-        names("network")?.contains("demo-a-b123_backend"),
-        "test contract condition failed"
-    );
+    assert!(names("container")?.contains("demo-a-b123-web-1"));
+    assert!(!names("container")?.contains("custom-web"));
+    assert!(names("volume")?.contains("demo-a-b123_data"));
+    assert!(names("network")?.contains("demo-a-b123_backend"));
     Ok(())
 }
 
@@ -80,18 +68,9 @@ fn ownership_override_supports_later_volume_overlays_and_external_volumes() -> a
     let mut manifest = manifest()?;
     manifest.compose_files = vec![primary, overlay];
     let rendered = render_ownership_override(&manifest).test()?;
-    assert!(
-        rendered.contains("cache:"),
-        "test contract condition failed"
-    );
-    assert!(
-        !rendered.contains("shared:"),
-        "test contract condition failed"
-    );
-    assert!(
-        !rendered.contains("default:"),
-        "test contract condition failed"
-    );
+    assert!(rendered.contains("cache:"));
+    assert!(!rendered.contains("shared:"));
+    assert!(!rendered.contains("default:"));
     Ok(())
 }
 

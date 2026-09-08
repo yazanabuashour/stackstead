@@ -2,52 +2,32 @@ use std::{
     collections::BTreeMap,
     path::Path,
     process::{Command, ExitStatus, Output, Stdio},
-    thread,
     time::{Duration, Instant},
 };
 
-use crate::error::StacksteadError;
+mod runner;
+pub use runner::{run, run_sanitized, run_sanitized_until};
 
-pub fn run(
-    program: &str,
-    args: &[String],
-    cwd: &Path,
-    env: &BTreeMap<String, String>,
-) -> anyhow::Result<Output> {
-    run_sanitized(program, args, cwd, env, std::iter::empty::<&str>())
+#[cfg(unix)]
+mod process;
+#[cfg(target_os = "macos")]
+pub use process::leader_is_alone;
+#[cfg(unix)]
+pub use process::{observe as observe_child_exit, require_waitable_children};
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+mod captured;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+use captured::{output as captured_until, status as status_until};
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn captured_until(_command: &mut Command, _deadline: Instant) -> anyhow::Result<Output> {
+    anyhow::bail!("bounded captured commands require Linux or macOS")
 }
 
-pub fn run_sanitized<'a>(
-    program: &str,
-    args: &[String],
-    cwd: &Path,
-    env: &BTreeMap<String, String>,
-    removed: impl IntoIterator<Item = &'a str>,
-) -> anyhow::Result<Output> {
-    tracing::debug!(program, arg_count = args.len(), cwd = %cwd.display(), "running external command");
-    let mut command = Command::new(program);
-    command.args(args).current_dir(cwd);
-    let mut redaction_env = std::env::vars().collect::<BTreeMap<_, _>>();
-    for key in removed {
-        command.env_remove(key);
-        redaction_env.remove(key);
-    }
-    redaction_env.extend(env.clone());
-    let output = command
-        .envs(env)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
-        .map_err(|error| anyhow::anyhow!("could not run {program}: {error}"))?;
-    if !output.status.success() {
-        return Err(StacksteadError::CommandFailed {
-            command: redact_with_env(&display_command(program, args), &redaction_env),
-            stderr: redact_with_env(&String::from_utf8_lossy(&output.stderr), &redaction_env),
-        }
-        .into());
-    }
-    Ok(output)
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn status_until(_command: &mut Command, _deadline: Instant) -> anyhow::Result<Option<ExitStatus>> {
+    anyhow::bail!("bounded command status requires Linux or macOS")
 }
 
 pub fn status_sanitized<'a>(
@@ -98,87 +78,10 @@ pub fn configured_status_with_timeout(
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        configured.process_group(0);
-    }
-    let mut child = configured
-        .spawn()
-        .map_err(|error| anyhow::anyhow!("could not run {program}: {error}"))?;
     let deadline = Instant::now()
         .checked_add(timeout)
         .ok_or_else(|| anyhow::anyhow!("command timeout exceeds the supported Instant range"))?;
-    loop {
-        if let Some(status) = child.try_wait()? {
-            terminate_descendants_after_exit(&child)?;
-            return Ok(Some(status));
-        }
-        if Instant::now() >= deadline {
-            terminate_process_tree(&mut child)?;
-            return Ok(None);
-        }
-        thread::sleep(Duration::from_millis(25).min(timeout));
-    }
-}
-
-#[cfg(unix)]
-pub fn terminate_descendants_after_exit(child: &std::process::Child) -> std::io::Result<()> {
-    kill_process_group(child)
-}
-
-#[cfg(windows)]
-pub(crate) fn terminate_descendants_after_exit(
-    child: &mut std::process::Child,
-) -> std::io::Result<()> {
-    drop(
-        Command::new("taskkill")
-            .args(["/PID", &child.id().to_string(), "/T", "/F"])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status(),
-    );
-    Ok(())
-}
-
-#[cfg(unix)]
-fn terminate_process_tree(child: &mut std::process::Child) -> std::io::Result<()> {
-    kill_process_group(child)?;
-    child.wait().map(|_| ())
-}
-
-#[cfg(unix)]
-fn kill_process_group(child: &std::process::Child) -> std::io::Result<()> {
-    // The child was spawned as its own process-group leader above, so
-    // signaling its group targets only this command and its descendants.
-    match rustix::process::kill_process_group(
-        rustix::process::Pid::from_child(child),
-        rustix::process::Signal::KILL,
-    ) {
-        Ok(()) | Err(rustix::io::Errno::SRCH) => Ok(()),
-        Err(error) => Err(error.into()),
-    }
-}
-
-#[cfg(windows)]
-fn terminate_process_tree(child: &mut std::process::Child) -> std::io::Result<()> {
-    terminate_windows_process_tree(child)
-}
-
-#[cfg(windows)]
-fn terminate_windows_process_tree(child: &mut std::process::Child) -> std::io::Result<()> {
-    let killed = Command::new("taskkill")
-        .args(["/PID", &child.id().to_string(), "/T", "/F"])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .is_ok_and(|status| status.success());
-    if !killed {
-        child.kill()?;
-    }
-    child.wait().map(|_| ())
+    status_until(&mut configured, deadline)
 }
 
 fn configured_parts(command: &str, shell: bool) -> anyhow::Result<Option<(String, Vec<String>)>> {

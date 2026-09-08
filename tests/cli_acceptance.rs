@@ -75,6 +75,7 @@ struct StacksteadManifest {
     port_lease_state_dir: Option<PathBuf>,
     compose_project: String,
     compose_files: Vec<PathBuf>,
+    readiness: Value,
     ports: std::collections::BTreeMap<String, u16>,
     container_ports: std::collections::BTreeMap<String, u16>,
     urls: std::collections::BTreeMap<String, String>,
@@ -95,7 +96,7 @@ impl StacksteadManifest {
             .test_context("parse manifest fixture")
     }
 
-    fn save_atomic(&self) -> anyhow::Result<()> {
+    fn write_fixture(&self) -> anyhow::Result<()> {
         fs::write(
             self.manifest_path(),
             serde_json::to_vec_pretty(self).test()?,
@@ -218,6 +219,9 @@ mod lifecycle_locks;
 mod open;
 #[path = "cli_acceptance/port_leases.rs"]
 mod port_leases;
+#[cfg(unix)]
+#[path = "cli_acceptance/readiness.rs"]
+mod readiness;
 #[path = "cli_acceptance/repair_and_recovery.rs"]
 mod repair_and_recovery;
 #[path = "cli_acceptance/run.rs"]
@@ -236,3 +240,6 @@ mod source_creation;
 mod source_recovery;
 #[path = "cli_acceptance/state_safety.rs"]
 mod state_safety;
+#[cfg(unix)]
+#[path = "cli_acceptance/supervision.rs"]
+mod supervision;

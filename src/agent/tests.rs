@@ -43,6 +43,7 @@ fn manifest(root: &Path) -> anyhow::Result<StacksteadManifest> {
         event_log: state_dir.join("events.jsonl"),
         env_keys: vec![],
         status: ManifestStatus::default(),
+        readiness: crate::readiness::Contract::Unconfigured {},
         database: None,
         created_at: Utc::now(),
         updated_at: Utc::now(),
@@ -82,7 +83,7 @@ exit "$3"
         .output()
         .test()?;
 
-    assert_eq!(exit_code(output.status), 23, "test contract values differ");
+    assert_eq!(exit_code(output.status), 23);
     assert_eq!(
         String::from_utf8(output.stdout).test()?,
         format!(
@@ -90,8 +91,7 @@ exit "$3"
             manifest.worktree.display(),
             manifest.manifest_path().display(),
             manifest.agent_context.display()
-        ),
-        "test contract values differ"
+        )
     );
     Ok(())
 }
@@ -102,7 +102,7 @@ fn signal_status_uses_conventional_shell_exit_code() -> anyhow::Result<()> {
     use std::os::unix::process::ExitStatusExt;
 
     let status = ExitStatus::from_raw(9);
-    assert_eq!(exit_code(status), 137, "test contract values differ");
+    assert_eq!(exit_code(status), 137);
     Ok(())
 }
 

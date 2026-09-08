@@ -18,14 +18,8 @@ fn missing_lock_contract_is_rejected_without_recreation() -> anyhow::Result<()> 
         .iter()
         .filter_map(|item| item["code"].as_str())
         .collect::<BTreeSet<_>>();
-    assert!(
-        codes.contains("lock.stackstead.missing"),
-        "test contract condition failed"
-    );
-    assert!(
-        codes.contains("lock.run.missing"),
-        "test contract condition failed"
-    );
+    assert!(codes.contains("lock.stackstead.missing"));
+    assert!(codes.contains("lock.run.missing"));
     stackstead(&project.repo)
         .args(["run", "run-legacy", "--", "true"])
         .assert()
@@ -34,14 +28,8 @@ fn missing_lock_contract_is_rejected_without_recreation() -> anyhow::Result<()> 
         .args(["exec", "run-legacy", "web", "--", "true"])
         .assert()
         .failure();
-    assert!(
-        !run_cell.state_dir.join("lock").exists(),
-        "test contract condition failed"
-    );
-    assert!(
-        !run_cell.state_dir.join("run.lock").exists(),
-        "test contract condition failed"
-    );
+    assert!(!run_cell.state_dir.join("lock").exists());
+    assert!(!run_cell.state_dir.join("run.lock").exists());
 
     let destroy_cell = project.create("destroy-legacy")?;
     fs::remove_file(destroy_cell.state_dir.join("lock"))
@@ -58,18 +46,9 @@ fn missing_lock_contract_is_rejected_without_recreation() -> anyhow::Result<()> 
         .args(["destroy", "destroy-legacy", "--yes"])
         .assert()
         .failure();
-    assert!(
-        destroy_cell.stackstead_root.exists(),
-        "test contract condition failed"
-    );
-    assert!(
-        !destroy_cell.state_dir.join("lock").exists(),
-        "test contract condition failed"
-    );
-    assert!(
-        !destroy_cell.state_dir.join("run.lock").exists(),
-        "test contract condition failed"
-    );
+    assert!(destroy_cell.stackstead_root.exists());
+    assert!(!destroy_cell.state_dir.join("lock").exists());
+    assert!(!destroy_cell.state_dir.join("run.lock").exists());
     Ok(())
 }
 
@@ -116,21 +95,13 @@ fn post_create_holds_the_cell_lock_after_manifest_publication() -> anyhow::Resul
         "second create did not wait"
     );
     fs::remove_file(&release).test_context("release post-create hook")?;
-    assert!(
-        create.wait().test_context("wait for create")?.success(),
-        "test contract condition failed"
-    );
+    assert!(create.wait().test_context("wait for create")?.success());
     assert!(
         second
             .wait()
             .test_context("wait for second create")?
-            .success(),
-        "test contract condition failed"
+            .success()
     );
-    assert_eq!(
-        state_stackstead_directories(&project)?.len(),
-        2,
-        "test contract values differ"
-    );
+    assert_eq!(state_stackstead_directories(&project)?.len(), 2);
     Ok(())
 }

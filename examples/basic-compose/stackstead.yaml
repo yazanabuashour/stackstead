@@ -1,4 +1,4 @@
-version: "1"
+version: "2"
 kind: StacksteadProject
 
 project:
@@ -15,7 +15,10 @@ runtime:
   provider: docker-compose
   files:
     - docker-compose.yml
-  project_name_template: "{{ project.name }}-{{ stackstead.id }}"
+  readiness:
+    required:
+      web: long-running
+      postgres: long-running
 
 resources:
   ports:

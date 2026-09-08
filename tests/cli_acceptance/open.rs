@@ -28,8 +28,7 @@ fn open_refuses_a_stopped_runtime_before_invoking_the_browser() -> anyhow::Resul
         .assert()
         .failure();
     assert!(
-        output_text(&rejected.get_output().stderr)?.contains("has no Stackstead ownership claim"),
-        "test contract condition failed"
+        output_text(&rejected.get_output().stderr)?.contains("has no Stackstead ownership claim")
     );
     assert!(
         !marker.exists(),
@@ -96,9 +95,6 @@ exit 97
         }
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
-    assert_eq!(
-        opened_url, manifest.urls["web"],
-        "test contract values differ"
-    );
+    assert_eq!(opened_url, manifest.urls["web"]);
     Ok(())
 }

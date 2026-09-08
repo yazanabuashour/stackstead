@@ -56,16 +56,22 @@ fn observe_live(
     manifest: &StacksteadManifest,
     warnings: &mut Vec<String>,
 ) -> LiveStatus {
-    let (runtime_status, services) = observe_runtime(manifest, warnings);
+    let runtime = super::observe_runtime(manifest);
+    warnings.extend(runtime.issues.iter().cloned());
+    let runtime_status = runtime.status();
     let database_status = manifest
         .database
         .as_ref()
-        .map(|_| database::live_status(manifest, runtime_status));
+        .map(|database| database::live_status(manifest, runtime.service_status(&database.service)));
     let database_reachable = manifest.database.as_ref().map(|database| {
         database::reachable(&database.host, database.port, Duration::from_millis(250))
     });
     let health_healthy = if runtime_status == ComponentStatus::Running {
-        match observed_passive_health(config, manifest, &services) {
+        match observed_passive_health(
+            config,
+            manifest,
+            runtime.services.as_deref().unwrap_or_default(),
+        ) {
             Ok(status) => status,
             Err(error) => {
                 warnings.push(format!(
@@ -78,31 +84,10 @@ fn observe_live(
         None
     };
     LiveStatus {
-        runtime_status,
-        services,
+        runtime,
         database_reachable,
         database_status,
         health_healthy,
-    }
-}
-
-fn observe_runtime(
-    manifest: &StacksteadManifest,
-    warnings: &mut Vec<String>,
-) -> (ComponentStatus, Vec<compose::ServiceObservation>) {
-    match compose::service_observations(manifest) {
-        Ok(services) => {
-            let status = if services.iter().any(|service| service.state == "running") {
-                ComponentStatus::Running
-            } else {
-                ComponentStatus::Stopped
-            };
-            (status, services)
-        }
-        Err(error) => {
-            warnings.push(format!("could not inspect Docker runtime: {error}"));
-            (ComponentStatus::Unknown, vec![])
-        }
     }
 }
 
@@ -136,14 +121,14 @@ fn effective_status(
     warnings: &mut Vec<String>,
 ) -> EffectiveStatus {
     let runtime = EffectiveComponent {
-        status: live.runtime_status,
+        status: live.runtime.status(),
         basis: StatusBasis::Live,
     };
     let database = live.database_status.map(|status| EffectiveComponent {
         status,
         basis: StatusBasis::Live,
     });
-    let health = effective_health(config, manifest, live.health_healthy);
+    let health = effective_health(config, manifest, live);
     push_status_divergence(warnings, "runtime", manifest.status.runtime, runtime);
     if let Some(database) = database {
         push_status_divergence(warnings, "database", manifest.status.database, database);
@@ -175,9 +160,21 @@ fn effective_status(
 fn effective_health(
     config: &StacksteadConfig,
     manifest: &StacksteadManifest,
-    health_healthy: Option<bool>,
+    live: &LiveStatus,
 ) -> EffectiveComponent {
-    match health_healthy {
+    if config.health.checks.is_empty() {
+        return EffectiveComponent {
+            status: ComponentStatus::Unknown,
+            basis: StatusBasis::Unconfigured,
+        };
+    }
+    if live.runtime.running() != Some(true) {
+        return EffectiveComponent {
+            status: ComponentStatus::Unknown,
+            basis: StatusBasis::Lifecycle,
+        };
+    }
+    match live.health_healthy {
         Some(healthy) => EffectiveComponent {
             status: if healthy {
                 ComponentStatus::Ready
@@ -186,9 +183,7 @@ fn effective_health(
             },
             basis: StatusBasis::Live,
         },
-        None if config.health.checks.is_empty()
-            || config.health.checks.iter().any(|check| check.url.is_none()) =>
-        {
+        None if config.health.checks.iter().any(|check| check.url.is_none()) => {
             EffectiveComponent {
                 status: manifest.status.health,
                 basis: StatusBasis::Recorded,

@@ -137,14 +137,106 @@ if STACKSTEAD_HOMEPAGE='https://example.invalid/a\b' \
     fail "formula renderer accepted an unsafe homepage"
 fi
 
+docker_bin="$tmp/docker-bin"
+mkdir "$docker_bin"
+printf '%s\n' '#!/bin/sh' 'case "$*" in "compose version") ;; "context show") echo fixture-context ;; *) exit 1 ;; esac' >"$docker_bin/docker"
+printf '%s\n' '#!/bin/sh' 'exit 99' >"$docker_bin/stackstead"
+chmod +x "$docker_bin/docker" "$docker_bin/stackstead"
 existing_destination="$tmp/existing-docker-destination"
 mkdir "$existing_destination"
 printf 'preserve\n' > "$existing_destination/marker"
-if STACKSTEAD_DOCKER_TEST_DIR="$existing_destination" \
-    "$root/scripts/docker-integration.sh" >/dev/null 2>&1; then
+if PATH="$docker_bin:$PATH" STACKSTEAD_BIN="$docker_bin/stackstead" \
+    STACKSTEAD_DOCKER_TEST_DIR="$existing_destination" \
+    "$root/scripts/docker-integration.sh" >"$tmp/docker.out" 2>&1; then
     fail "Docker integration accepted an existing cleanup destination"
 fi
+grep -q 'destination already exists' "$tmp/docker.out" || fail "wrong destination rejection"
 [ "$(cat "$existing_destination/marker")" = preserve ] ||
     fail "Docker integration removed an existing destination"
+
+for sibling_kind in directory file dangling-symlink; do
+    destination="$tmp/sibling-$sibling_kind"
+    sibling="$tmp/.stackstead-state-sibling-$sibling_kind"
+    case "$sibling_kind" in
+        directory) mkdir "$sibling"; printf 'preserve\n' >"$sibling/marker" ;;
+        file) printf 'preserve\n' >"$sibling" ;;
+        dangling-symlink) ln -s "$tmp/missing-state" "$sibling" ;;
+    esac
+    for entry in prepare integration; do
+        if (
+            export PATH="$docker_bin:$PATH" STACKSTEAD_BIN="$docker_bin/stackstead"
+            if [ "$entry" = prepare ]; then
+                "$root/examples/three-agent-demo/demo.sh" prepare "$destination"
+            else
+                STACKSTEAD_DOCKER_TEST_DIR="$destination" "$root/scripts/docker-integration.sh"
+            fi
+        ) >"$tmp/docker.out" 2>&1; then
+            fail "$entry accepted a pre-existing sibling $sibling_kind"
+        fi
+        grep -q 'sibling state already exists' "$tmp/docker.out" || fail "wrong sibling rejection"
+        [ ! -e "$destination" ] || fail "$entry created the destination before sibling refusal"
+        case "$sibling_kind" in
+            directory) [ "$(cat "$sibling/marker")" = preserve ] || fail "sibling content changed" ;;
+            file) [ "$(cat "$sibling")" = preserve ] || fail "sibling file changed" ;;
+            dangling-symlink) [ "$(readlink "$sibling")" = "$tmp/missing-state" ] || fail "sibling link changed" ;;
+        esac
+    done
+done
+
+# A printed cleanup retry must preserve connection selection even in a different shell.
+cat >"$docker_bin/docker" <<'EOF'
+#!/bin/sh
+case "$*" in
+    'compose version') ;;
+    'context show') echo fixture-context ;;
+    *)
+        printf '%s\n' "${DOCKER_HOST-unset}" "${DOCKER_CONTEXT-unset}" "$DOCKER_CONFIG" \
+          "$HOME" "$DOCKER_TLS_VERIFY" "$DOCKER_CERT_PATH" >"$FAKE_CONNECTION_RECEIPT"
+        exit 19 ;;
+esac
+EOF
+cat >"$docker_bin/stackstead" <<'EOF'
+#!/bin/sh
+if [ "$*" = '--json create alpha' ]; then
+    jq -n --arg root "$PWD" '{kind:"StacksteadChange",version:"1",action:"created",
+      stackstead:{stackstead_id:"alpha-a111",worktree:$root,compose_project:"demo-alpha-a111",
+      files:{manifest:($root + "/fake-manifest.json")}}}'
+else
+    exit 19
+fi
+EOF
+for connection in host context; do
+    destination="$tmp/retry-$connection"
+    if (
+        export PATH="$docker_bin:$PATH" STACKSTEAD_BIN="$docker_bin/stackstead"
+        export HOME="$tmp/original home" DOCKER_CONFIG="$tmp/original config"
+        export DOCKER_TLS_VERIFY=1 DOCKER_CERT_PATH="$tmp/original certs"
+        export FAKE_CONNECTION_RECEIPT="$tmp/connection.actual"
+        unset DOCKER_HOST DOCKER_CONTEXT
+        [ "$connection" != host ] || export DOCKER_HOST=unix:///original-fixture.sock
+        STACKSTEAD_DOCKER_TEST_DIR="$destination" "$root/scripts/docker-integration.sh"
+    ) >"$tmp/retry.out" 2>&1; then
+        fail "fault-injected integration unexpectedly succeeded"
+    fi
+    retry=$(grep '^Retry: ' "$tmp/retry.out") || fail "missing recovery command"
+    rm -f "$tmp/connection.actual"
+    if HOME="$tmp/wrong-home" DOCKER_HOST=unix:///wrong.sock DOCKER_CONTEXT=wrong \
+        DOCKER_CONFIG="$tmp/wrong-config" FAKE_CONNECTION_RECEIPT="$tmp/connection.actual" \
+        PATH="$docker_bin:$PATH" bash -c "${retry#Retry: }" >"$tmp/retry-command.out" 2>&1; then
+        fail "fault-injected cleanup unexpectedly succeeded"
+    fi
+    if [ ! -f "$tmp/connection.actual" ]; then
+        cat "$tmp/retry-command.out" >&2
+        fail "retry did not reach a Docker query"
+    fi
+    if [ "$connection" = host ]; then
+        printf '%s\n' unix:///original-fixture.sock unset >"$tmp/connection.expected"
+    else
+        printf '%s\n' unset fixture-context >"$tmp/connection.expected"
+    fi
+    printf '%s\n' "$tmp/original config" "$tmp/original home" 1 "$tmp/original certs" \
+        >>"$tmp/connection.expected"
+    diff -u "$tmp/connection.expected" "$tmp/connection.actual" || fail "retry changed Docker connection"
+done
 
 printf 'installer packaging tests passed\n'

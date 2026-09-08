@@ -38,10 +38,7 @@ fn up_rejects_every_structurally_unsafe_or_disconnected_port_contract() -> anyho
             stderr.contains(expected),
             "unexpected error for {mapping}: {stderr}"
         );
-        assert!(
-            !stderr.contains("docker-must-not-run"),
-            "test contract condition failed"
-        );
+        assert!(!stderr.contains("docker-must-not-run"));
     }
 
     fs::write(
@@ -58,13 +55,7 @@ fn up_rejects_every_structurally_unsafe_or_disconnected_port_contract() -> anyho
         .args(["up", &manifest.stackstead_id])
         .assert()
         .failure();
-    assert!(
-        output_text(&literal.get_output().stderr)?.contains("ports.<name>"),
-        "test contract condition failed"
-    );
-    assert!(
-        !output_text(&literal.get_output().stderr)?.contains("docker-must-not-run"),
-        "test contract condition failed"
-    );
+    assert!(output_text(&literal.get_output().stderr)?.contains("ports.<name>"));
+    assert!(!output_text(&literal.get_output().stderr)?.contains("docker-must-not-run"));
     Ok(())
 }

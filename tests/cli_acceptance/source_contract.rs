@@ -17,7 +17,7 @@ fn assert_manifest_metadata(
         "generated manifest identity broke its contract"
     );
     assert_eq!(
-        manifest.version, "2",
+        manifest.version, "3",
         "generated manifest identity broke its contract"
     );
     assert_eq!(
@@ -223,10 +223,10 @@ pub(super) fn assert_generated_agent_contract(manifest: &StacksteadManifest) -> 
         !context.contains("postgres://app:app"),
         "generated agent files broke their contract"
     );
-    assert!(
-        context.contains("runtime identity and state are isolated from peer stacksteads"),
-        "generated agent files broke their contract"
-    );
+    assert!(context.contains("Stackstead preserves externally owned worktrees"));
+    assert!(context.contains(
+        "External networks, external volumes, and shared host paths can still share state"
+    ));
     Ok(())
 }
 

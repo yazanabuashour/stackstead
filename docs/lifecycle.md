@@ -55,7 +55,26 @@ Adoption requires the exact root of a checked-out branch registered to the canon
 stackstead up feature-a
 ```
 
-`up` locks the stackstead, regenerates the env and Compose ownership contracts, runs configured dependency/link setup, runs `pre_up` hooks, verifies or creates the runtime-token claim and rejects foreign resources in the target namespace, starts the exact Compose project from the manifest, verifies the created resources carry the runtime token, waits for configured Postgres reachability, runs a configured seed command and `post_up` hooks, waits for all HTTP/custom health checks, and refreshes manifest status. Failures retain inspectable state and event history.
+`up` holds the mutation lock and run lease through startup:
+
+1. Validate the current contract, invalidate old resolved readiness requirements,
+   and clear stale health/database status before regenerating the environment and
+   Compose ownership files. Capture the startup `COMPOSE_PROFILES` selection.
+2. Run dependency installation and `pre_up` hooks, then resolve declared
+   requirements from the effective Compose model before starting Compose.
+3. Verify or create the runtime-token claim, reject foreign resources, start the
+   exact manifest project, and verify resource ownership.
+4. Wait for configured Postgres reachability, run the seed command and `post_up`
+   hooks, then resolve requirements again with the captured profiles. If the
+   model changed, leave requirements unresolved and fail. Do not automatically
+   rerun hooks or Compose to accept the changed inputs.
+5. Persist the matching resolution and verify required runtime instances and
+   application checks under one shared final deadline using
+   `health.timeout_seconds` and `health.interval_millis`. Report application
+   health independently of runtime readiness.
+
+Failures retain inspectable state and event history. Fix the reported input or
+service failure before retrying `up`; do not edit generated readiness state.
 
 Successful human output reports timings for the configured phases and the total.
 See the [CLI JSON reference](agent-contract.md#cli-json) for the response contract.
@@ -93,6 +112,27 @@ stackstead exec <full-id> web -- nginx -t
 
 The [CLI JSON reference](agent-contract.md#cli-json) lists supported commands and their response contracts. `run`, `exec`, `launch`, and `logs --follow` reject JSON because they own stdout, while `destroy --json` requires `--yes` to prevent prompt output from contaminating JSON. `stackstead open ... --print` returns a configured URL without launching a browser. `stackstead env --print` redacts secret-like values and credential-bearing DSNs unless `--show-secrets` is explicitly supplied.
 
+Read runtime activity, runtime readiness, and application health separately:
+
+- Activity is `active` when an observed container is running, paused, or
+  restarting. It is `inactive` when all observed containers are created, exited,
+  or dead, including an empty capture. Unavailable or unrecognized evidence
+  without a known active container gives `unknown`. Activity does not prove
+  declared readiness.
+- Readiness is `unconfigured`, `ready`, `not_ready`, or `unknown`. Missing or
+  stopped required instances, failed jobs, and unhealthy required containers are
+  `not_ready`. Unresolved, stale, or unprovable evidence is `unknown`; a known
+  failure is not hidden by unrelated unknown evidence.
+- Application health evaluates the configured HTTP or command checks. With no
+  checks it is unconfigured and reports `unknown`. Passive inspection never runs
+  custom commands, and `ps` runs no application checks.
+
+A jobs-only runtime can be inactive and ready after all required jobs exit
+successfully. Optional failures remain visible without blocking declared
+readiness. Neither `ps` nor `inspect` promises an atomic or real-time snapshot.
+Use full IDs and inspect requirement issues and raw container states before
+acting. See [JSON fields](agent-contract.md#inspection-version-4-and-list-version-2).
+
 ## Stop
 
 ```sh
@@ -118,7 +158,7 @@ and exits successfully when diagnostics were produced. `--fail-on-error` exits
 1 only when at least one error diagnostic exists, making the same complete
 human or JSON report suitable for CI; warnings alone still exit 0.
 
-`repair` is deliberately conservative. It first verifies the exact host-wide port lease, then may regenerate env, context, and pointer files; recreate non-destructive state directories; refresh the Git exclude; rerun configured dependency/link setup; and refresh status. It does not delete worktrees or volumes, rewrite Compose files, or run Docker prune.
+`repair` is deliberately conservative. It first verifies the exact host-wide port lease, then may regenerate env, context, and pointer files; recreate non-destructive state directories; refresh the Git exclude; rerun configured dependency installation; and refresh status. It does not delete worktrees or volumes, rewrite Compose files, or run Docker prune.
 
 ## Destroy
 
@@ -144,7 +184,7 @@ Destroy preserves the Git branch because it may contain committed user work and
 retains the project coordination lock as stable concurrency state. These are not
 orphaned environment resources and should not be removed as routine cleanup.
 
-Inspection and cleanup validate the durable manifest independently of later non-destructive config path changes, so a revised `env.file` or context path cannot strand an older runtime. Regenerating operations such as `up`, `repair`, `run`, and `exec` additionally require the current config to match the manifest contract.
+Inspection and cleanup validate the durable manifest independently of later non-destructive config path changes, so a revised `env.file` or context path cannot strand an older runtime. `up`, `repair`, `run`, and `exec` additionally require the current config to match the manifest contract. `run` and `exec` validate and consume generated state; they do not regenerate it.
 
 JSON-mode destruction requires `--yes`; this prevents an interactive prompt from corrupting machine-readable stdout.
 

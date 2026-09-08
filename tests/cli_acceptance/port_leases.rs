@@ -21,21 +21,16 @@ fn host_wide_port_leases_keep_stopped_projects_on_disjoint_ports() -> anyhow::Re
     let second = create(&second_project, "second")?;
     let first_ports = first.ports.values().copied().collect::<BTreeSet<_>>();
     let second_ports = second.ports.values().copied().collect::<BTreeSet<_>>();
-    assert!(
-        first_ports.is_disjoint(&second_ports),
-        "test contract condition failed"
-    );
-    assert_eq!(first_ports.len(), 2, "test contract values differ");
-    assert_eq!(second_ports.len(), 2, "test contract values differ");
+    assert!(first_ports.is_disjoint(&second_ports));
+    assert_eq!(first_ports.len(), 2);
+    assert_eq!(second_ports.len(), 2);
     assert_eq!(
         first_ports.iter().next_back().test()? - first_ports.iter().next().test()?,
-        1,
-        "test contract values differ"
+        1
     );
     assert_eq!(
         second_ports.iter().next_back().test()? - second_ports.iter().next().test()?,
-        1,
-        "test contract values differ"
+        1
     );
 
     #[cfg(unix)]
@@ -62,8 +57,7 @@ fn host_wide_port_leases_keep_stopped_projects_on_disjoint_ports() -> anyhow::Re
                 .iter()
                 .map(|lease| lease["port"].as_u64().test().map(|port| port as u16))
                 .collect::<anyhow::Result<BTreeSet<_>>>()?,
-            second_ports,
-            "test contract values differ"
+            second_ports
         );
     }
     Ok(())
@@ -121,10 +115,7 @@ fn lifecycle_commands_reject_a_port_lease_that_no_longer_belongs_to_the_manifest
         !marker.exists(),
         "Docker ran before lease ownership validation"
     );
-    assert!(
-        manifest.manifest_path().is_file(),
-        "test contract condition failed"
-    );
-    assert!(manifest.worktree.is_dir(), "test contract condition failed");
+    assert!(manifest.manifest_path().is_file());
+    assert!(manifest.worktree.is_dir());
     Ok(())
 }

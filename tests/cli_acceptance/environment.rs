@@ -10,14 +10,8 @@ fn env_outputs_redact_credentials_and_generation_is_deterministic() -> anyhow::R
     let manifest = project.create("feature-a")?;
 
     let env = fs::read_to_string(&manifest.env_file).test_context("read generated env")?;
-    assert!(
-        env.contains("A_FIRST=\"hello world\""),
-        "test contract condition failed"
-    );
-    assert!(
-        env.contains("Z_LAST=\"value#hash\""),
-        "test contract condition failed"
-    );
+    assert!(env.contains("A_FIRST=\"hello world\""));
+    assert!(env.contains("Z_LAST=\"value#hash\""));
     let keys = env
         .lines()
         .filter(|line| !line.is_empty() && !line.starts_with('#'))
@@ -46,18 +40,9 @@ fn env_outputs_redact_credentials_and_generation_is_deterministic() -> anyhow::R
             !stdout.contains("worker:dnspass@"),
             "SERVICE_DSN leaked: {stdout}"
         );
-        assert!(
-            stdout.contains("DATABASE_URL"),
-            "test contract condition failed"
-        );
-        assert!(
-            stdout.contains("SERVICE_DSN"),
-            "test contract condition failed"
-        );
-        assert!(
-            stdout.contains("[REDACTED]"),
-            "test contract condition failed"
-        );
+        assert!(stdout.contains("DATABASE_URL"));
+        assert!(stdout.contains("SERVICE_DSN"));
+        assert!(stdout.contains("[REDACTED]"));
     }
     Ok(())
 }

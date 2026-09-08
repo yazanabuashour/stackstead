@@ -21,10 +21,9 @@ Stackstead binds those pieces to one durable full ID:
 | Recovery | Operator reconstructs the target | Exact-ID inspect, logs, up, and repair |
 | Teardown | Caller must prove what is safe to remove | Ownership is revalidated and cleanup fails closed |
 
-Stackstead reuses the repository's reviewed Docker Compose topology. It is a
-runtime substrate, not an agent scheduler, editor, terminal multiplexer, or
-second application definition. Agents and managers keep their existing user
-experience while Stackstead owns the runtime contract.
+Keep your existing agent, editor, and session manager. Stackstead manages the
+environment described by the repository's reviewed Docker Compose files, so you
+do not need a second application definition.
 
 ## When Stackstead is a good fit
 

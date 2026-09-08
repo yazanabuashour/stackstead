@@ -23,8 +23,7 @@ fn doctor_scans_branch_local_compose_files_for_fixed_ports() -> anyhow::Result<(
                 == "compose.worktree_fixed_host_port"
                 && item["message"].as_str().is_some_and(|message| {
                     message.contains("3000") && message.contains("docker-compose.yml:5")
-                }))),
-        "test contract condition failed"
+                })))
     );
     assert!(
         diagnostics["diagnostics"]
@@ -38,8 +37,7 @@ fn doctor_scans_branch_local_compose_files_for_fixed_ports() -> anyhow::Result<(
                             && message
                                 .contains(manifest.compose_files[0].to_string_lossy().as_ref())
                     })
-            })),
-        "test contract condition failed"
+            }))
     );
 
     fs::write(
@@ -52,14 +50,11 @@ fn doctor_scans_branch_local_compose_files_for_fixed_ports() -> anyhow::Result<(
         .assert()
         .success();
     let loopback: Value = serde_json::from_slice(&loopback.get_output().stdout).test()?;
-    assert!(
-        loopback["diagnostics"].as_array().is_some_and(|items| {
-            items
-                .iter()
-                .all(|item| item["code"] != "compose.worktree_all_interfaces_host_port")
-        }),
-        "test contract condition failed"
-    );
+    assert!(loopback["diagnostics"].as_array().is_some_and(|items| {
+        items
+            .iter()
+            .all(|item| item["code"] != "compose.worktree_all_interfaces_host_port")
+    }));
     Ok(())
 }
 
@@ -127,22 +122,10 @@ fn doctor_fail_on_error_keeps_complete_json_and_ignores_warnings() -> anyhow::Re
         .assert()
         .success();
     let warning_report: Value = serde_json::from_slice(&warning_only.get_output().stdout).test()?;
-    assert_eq!(
-        warning_report["kind"], "DoctorReport",
-        "test contract values differ"
-    );
-    assert_eq!(
-        warning_report["version"], "1",
-        "test contract values differ"
-    );
-    assert_eq!(
-        warning_report["error_count"], 0,
-        "test contract values differ"
-    );
-    assert!(
-        warning_report["warning_count"].as_u64().test()? > 0,
-        "test contract condition failed"
-    );
+    assert_eq!(warning_report["kind"], "DoctorReport");
+    assert_eq!(warning_report["version"], "1");
+    assert_eq!(warning_report["error_count"], 0);
+    assert!(warning_report["warning_count"].as_u64().test()? > 0);
 
     fs::write(
         project.repo.join("docker-compose.yml"),
@@ -160,15 +143,9 @@ fn doctor_fail_on_error_keeps_complete_json_and_ignores_warnings() -> anyhow::Re
         .assert()
         .code(1);
     let error_report: Value = serde_json::from_slice(&failed.get_output().stdout).test()?;
-    assert_eq!(error_report["ok"], false, "test contract values differ");
-    assert!(
-        error_report["error_count"].as_u64().test()? > 0,
-        "test contract condition failed"
-    );
-    assert!(
-        !error_report["diagnostics"].as_array().test()?.is_empty(),
-        "test contract condition failed"
-    );
+    assert_eq!(error_report["ok"], false);
+    assert!(error_report["error_count"].as_u64().test()? > 0);
+    assert!(!error_report["diagnostics"].as_array().test()?.is_empty());
     Ok(())
 }
 
@@ -189,10 +166,11 @@ fn doctor_reports_repository_policy_freshness_without_failing() -> anyhow::Resul
         .assert()
         .success();
     let report: Value = serde_json::from_slice(&report.get_output().stdout).test()?;
-    assert!(
-        has_diagnostic(&report, "repository_policy.missing", "warning"),
-        "test contract condition failed"
-    );
+    assert!(has_diagnostic(
+        &report,
+        "repository_policy.missing",
+        "warning"
+    ));
 
     for (contents, code, severity) in [
         (
@@ -224,10 +202,11 @@ fn doctor_reports_repository_policy_freshness_without_failing() -> anyhow::Resul
             .success();
         let report: Value = serde_json::from_slice(&report.get_output().stdout).test()?;
         assert!(has_diagnostic(&report, code, severity), "{report:#}");
-        assert!(
-            !has_diagnostic(&report, "repository_policy.missing", "warning"),
-            "test contract condition failed"
-        );
+        assert!(!has_diagnostic(
+            &report,
+            "repository_policy.missing",
+            "warning"
+        ));
     }
     Ok(())
 }

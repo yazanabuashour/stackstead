@@ -1,11 +1,13 @@
 use serde::Serialize;
 
 const VERSION: &str = "1";
-const INSPECTION_VERSION: &str = "3";
+const INSPECTION_VERSION: &str = "4";
+const LIST_VERSION: &str = "2";
 
 mod compose;
 mod contract;
 mod inspection;
+mod runtime;
 mod summary;
 mod utility;
 

@@ -25,6 +25,13 @@ pub fn docker_environment(
     manifest: &StacksteadManifest,
 ) -> anyhow::Result<(Vec<String>, BTreeMap<String, String>)> {
     let generated = manifest.validated_environment()?;
+    Ok(environment_for_generated(manifest, &generated))
+}
+
+pub(super) fn environment_for_generated(
+    manifest: &StacksteadManifest,
+    generated: &BTreeMap<String, String>,
+) -> (Vec<String>, BTreeMap<String, String>) {
     let removed = generated
         .keys()
         .filter(|key| !crate::config::reserved_process_env(key))
@@ -34,7 +41,16 @@ pub fn docker_environment(
         "COMPOSE_PROJECT_NAME".into(),
         manifest.compose_project.clone(),
     )]);
-    Ok((removed, environment))
+    (removed, environment)
+}
+
+pub(super) fn sanitize_generated_error(
+    error: &anyhow::Error,
+    generated: &BTreeMap<String, String>,
+) -> anyhow::Error {
+    // Generated keys are absent from the runner's subprocess and redaction environment,
+    // but Compose still reads their values through --env-file.
+    anyhow::anyhow!(command::redact_with_env(&format!("{error:#}"), generated))
 }
 
 pub(super) fn run_docker_compose(
@@ -62,6 +78,7 @@ fn run_docker(
 pub(super) fn run_docker_control(
     manifest: &StacksteadManifest,
     args: &[String],
+    deadline: Option<std::time::Instant>,
 ) -> anyhow::Result<std::process::Output> {
     let removed = manifest
         .env_keys
@@ -77,5 +94,5 @@ pub(super) fn run_docker_control(
     } else {
         &manifest.repo_root
     };
-    command::run_sanitized("docker", args, cwd, &environment, removed)
+    command::run_sanitized_until("docker", args, cwd, &environment, removed, deadline)
 }

@@ -3,6 +3,7 @@ mod destroy;
 mod inspect;
 mod inspect_health;
 mod lease;
+mod observe_runtime;
 mod project;
 mod provision;
 mod provision_manifest;
@@ -13,12 +14,14 @@ mod teardown;
 mod types;
 mod up;
 mod up_database;
+mod up_readiness;
 mod validation;
 
 pub use contract::{install_dependencies, regenerate_contract, template_context};
 pub use destroy::{destroy, resolve_destroy};
 pub use inspect::inspect;
 pub use lease::verify_port_leases;
+pub use observe_runtime::{RuntimeObservation, observe_runtime};
 pub use project::{
     compose_apply_with_file, compose_plan, compose_plan_with_file, current, init_with_compose_file,
     load_project,

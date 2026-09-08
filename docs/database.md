@@ -79,7 +79,7 @@ The [`DatabaseStatus` JSON response](agent-contract.md#cli-json) reports the con
 
 With a normal Compose-managed volume, the unique Compose project name makes database storage stackstead-local. `stackstead stop` preserves the volume. `stackstead destroy` runs `down -v --remove-orphans --rmi local`, permanently removing that stackstead's Compose volumes and local build images without a custom image tag after confirmation.
 
-External volumes, globally named volumes, and shared host bind mounts bypass project-name isolation. Stackstead does not claim those are branch-local and does not attempt to delete them.
+Stackstead rejects custom `name` values on managed volumes and networks before startup. External volumes and shared host bind mounts are accepted but can share data; Stackstead does not treat them as branch-local or delete them as managed volumes. Use project-scoped managed volumes for separate database state. See [Compose isolation](compose.md#volume-isolation).
 
 ## Not included
 

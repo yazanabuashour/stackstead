@@ -55,14 +55,10 @@ fn two_stacksteads_have_distinct_runtime_identity_and_state() -> anyhow::Result<
     );
     let first_ports = first.ports.values().copied().collect::<BTreeSet<_>>();
     let second_ports = second.ports.values().copied().collect::<BTreeSet<_>>();
-    assert!(
-        first_ports.is_disjoint(&second_ports),
-        "test contract condition failed"
-    );
+    assert!(first_ports.is_disjoint(&second_ports));
     assert_eq!(
         first.ports.keys().collect::<Vec<_>>(),
-        second.ports.keys().collect::<Vec<_>>(),
-        "test contract values differ"
+        second.ports.keys().collect::<Vec<_>>()
     );
 
     let assert = stackstead(&project.repo)
@@ -71,28 +67,23 @@ fn two_stacksteads_have_distinct_runtime_identity_and_state() -> anyhow::Result<
         .success();
     let listed: Value = serde_json::from_slice(&assert.get_output().stdout)
         .test_context("parse stackstead list")?;
-    assert_eq!(
-        listed["kind"], "StacksteadList",
-        "test contract values differ"
-    );
-    assert_eq!(listed["version"], "1", "test contract values differ");
+    assert_eq!(listed["kind"], "StacksteadList");
+    assert_eq!(listed["version"], "2");
     let listed = listed["stacksteads"]
         .as_array()
         .test_context("stackstead list items")?;
-    assert_eq!(listed.len(), 2, "test contract values differ");
+    assert_eq!(listed.len(), 2);
     assert_eq!(
         listed
             .iter()
             .filter_map(|item| item["stackstead_id"].as_str())
             .collect::<BTreeSet<_>>(),
-        BTreeSet::from([first.stackstead_id.as_str(), second.stackstead_id.as_str()]),
-        "test contract values differ"
+        BTreeSet::from([first.stackstead_id.as_str(), second.stackstead_id.as_str()])
     );
     assert!(
         listed
             .iter()
-            .all(|item| matches!(item["runtime"].as_str(), Some("stopped" | "unknown"))),
-        "test contract condition failed"
+            .all(|item| matches!(item["runtime"].as_str(), Some("inactive" | "unknown")))
     );
     Ok(())
 }

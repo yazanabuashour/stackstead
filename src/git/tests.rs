@@ -11,8 +11,7 @@ fn git(repository: &Path, arguments: &[&str]) -> anyhow::Result<()> {
             .current_dir(repository)
             .status()
             .test()?
-            .success(),
-        "test contract condition failed"
+            .success()
     );
     Ok(())
 }
@@ -43,21 +42,14 @@ fn worktree_parsers_preserve_newlines_in_paths() -> anyhow::Result<()> {
         .current_dir(&repository)
         .status()
         .test()?;
-    assert!(output.success(), "test contract condition failed");
+    assert!(output.success());
     assert_eq!(
         primary_worktree(&worktree).test()?,
-        std::fs::canonicalize(&repository).test()?,
-        "test contract values differ"
+        std::fs::canonicalize(&repository).test()?
     );
-    assert!(
-        is_registered_worktree(&repository, &worktree).test()?,
-        "test contract condition failed"
-    );
+    assert!(is_registered_worktree(&repository, &worktree).test()?);
     std::fs::remove_dir_all(&worktree).test()?;
-    assert!(
-        is_registered_worktree(&repository, &worktree).test()?,
-        "test contract condition failed"
-    );
+    assert!(is_registered_worktree(&repository, &worktree).test()?);
     Ok(())
 }
 
@@ -74,10 +66,7 @@ fn registered_worktree_check_propagates_canonicalization_errors() -> anyhow::Res
         .test_err()?
         .to_string();
 
-    assert!(
-        error.contains("cannot resolve worktree path"),
-        "test contract condition failed"
-    );
+    assert!(error.contains("cannot resolve worktree path"));
     Ok(())
 }
 
@@ -95,14 +84,7 @@ fn ensure_excluded_preserves_invalid_utf8_on_error() -> anyhow::Result<()> {
         .test_err()?
         .to_string();
 
-    assert!(
-        error.contains("cannot read Git exclude file"),
-        "test contract condition failed"
-    );
-    assert_eq!(
-        std::fs::read(exclude).test()?,
-        original,
-        "test contract values differ"
-    );
+    assert!(error.contains("cannot read Git exclude file"));
+    assert_eq!(std::fs::read(exclude).test()?, original);
     Ok(())
 }

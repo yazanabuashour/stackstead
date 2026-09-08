@@ -21,8 +21,7 @@ fn resolves_contract_key_to_its_actual_compose_service() -> anyhow::Result<()> {
         ComposePortTarget {
             service: "frontend".into(),
             container_port: 3000
-        },
-        "test contract values differ"
+        }
     );
     Ok(())
 }
@@ -45,8 +44,7 @@ fn validates_the_exact_structural_port_environment_contract() -> anyhow::Result<
         validate_port_contract(std::slice::from_ref(&file), &containers, &wrong_environment)
             .test_err()?
             .to_string()
-            .contains("APP_PORT"),
-        "test contract condition failed"
+            .contains("APP_PORT")
     );
 
     std::fs::write(
@@ -58,8 +56,7 @@ fn validates_the_exact_structural_port_environment_contract() -> anyhow::Result<
         validate_port_contract(&[file], &containers, &environment)
             .test_err()?
             .to_string()
-            .contains("fixed host port"),
-        "test contract condition failed"
+            .contains("fixed host port")
     );
     Ok(())
 }

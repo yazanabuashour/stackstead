@@ -140,14 +140,8 @@ mod tests {
         (validate_env_name("WEB_PORT")).test()?;
         (validate_env_name("9PORT")).test_err()?;
         (validate_env_name("BAD-NAME")).test_err()?;
-        assert!(
-            is_secret_name("DATABASE_PASSWORD"),
-            "test contract condition failed"
-        );
-        assert!(
-            !is_secret_name("WEB_PORT"),
-            "test contract condition failed"
-        );
+        assert!(is_secret_name("DATABASE_PASSWORD"));
+        assert!(!is_secret_name("WEB_PORT"));
         Ok(())
     }
 
@@ -157,35 +151,23 @@ mod tests {
         let path = directory.path().join(".env");
         std::fs::write(&path, "WEB_PORT=39000\nAPI_TOKEN=private\n").test()?;
         let output = rendered(&path, false).test()?;
-        assert!(
-            output.contains("WEB_PORT=39000"),
-            "test contract condition failed"
-        );
-        assert!(
-            output.contains("API_TOKEN=[REDACTED]"),
-            "test contract condition failed"
-        );
-        assert!(
-            !output.contains("private"),
-            "test contract condition failed"
-        );
+        assert!(output.contains("WEB_PORT=39000"));
+        assert!(output.contains("API_TOKEN=[REDACTED]"));
+        assert!(!output.contains("private"));
         Ok(())
     }
 
     #[test]
     fn redacts_credentials_in_urls_even_when_key_is_not_secret_like() -> anyhow::Result<()> {
-        assert!(
-            should_redact("DATABASE_URL", "postgres://app:password@127.0.0.1/app"),
-            "test contract condition failed"
-        );
-        assert!(
-            should_redact("REMOTE_URL", "https://access-token@example.invalid/repo"),
-            "test contract condition failed"
-        );
-        assert!(
-            !should_redact("PUBLIC_URL", "http://127.0.0.1:3000/path"),
-            "test contract condition failed"
-        );
+        assert!(should_redact(
+            "DATABASE_URL",
+            "postgres://app:password@127.0.0.1/app"
+        ));
+        assert!(should_redact(
+            "REMOTE_URL",
+            "https://access-token@example.invalid/repo"
+        ));
+        assert!(!should_redact("PUBLIC_URL", "http://127.0.0.1:3000/path"));
         Ok(())
     }
 }

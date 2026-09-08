@@ -2,6 +2,8 @@ use std::{collections::BTreeMap, path::PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::readiness::Role;
+
 use super::{
     CONFIG_VERSION,
     features::{
@@ -9,7 +11,7 @@ use super::{
     },
     helpers::{
         default_base, default_compose_files, default_port_base, default_port_stride,
-        default_project_name_template, default_state_root,
+        default_state_root,
     },
 };
 
@@ -122,8 +124,8 @@ pub struct RuntimeConfig {
     pub provider: RuntimeProvider,
     #[serde(default = "default_compose_files")]
     pub files: Vec<PathBuf>,
-    #[serde(default = "default_project_name_template")]
-    pub project_name_template: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub readiness: Option<ReadinessConfig>,
 }
 
 impl Default for RuntimeConfig {
@@ -131,9 +133,15 @@ impl Default for RuntimeConfig {
         Self {
             provider: RuntimeProvider::default(),
             files: default_compose_files(),
-            project_name_template: default_project_name_template(),
+            readiness: None,
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ReadinessConfig {
+    pub required: BTreeMap<String, Role>,
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]

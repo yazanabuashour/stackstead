@@ -7,7 +7,7 @@ use std::{
 };
 
 const SAMPLE: &str = r#"
-version: "1"
+version: "2"
 kind: StacksteadProject
 project:
   name: loan-platform
@@ -19,6 +19,10 @@ state:
 runtime:
   provider: docker-compose
   files: [docker-compose.yml]
+  readiness:
+    required:
+      web: long-running
+      Worker.api_1: job
 resources:
   ports:
     strategy: deterministic
@@ -31,7 +35,6 @@ resources:
       postgres:
         container: 5432
 dependencies:
-  provider: command
   install:
     command: ""
     shell: false
@@ -56,23 +59,23 @@ hooks:
 #[test]
 fn parses_full_config() -> anyhow::Result<()> {
     let config = StacksteadConfig::from_yaml(SAMPLE).test()?;
-    assert_eq!(
-        config.project.name, "loan-platform",
-        "test contract values differ"
-    );
-    assert_eq!(
-        config.resources.ports.expose["web"].container, 3000,
-        "test contract values differ"
-    );
+    assert_eq!(config.project.name, "loan-platform");
+    assert_eq!(config.resources.ports.expose["web"].container, 3000);
     assert_eq!(
         config.database.postgres.as_ref().test()?.service,
-        "postgres",
-        "test contract values differ"
+        "postgres"
+    );
+    assert_eq!(config.service_names(), ["postgres", "web"]);
+    assert_eq!(
+        config.runtime.readiness.as_ref().test()?.required,
+        std::collections::BTreeMap::from([
+            ("web".into(), crate::readiness::Role::LongRunning),
+            ("Worker.api_1".into(), crate::readiness::Role::Job),
+        ])
     );
     assert_eq!(
-        config.service_names(),
-        ["postgres", "web"],
-        "test contract values differ"
+        StacksteadConfig::from_yaml(&serde_yaml::to_string(&config).test()?).test()?,
+        config
     );
     Ok(())
 }
@@ -81,41 +84,68 @@ fn parses_full_config() -> anyhow::Result<()> {
 fn supplies_optional_defaults() -> anyhow::Result<()> {
     let config = StacksteadConfig::from_yaml(
         r#"
-version: "1"
+version: "2"
 kind: StacksteadProject
 project:
   name: demo
 "#,
     )
     .test()?;
-    assert_eq!(config.version, "1", "test contract values differ");
-    assert_eq!(config.source.base, "main", "test contract values differ");
-    assert_eq!(
-        config.state.root,
-        Path::new("../.stacksteads"),
-        "test contract values differ"
-    );
-    assert_eq!(
-        config.runtime.files,
-        [PathBuf::from("docker-compose.yml")],
-        "test contract values differ"
-    );
-    assert_eq!(
-        config.resources.ports.base, 39000,
-        "test contract values differ"
-    );
+    assert_eq!(config.version, "2");
+    assert_eq!(config.source.base, "main");
+    assert_eq!(config.state.root, Path::new("../.stacksteads"));
+    assert_eq!(config.runtime.files, [PathBuf::from("docker-compose.yml")]);
+    assert!(config.runtime.readiness.is_none());
+    assert_eq!(config.resources.ports.base, 39000);
     Ok(())
 }
 
 #[test]
 fn rejects_unsupported_values_and_unknown_fields() -> anyhow::Result<()> {
-    (StacksteadConfig::from_yaml("version: '3'\nkind: StacksteadProject\nproject: { name: demo }"))
+    for version in ["1", "3"] {
+        (StacksteadConfig::from_yaml(
+            &SAMPLE.replace("version: \"2\"", &format!("version: \"{version}\"")),
+        ))
         .test_err()?;
-    (StacksteadConfig::from_yaml(
-        "project: { name: demo }\nsource: { provider: copy, base: main }",
-    ))
-    .test_err()?;
-    (StacksteadConfig::from_yaml("project: { name: demo }\nsurprise: true")).test_err()?;
+    }
+    (StacksteadConfig::from_yaml(&SAMPLE.replace("provider: git-worktree", "provider: copy")))
+        .test_err()?;
+    (StacksteadConfig::from_yaml(&format!("{SAMPLE}\nsurprise: true\n"))).test_err()?;
+    for section in ["runtime", "dependencies"] {
+        let yaml = SAMPLE.replace(
+            &format!("{section}:\n"),
+            &format!("{section}:\n  surprise: true\n"),
+        );
+        (StacksteadConfig::from_yaml(&yaml)).test_err()?;
+    }
+    Ok(())
+}
+
+#[test]
+fn rejects_empty_or_unsupported_readiness_declarations() -> anyhow::Result<()> {
+    for declaration in [
+        "{}",
+        "{required: {}}",
+        "{required: {web: running}}",
+        "{required: {web: long_running}}",
+        "{required: {web: {role: long-running, replicas: 2}}}",
+        "{required: {web: job}, replicas: 2}",
+        "{required: {web: job}, resolved: {}}",
+    ] {
+        let yaml = format!(
+            "version: \"2\"\nkind: StacksteadProject\nproject: {{name: demo}}\nruntime:\n  readiness: {declaration}\n"
+        );
+        StacksteadConfig::from_yaml(&yaml).test_err()?;
+    }
+    let mut config = StacksteadConfig::from_yaml(SAMPLE).test()?;
+    config.runtime.readiness.as_mut().test()?.required.clear();
+    assert!(
+        config
+            .validate()
+            .test_err()?
+            .to_string()
+            .contains("readiness.required")
+    );
     Ok(())
 }
 

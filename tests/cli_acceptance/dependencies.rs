@@ -15,44 +15,28 @@ fn dependency_failure_is_persisted_without_starting_compose() -> anyhow::Result<
         .failure();
     assert!(
         output_text(&assert.get_output().stderr)?
-            .contains("stackstead-command-that-does-not-exist"),
-        "test contract condition failed"
+            .contains("stackstead-command-that-does-not-exist")
     );
 
     let persisted =
         StacksteadManifest::read(&manifest.manifest_path()).test_context("read failed state")?;
     assert_eq!(
         serde_json::to_value(persisted.status.dependencies).test_context("serialize status")?,
-        Value::String("failed".into()),
-        "test contract values differ"
+        Value::String("failed".into())
     );
     let events = event_types(&persisted.event_log)?;
-    assert!(
-        events.contains(&"dependencies_install".into()),
-        "test contract condition failed"
-    );
-    assert!(
-        !events.contains(&"runtime_start".into()),
-        "test contract condition failed"
-    );
+    assert!(events.contains(&"dependencies_install".into()));
+    assert!(!events.contains(&"runtime_start".into()));
     Ok(())
 }
 
 #[cfg(unix)]
 #[test]
-fn dependency_and_yarn_logs_redact_structured_and_environment_secrets() -> anyhow::Result<()> {
+fn dependency_logs_redact_structured_and_environment_secrets() -> anyhow::Result<()> {
     let project = Project::initialized()?;
     let mut config = load_config(&project.repo.join("stackstead.yaml"))?;
-    config["dependencies"]["provider"] = "yarn-classic".into();
-    config["dependencies"]["install"]["command"] = "printf 'Authorization: Bearer dependency-header-marker\\nhttps://user:dependency-url-marker@example.invalid/repo\\n%s\\nordinary dependency output\\n' \"$API_TOKEN\"".into();
+    config["dependencies"]["install"]["command"] = "printf 'Authorization: Bearer dependency-header-marker\\nProxy-Authorization: Basic dependency-proxy-marker\\nhttps://user:dependency-url-marker@example.invalid/repo\\n%s\\nordinary dependency output\\n' \"$API_TOKEN\"".into();
     config["dependencies"]["install"]["shell"] = true.into();
-    config["dependencies"]["link"] = serde_yaml::to_value(serde_json::json!({
-        "enabled": true,
-        "link_folder": ".stackstead/yarn-links",
-        "command": "printf 'Proxy-Authorization: Basic yarn-header-marker\\nhttps://user:yarn-url-marker@example.invalid/repo\\n%s\\nordinary yarn output\\n' \"$API_TOKEN\"",
-        "shell": true,
-    }))
-    .test()?;
     config["env"]["generate"]["API_TOKEN"] = "known-environment-marker".into();
     project.write_config(&config, "configure secret-emitting dependency fixtures")?;
     let manifest = project.create("feature-a")?;
@@ -67,22 +51,16 @@ fn dependency_and_yarn_logs_redact_structured_and_environment_secrets() -> anyho
         .args(["up", &manifest.stackstead_id])
         .assert()
         .failure();
-    for (name, ordinary) in [
-        ("dependencies.log", "ordinary dependency output"),
-        ("yarn-link.log", "ordinary yarn output"),
+    let log = fs::read_to_string(manifest.state_dir.join("logs/dependencies.log")).test()?;
+    assert!(log.contains("ordinary dependency output"));
+    assert!(log.contains("[REDACTED]"));
+    for marker in [
+        "dependency-header-marker",
+        "dependency-proxy-marker",
+        "dependency-url-marker",
+        "known-environment-marker",
     ] {
-        let log = fs::read_to_string(manifest.state_dir.join("logs").join(name)).test()?;
-        assert!(log.contains(ordinary), "test contract condition failed");
-        assert!(log.contains("[REDACTED]"), "test contract condition failed");
-        for marker in [
-            "dependency-header-marker",
-            "dependency-url-marker",
-            "yarn-header-marker",
-            "yarn-url-marker",
-            "known-environment-marker",
-        ] {
-            assert!(!log.contains(marker), "{name} leaked {marker}");
-        }
+        assert!(!log.contains(marker), "dependencies.log leaked {marker}");
     }
     Ok(())
 }
@@ -100,19 +78,10 @@ fn failed_dependency_diagnostics_and_events_share_structured_redaction() -> anyh
         .args(["up", &manifest.stackstead_id])
         .assert()
         .failure();
-    assert!(
-        !output_text(&rejected.get_output().stderr)?.contains("event-header-marker"),
-        "test contract condition failed"
-    );
+    assert!(!output_text(&rejected.get_output().stderr)?.contains("event-header-marker"));
     let events = fs::read_to_string(&manifest.event_log).test()?;
-    assert!(
-        events.contains("[REDACTED]"),
-        "test contract condition failed"
-    );
-    assert!(
-        !events.contains("event-header-marker"),
-        "test contract condition failed"
-    );
+    assert!(events.contains("[REDACTED]"));
+    assert!(!events.contains("event-header-marker"));
     Ok(())
 }
 
@@ -126,7 +95,7 @@ fn pre_up_failure_preserves_completed_dependency_status() -> anyhow::Result<()> 
     let mut manifest = project.create("feature-a")?;
     manifest.status.database = ComponentStatus::Reachable;
     manifest.status.health = ComponentStatus::Ready;
-    manifest.save_atomic().test()?;
+    manifest.write_fixture().test()?;
 
     stackstead(&project.repo)
         .args(["up", "feature-a", "--json"])
@@ -135,25 +104,10 @@ fn pre_up_failure_preserves_completed_dependency_status() -> anyhow::Result<()> 
 
     let persisted =
         StacksteadManifest::read(&manifest.manifest_path()).test_context("read failed state")?;
-    assert_eq!(
-        persisted.status.dependencies,
-        ComponentStatus::Ready,
-        "test contract values differ"
-    );
-    assert_eq!(
-        persisted.status.database,
-        ComponentStatus::Unknown,
-        "test contract values differ"
-    );
-    assert_eq!(
-        persisted.status.health,
-        ComponentStatus::Unknown,
-        "test contract values differ"
-    );
-    assert!(
-        !event_types(&persisted.event_log)?.contains(&"runtime_start".into()),
-        "test contract condition failed"
-    );
+    assert_eq!(persisted.status.dependencies, ComponentStatus::Ready);
+    assert_eq!(persisted.status.database, ComponentStatus::Unknown);
+    assert_eq!(persisted.status.health, ComponentStatus::Unknown);
+    assert!(!event_types(&persisted.event_log)?.contains(&"runtime_start".into()));
     Ok(())
 }
 
@@ -218,10 +172,7 @@ exit 0
             .args(["up", &manifest.stackstead_id])
             .assert()
             .failure();
-        assert!(
-            output_text(&rejected.get_output().stderr)?.contains("deterministic host binding"),
-            "test contract condition failed"
-        );
+        assert!(output_text(&rejected.get_output().stderr)?.contains("deterministic host binding"));
         assert_eq!(marker.exists(), post_up, "Docker stage ordering changed");
     }
     Ok(())

@@ -35,13 +35,15 @@ Start with the guide that matches what you are trying to do.
 
 ## Trust and participate
 
-- [Reliability evidence](reliability.md) summarizes dogfood and release-gate
-  results, including failures and limitations.
+- [Reliability evidence](reliability.md) explains reproducible checks and evidence
+  limits.
+- [Performance measurement](performance.md) documents query timing and profiling
+  receipts.
 - [Early adopter program](early-adopters.md) explains who the current release is
   for and how to participate.
 - [Rust architecture](rust-architecture.md) documents the internal boundaries and
   deliberate scope budget.
 - [Contributing](../CONTRIBUTING.md) and [Security policy](../SECURITY.md) cover
   changes and private vulnerability reporting.
-- [Stackstead 0.1.4 release notes](releases/v0.1.4.md) describe the current
-  reliability release and upgrade considerations.
+- [Stackstead 0.1.4 release notes](releases/v0.1.4.md) describe the 0.1.4
+  reliability changes and upgrade considerations.

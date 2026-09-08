@@ -41,9 +41,14 @@ fn help_exposes_the_complete_command_surface() -> anyhow::Result<()> {
         stackstead(directory.path()).args(args).assert().success();
     }
 
-    stackstead(directory.path())
+    let assert = stackstead(directory.path())
         .args(["env", "demo", "--show-secrets"])
         .assert()
-        .failure();
+        .code(2);
+    let stderr = output_text(&assert.get_output().stderr)?;
+    assert!(
+        stderr.contains("the following required arguments were not provided:\n  --print"),
+        "--show-secrets without --print must fail during argument parsing: {stderr}"
+    );
     Ok(())
 }

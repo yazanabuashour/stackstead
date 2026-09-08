@@ -18,10 +18,7 @@ fn malformed_duplicate_and_ambiguous_registries_fail_closed() -> anyhow::Result<
     let Err(error) = store.transaction() else {
         anyhow::bail!("duplicate registry was accepted");
     };
-    assert!(
-        error.to_string().contains("duplicate"),
-        "test contract condition failed"
-    );
+    assert!(error.to_string().contains("duplicate"));
 
     std::fs::write(
             &path,
@@ -31,10 +28,7 @@ fn malformed_duplicate_and_ambiguous_registries_fail_closed() -> anyhow::Result<
     let Err(error) = store.transaction() else {
         anyhow::bail!("ambiguous registry was accepted");
     };
-    assert!(
-        error.to_string().contains("ambiguous"),
-        "test contract condition failed"
-    );
+    assert!(error.to_string().contains("ambiguous"));
 
     std::fs::write(
         &path,
@@ -67,15 +61,8 @@ fn symlinked_registry_fails_closed_without_reading_its_target() -> anyhow::Resul
     let Err(error) = store.transaction() else {
         anyhow::bail!("symlinked registry was accepted");
     };
-    assert!(
-        error.to_string().contains("symlink"),
-        "test contract condition failed"
-    );
-    assert_eq!(
-        std::fs::read(&target).test()?,
-        b"not json",
-        "test contract values differ"
-    );
+    assert!(error.to_string().contains("symlink"));
+    assert_eq!(std::fs::read(&target).test()?, b"not json");
     Ok(())
 }
 
@@ -85,23 +72,17 @@ fn first_transaction_initializes_a_durable_empty_registry() -> anyhow::Result<()
     let store = store(&directory);
     let path = store.state_dir.join(REGISTRY_FILE);
     let mut transaction = store.transaction().test()?;
-    assert!(
-        transaction.used_ports().is_empty(),
-        "test contract condition failed"
-    );
-    assert!(path.is_file(), "test contract condition failed");
+    assert!(transaction.used_ports().is_empty());
+    assert!(path.is_file());
 
     (transaction.reserve("", &identity("alpha"), &ports(&[39000]))).test_err()?;
-    assert!(path.is_file(), "test contract condition failed");
+    assert!(path.is_file());
 
     transaction
         .reserve("owner-a", &identity("alpha"), &ports(&[39000]))
         .test()?;
-    assert!(path.is_file(), "test contract condition failed");
-    assert!(
-        store.state_dir.join(INITIALIZED_FILE).is_file(),
-        "test contract condition failed"
-    );
+    assert!(path.is_file());
+    assert!(store.state_dir.join(INITIALIZED_FILE).is_file());
     transaction
         .verify("owner-a", &identity("alpha"), &ports(&[39000]))
         .test()?;
@@ -116,14 +97,8 @@ fn interrupted_lock_creation_does_not_wedge_first_initialization() -> anyhow::Re
     std::fs::write(store.state_dir.join(LOCK_FILE), b"").test()?;
 
     let transaction = store.transaction().test()?;
-    assert!(
-        transaction.registry_path.is_file(),
-        "test contract condition failed"
-    );
-    assert!(
-        store.state_dir.join(INITIALIZED_FILE).is_file(),
-        "test contract condition failed"
-    );
+    assert!(transaction.registry_path.is_file());
+    assert!(store.state_dir.join(INITIALIZED_FILE).is_file());
     Ok(())
 }
 
@@ -139,8 +114,7 @@ fn initialized_registry_cannot_silently_reinitialize_after_deletion() -> anyhow:
     assert!(
         error
             .to_string()
-            .contains("initialized port lease registry"),
-        "test contract condition failed"
+            .contains("initialized port lease registry")
     );
     Ok(())
 }

@@ -24,22 +24,15 @@ fn compose_discovery_generates_config_and_rewrites_only_after_confirmation() -> 
     stackstead(&project.repo).arg("init").assert().success();
     let config = load_config(&project.repo.join("stackstead.yaml"))?;
     assert_eq!(
-        config["resources"]["ports"]["expose"]["web"]["container"], 80,
-        "test contract values differ"
+        config["resources"]["ports"]["expose"]["web"]["container"],
+        80
     );
     assert_eq!(
-        config["resources"]["ports"]["expose"]["postgres"]["container"], 5432,
-        "test contract values differ"
+        config["resources"]["ports"]["expose"]["postgres"]["container"],
+        5432
     );
-    assert_eq!(
-        config["health"]["checks"].as_sequence().test()?.len(),
-        1,
-        "test contract values differ"
-    );
-    assert_eq!(
-        config["health"]["checks"][0]["name"], "web",
-        "test contract values differ"
-    );
+    assert_eq!(config["health"]["checks"].as_sequence().test()?.len(), 1);
+    assert_eq!(config["health"]["checks"][0]["name"], "web");
 
     let plan = stackstead(&project.repo)
         .args(["--json", "compose", "plan"])
@@ -47,12 +40,9 @@ fn compose_discovery_generates_config_and_rewrites_only_after_confirmation() -> 
         .success();
     let plan: Value =
         serde_json::from_slice(&plan.get_output().stdout).test_context("parse Compose plan")?;
-    assert_eq!(plan["kind"], "ComposePlan", "test contract values differ");
-    assert_eq!(plan["version"], "1", "test contract values differ");
-    assert_eq!(
-        plan["file"], "docker-compose.yml",
-        "test contract values differ"
-    );
+    assert_eq!(plan["kind"], "ComposePlan");
+    assert_eq!(plan["version"], "1");
+    assert_eq!(plan["file"], "docker-compose.yml");
     let ports = plan["ports"]
         .as_array()
         .test_context("Compose plan ports")?;
@@ -61,16 +51,14 @@ fn compose_discovery_generates_config_and_rewrites_only_after_confirmation() -> 
             .iter()
             .find(|port| port["name"] == "web")
             .test_context("web plan")?["current_host_port"],
-        3000,
-        "test contract values differ"
+        3000
     );
     assert_eq!(
         ports
             .iter()
             .find(|port| port["name"] == "postgres")
             .test_context("Postgres plan")?["current_host_port"],
-        5432,
-        "test contract values differ"
+        5432
     );
 
     let original = fs::read(&compose).test_context("read original Compose fixture")?;
@@ -80,8 +68,7 @@ fn compose_discovery_generates_config_and_rewrites_only_after_confirmation() -> 
         .failure();
     assert_eq!(
         fs::read(&compose).test_context("reread Compose fixture")?,
-        original,
-        "test contract values differ"
+        original
     );
 
     stackstead(&project.repo)
@@ -89,14 +76,8 @@ fn compose_discovery_generates_config_and_rewrites_only_after_confirmation() -> 
         .assert()
         .success();
     let rewritten = fs::read_to_string(&compose).test_context("read rewritten Compose fixture")?;
-    assert!(
-        rewritten.contains("127.0.0.1:${WEB_PORT}:80"),
-        "test contract condition failed"
-    );
-    assert!(
-        rewritten.contains("127.0.0.1:${POSTGRES_PORT}:5432"),
-        "test contract condition failed"
-    );
+    assert!(rewritten.contains("127.0.0.1:${WEB_PORT}:80"));
+    assert!(rewritten.contains("127.0.0.1:${POSTGRES_PORT}:5432"));
     Ok(())
 }
 
@@ -116,14 +97,8 @@ fn explicit_nested_compose_file_drives_init_plan_and_apply() -> anyhow::Result<(
 
     let missing = stackstead(&project.repo).arg("init").assert().failure();
     let error = output_text(&missing.get_output().stderr)?;
-    assert!(
-        error.contains("--compose-file"),
-        "test contract condition failed"
-    );
-    assert!(
-        error.contains("infra/docker/compose.yml"),
-        "test contract condition failed"
-    );
+    assert!(error.contains("--compose-file"));
+    assert!(error.contains("infra/docker/compose.yml"));
 
     stackstead(&project.repo)
         .args(["init", "--compose-file", "infra/docker/compose.yml"])
@@ -132,8 +107,7 @@ fn explicit_nested_compose_file_drives_init_plan_and_apply() -> anyhow::Result<(
     let config = load_config(&project.repo.join("stackstead.yaml"))?;
     assert_eq!(
         config["runtime"]["files"],
-        serde_yaml::Value::Sequence(vec!["infra/docker/compose.yml".into()]),
-        "test contract values differ"
+        serde_yaml::Value::Sequence(vec!["infra/docker/compose.yml".into()])
     );
 
     let plan = stackstead(&project.repo)
@@ -142,10 +116,7 @@ fn explicit_nested_compose_file_drives_init_plan_and_apply() -> anyhow::Result<(
         .success();
     let plan: Value =
         serde_json::from_slice(&plan.get_output().stdout).test_context("parse plan")?;
-    assert_eq!(
-        plan["file"], "infra/docker/compose.yml",
-        "test contract values differ"
-    );
+    assert_eq!(plan["file"], "infra/docker/compose.yml");
 
     let second = project.repo.join("infra/docker/admin-compose.yml");
     fs::write(
@@ -180,10 +151,7 @@ fn explicit_nested_compose_file_drives_init_plan_and_apply() -> anyhow::Result<(
         .assert()
         .success();
     let explicit: Value = serde_json::from_slice(&explicit.get_output().stdout).test()?;
-    assert_eq!(
-        explicit["file"], "infra/docker/compose.yml",
-        "test contract values differ"
-    );
+    assert_eq!(explicit["file"], "infra/docker/compose.yml");
 
     stackstead(&project.repo)
         .args([
@@ -198,14 +166,9 @@ fn explicit_nested_compose_file_drives_init_plan_and_apply() -> anyhow::Result<(
     assert!(
         fs::read_to_string(&nested)
             .test_context("read rewritten nested Compose file")?
-            .contains("127.0.0.1:${WEB_PORT}:80"),
-        "test contract condition failed"
+            .contains("127.0.0.1:${WEB_PORT}:80")
     );
-    assert_eq!(
-        fs::read(&second).test()?,
-        second_before,
-        "test contract values differ"
-    );
+    assert_eq!(fs::read(&second).test()?, second_before);
     Ok(())
 }
 
@@ -233,9 +196,6 @@ fn multi_file_config_keeps_the_conventional_root_plan_fallback() -> anyhow::Resu
         .assert()
         .success();
     let plan: Value = serde_json::from_slice(&plan.get_output().stdout).test()?;
-    assert_eq!(
-        plan["file"], "docker-compose.yml",
-        "test contract values differ"
-    );
+    assert_eq!(plan["file"], "docker-compose.yml");
     Ok(())
 }

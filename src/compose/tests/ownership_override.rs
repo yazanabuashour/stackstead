@@ -4,8 +4,7 @@ use super::*;
 fn ownership_mount_quotes_valid_commas_and_quotes() -> anyhow::Result<()> {
     assert_eq!(
         ownership_bind_mount("/tmp/source,\"quoted\""),
-        "type=bind,\"src=/tmp/source,\"\"quoted\"\"\",dst=/stackstead-source",
-        "test contract values differ"
+        "type=bind,\"src=/tmp/source,\"\"quoted\"\"\",dst=/stackstead-source"
     );
     Ok(())
 }
@@ -45,28 +44,18 @@ volumes:
         let values = yaml_field(&document, field)
             .and_then(serde_yaml::Value::as_mapping)
             .test()?;
-        assert_eq!(values.len(), names.len(), "test contract values differ");
+        assert_eq!(values.len(), names.len());
         for name in names {
             let token = values
                 .get(serde_yaml::Value::String((*name).into()))
                 .and_then(|resource| yaml_field(resource, "labels"))
                 .and_then(|labels| yaml_field(labels, RUNTIME_TOKEN_LABEL))
                 .and_then(serde_yaml::Value::as_str);
-            assert_eq!(
-                token,
-                Some(manifest.runtime_token.as_str()),
-                "test contract values differ"
-            );
+            assert_eq!(token, Some(manifest.runtime_token.as_str()));
         }
     }
-    assert!(
-        !rendered.contains("upstream:"),
-        "test contract condition failed"
-    );
-    assert!(
-        !rendered.contains("external-data:"),
-        "test contract condition failed"
-    );
+    assert!(!rendered.contains("upstream:"));
+    assert!(!rendered.contains("external-data:"));
     Ok(())
 }
 

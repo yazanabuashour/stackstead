@@ -122,10 +122,6 @@ pub(super) fn default_compose_files() -> Vec<PathBuf> {
     vec![PathBuf::from("docker-compose.yml")]
 }
 
-pub(super) fn default_project_name_template() -> String {
-    "{{ project.name }}-{{ stackstead.id }}".to_owned()
-}
-
 pub(super) const fn default_port_base() -> u16 {
     39000
 }
@@ -144,10 +140,6 @@ pub(super) const fn default_health_interval_millis() -> u64 {
 
 pub(super) const fn default_health_status() -> u16 {
     200
-}
-
-pub(super) fn default_link_folder() -> PathBuf {
-    PathBuf::from(".stackstead/yarn-links")
 }
 
 pub(super) fn default_postgres_service() -> String {

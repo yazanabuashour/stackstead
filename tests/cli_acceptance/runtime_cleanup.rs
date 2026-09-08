@@ -17,7 +17,7 @@ case "$kind $verb" in
     test -f "$FAKE_STATE/runtime" && printf '%s\n' "$COMPOSE_PROJECT_NAME-web-1"
     ;;
   "container inspect")
-    printf '{"io.stackstead.runtime-token":"%s"}\n' "$EXPECTED_TOKEN"
+    printf '{"io.stackstead.runtime-token":"%s","com.docker.compose.project":"%s"}\n' "$EXPECTED_TOKEN" "$COMPOSE_PROJECT_NAME"
     ;;
   "network ls") ;;
   "volume ls")
@@ -70,19 +70,12 @@ exit 0
         .args(["destroy", &manifest.stackstead_id, "--yes"])
         .assert()
         .success();
-    assert!(
-        !manifest.stackstead_root.exists(),
-        "test contract condition failed"
-    );
-    assert!(
-        !state.join("claim").exists(),
-        "test contract condition failed"
-    );
+    assert!(!manifest.stackstead_root.exists());
+    assert!(!state.join("claim").exists());
     assert!(
         fs::read_to_string(state.join("commands"))
             .test()?
-            .contains("down -v --remove-orphans --rmi local"),
-        "test contract condition failed"
+            .contains("down -v --remove-orphans --rmi local")
     );
     Ok(())
 }
@@ -111,9 +104,6 @@ fn stop_and_destroy_without_runtime_resources_skip_compose_and_claim_removal() -
         .args(["destroy", &manifest.stackstead_id, "--yes"])
         .assert()
         .success();
-    assert!(
-        !manifest.stackstead_root.exists(),
-        "test contract condition failed"
-    );
+    assert!(!manifest.stackstead_root.exists());
     Ok(())
 }

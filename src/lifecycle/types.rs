@@ -3,7 +3,6 @@ use std::{path::PathBuf, time::Duration};
 use chrono::Utc;
 
 use crate::{
-    compose,
     config::StacksteadConfig,
     lock::LockGuard,
     manifest::{ComponentStatus, SourceOwnership, StacksteadManifest},
@@ -47,8 +46,7 @@ pub struct InspectOutput {
 
 #[derive(Debug, Clone)]
 pub struct LiveStatus {
-    pub runtime_status: ComponentStatus,
-    pub services: Vec<compose::ServiceObservation>,
+    pub runtime: super::RuntimeObservation,
     pub database_reachable: Option<bool>,
     pub database_status: Option<ComponentStatus>,
     pub health_healthy: Option<bool>,
@@ -59,6 +57,7 @@ pub enum StatusBasis {
     Live,
     Recorded,
     Lifecycle,
+    Unconfigured,
 }
 
 impl std::fmt::Display for StatusBasis {
@@ -67,6 +66,7 @@ impl std::fmt::Display for StatusBasis {
             Self::Live => "live",
             Self::Recorded => "recorded",
             Self::Lifecycle => "lifecycle",
+            Self::Unconfigured => "unconfigured",
         })
     }
 }

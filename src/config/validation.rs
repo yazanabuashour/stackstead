@@ -6,10 +6,9 @@ use std::{
 
 use super::{
     CONFIG_VERSION, ConfigError,
-    features::DependencyProvider,
     helpers::{
         invalid, reserved_process_env, valid_env_name, validate_identifier, validate_relative_file,
-        validate_safe_relative, validate_url_template,
+        validate_url_template,
     },
     model::StacksteadConfig,
 };
@@ -49,6 +48,14 @@ impl StacksteadConfig {
         }
         for file in &self.runtime.files {
             validate_relative_file("runtime.files", file)?;
+        }
+        if self
+            .runtime
+            .readiness
+            .as_ref()
+            .is_some_and(|readiness| readiness.required.is_empty())
+        {
+            return invalid("runtime.readiness.required must contain at least one service");
         }
         if self.state.root.as_os_str().is_empty() || self.state.root == Path::new("/") {
             return invalid("state.root must not be empty or the filesystem root");
@@ -149,24 +156,6 @@ impl StacksteadConfig {
     }
 
     fn validate_commands(&self) -> Result<(), ConfigError> {
-        if self.dependencies.provider == DependencyProvider::YarnClassic {
-            if let Some(link) = &self.dependencies.link {
-                validate_safe_relative("dependencies.link.link_folder", &link.link_folder)?;
-                if link.enabled && link.command.trim().is_empty() {
-                    return invalid(
-                        "dependencies.link.command cannot be empty when linking is enabled",
-                    );
-                }
-            }
-        } else if self
-            .dependencies
-            .link
-            .as_ref()
-            .is_some_and(|link| link.enabled)
-        {
-            return invalid("dependencies.link requires provider `yarn-classic`");
-        }
-
         for (hook_name, commands) in self.hooks.entries() {
             for command in commands {
                 if command.command.trim().is_empty() {
@@ -238,10 +227,6 @@ impl StacksteadConfig {
                 .map_err(|error| ConfigError::Validation(format!("{name}: {error}")))
         };
 
-        validate(
-            "runtime.project_name_template",
-            &self.runtime.project_name_template,
-        )?;
         for (service, exposure) in &self.resources.ports.expose {
             if let Some(url) = &exposure.url {
                 validate(&format!("resources.ports.expose.{service}.url"), url)?;

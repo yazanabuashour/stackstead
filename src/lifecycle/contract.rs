@@ -1,14 +1,10 @@
 use std::{collections::BTreeMap, path::Path};
 
-use chrono::Utc;
-
 use crate::{
     command, compose,
-    config::{CommandConfig, DependencyProvider, StacksteadConfig},
+    config::{CommandConfig, StacksteadConfig},
     context, envfile,
-    manifest::{
-        POINTER_VERSION, StacksteadManifest, StacksteadPointer, write_json_atomic, write_pointer,
-    },
+    manifest::{POINTER_VERSION, StacksteadManifest, StacksteadPointer, write_pointer},
     paths,
     template::{TemplateContext, render_template},
 };
@@ -42,33 +38,6 @@ pub fn install_dependencies(
             environment,
         )?;
     }
-    if config.dependencies.provider == DependencyProvider::YarnClassic
-        && let Some(link) = config
-            .dependencies
-            .link
-            .as_ref()
-            .filter(|link| link.enabled)
-    {
-        let folder = paths::safe_generated_path(&manifest.worktree, &link.link_folder)?;
-        std::fs::create_dir_all(&folder)?;
-        let output =
-            command::run_configured(&link.command, link.shell, &manifest.worktree, environment)?;
-        write_command_log(
-            &manifest.state_dir.join("logs/yarn-link.log"),
-            &output,
-            environment,
-        )?;
-        write_json_atomic(
-            &manifest.state_dir.join("link-state.json"),
-            &serde_json::json!({
-                "kind": "StacksteadYarnLinkState",
-                "version": "1",
-                "link_folder": folder,
-                "status": "ready",
-                "updated_at": Utc::now()
-            }),
-        )?;
-    }
     Ok(())
 }
 
@@ -78,13 +47,12 @@ pub(super) fn write_contract(
     context_values: &TemplateContext,
 ) -> anyhow::Result<()> {
     validate_generated_paths(config, manifest)?;
-    let mut generated = config
+    let generated = config
         .env
         .generate
         .iter()
         .map(|(key, template)| Ok((key.clone(), render_template(template, context_values)?)))
         .collect::<anyhow::Result<BTreeMap<_, _>>>()?;
-    add_dependency_environment(config, manifest, &mut generated)?;
     manifest.env_keys = generated.keys().cloned().collect();
     envfile::write_generated(manifest, &generated)?;
     context::write_agent_context(manifest, &config.agent.rules)?;
@@ -120,28 +88,6 @@ fn validate_generated_paths(
         || manifest.pointer_file != expected_pointer
     {
         anyhow::bail!("generated contract paths do not match the current validated configuration");
-    }
-    Ok(())
-}
-
-fn add_dependency_environment(
-    config: &StacksteadConfig,
-    manifest: &StacksteadManifest,
-    generated: &mut BTreeMap<String, String>,
-) -> anyhow::Result<()> {
-    if config.dependencies.provider == DependencyProvider::YarnClassic
-        && let Some(link) = config
-            .dependencies
-            .link
-            .as_ref()
-            .filter(|link| link.enabled)
-    {
-        generated.insert(
-            "YARN_LINK_FOLDER".into(),
-            paths::safe_generated_path(&manifest.worktree, &link.link_folder)?
-                .display()
-                .to_string(),
-        );
     }
     Ok(())
 }

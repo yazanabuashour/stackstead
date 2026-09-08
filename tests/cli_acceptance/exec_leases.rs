@@ -59,13 +59,9 @@ fn exec_holds_the_run_lease_until_the_compose_client_finishes() -> anyhow::Resul
         executing
             .wait()
             .test_context("wait for service command")?
-            .success(),
-        "test contract condition failed"
+            .success()
     );
-    assert!(
-        stopping.wait().test_context("wait for stop")?.success(),
-        "test contract condition failed"
-    );
+    assert!(stopping.wait().test_context("wait for stop")?.success());
     Ok(())
 }
 
@@ -130,9 +126,6 @@ fn killed_exec_wrapper_leaves_the_run_lease_with_the_compose_client() -> anyhow:
     );
 
     fs::remove_file(&release).test_context("release Compose client")?;
-    assert!(
-        stopping.wait().test_context("wait for stop")?.success(),
-        "test contract condition failed"
-    );
+    assert!(stopping.wait().test_context("wait for stop")?.success());
     Ok(())
 }

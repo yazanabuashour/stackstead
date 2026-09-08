@@ -146,6 +146,7 @@ mod tests {
             event_log: root.join("events.jsonl"),
             env_keys: vec![],
             status: ManifestStatus::default(),
+            readiness: crate::readiness::Contract::Unconfigured {},
             database: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
@@ -171,13 +172,13 @@ mod tests {
     #[test]
     fn climbs_to_project_config() -> anyhow::Result<()> {
         let directory = tempfile::tempdir().test()?;
-        std::fs::write(directory.path().join("stackstead.yaml"), "version: '1'").test()?;
+        std::fs::write(directory.path().join("stackstead.yaml"), "version: '2'").test()?;
         let nested = directory.path().join("a/b");
         std::fs::create_dir_all(&nested).test()?;
-        assert!(
-            matches!(discover(&nested).test()?, Discovery::Project { .. }),
-            "test contract condition failed"
-        );
+        assert!(matches!(
+            discover(&nested).test()?,
+            Discovery::Project { .. }
+        ));
         Ok(())
     }
 
@@ -194,8 +195,7 @@ mod tests {
             discover(&copied_root)
                 .test_err()?
                 .to_string()
-                .contains("does not match its manifest"),
-            "test contract condition failed"
+                .contains("does not match its manifest")
         );
         Ok(())
     }
@@ -213,14 +213,8 @@ mod tests {
                 manifest: discovered,
                 ..
             } => {
-                assert_eq!(
-                    pointer_path, manifest.pointer_file,
-                    "test contract values differ"
-                );
-                assert_eq!(
-                    discovered.stackstead_id, manifest.stackstead_id,
-                    "test contract values differ"
-                );
+                assert_eq!(pointer_path, manifest.pointer_file);
+                assert_eq!(discovered.stackstead_id, manifest.stackstead_id);
             }
             Discovery::Project { .. } => anyhow::bail!("expected stackstead discovery"),
         }

@@ -12,47 +12,27 @@ fn repair_regenerates_missing_contract_files_without_docker() -> anyhow::Result<
         .arg("current")
         .assert()
         .failure();
-    assert!(
-        missing.get_output().stdout.is_empty(),
-        "test contract condition failed"
-    );
+    assert!(missing.get_output().stdout.is_empty());
 
     let assert = stackstead(&project.repo)
         .args(["repair", "feature-a", "--json"])
         .assert()
         .success();
     let repaired = changed_manifest(&assert.get_output().stdout, "repaired")?;
-    assert_eq!(
-        repaired.stackstead_id, manifest.stackstead_id,
-        "test contract values differ"
-    );
-    assert!(
-        repaired.env_file.is_file(),
-        "test contract condition failed"
-    );
-    assert!(
-        repaired.agent_context.is_file(),
-        "test contract condition failed"
-    );
-    assert!(
-        repaired.pointer_file.is_file(),
-        "test contract condition failed"
-    );
+    assert_eq!(repaired.stackstead_id, manifest.stackstead_id);
+    assert!(repaired.env_file.is_file());
+    assert!(repaired.agent_context.is_file());
+    assert!(repaired.pointer_file.is_file());
     assert_eq!(
         event_types(&repaired.event_log)?.last().map(String::as_str),
-        Some("repair"),
-        "test contract values differ"
+        Some("repair")
     );
 
     let repaired_pointer: StacksteadPointer = serde_json::from_slice(
         &fs::read(&repaired.pointer_file).test_context("read repaired pointer")?,
     )
     .test_context("parse repaired pointer")?;
-    assert_eq!(
-        repaired_pointer.manifest,
-        repaired.manifest_path(),
-        "test contract values differ"
-    );
+    assert_eq!(repaired_pointer.manifest, repaired.manifest_path());
     Ok(())
 }
 
@@ -70,15 +50,9 @@ fn json_destroy_requires_yes_without_writing_a_prompt_to_stdout() -> anyhow::Res
         "JSON failure was contaminated by: {}",
         output_text(&assert.get_output().stdout)?
     );
-    assert!(
-        output_text(&assert.get_output().stderr)?.contains("--yes"),
-        "test contract condition failed"
-    );
-    assert!(
-        manifest.stackstead_root.is_dir(),
-        "test contract condition failed"
-    );
-    assert!(manifest.worktree.is_dir(), "test contract condition failed");
+    assert!(output_text(&assert.get_output().stderr)?.contains("--yes"));
+    assert!(manifest.stackstead_root.is_dir());
+    assert!(manifest.worktree.is_dir());
     Ok(())
 }
 
@@ -96,15 +70,11 @@ fn unexposed_database_service_fails_without_publishing_partial_state() -> anyhow
         stderr.contains("resources.ports.expose") || stderr.contains("must be present"),
         "unexpected error: {stderr}"
     );
-    assert!(
-        state_stackstead_directories(&project)?.is_empty(),
-        "test contract condition failed"
-    );
+    assert!(state_stackstead_directories(&project)?.is_empty());
     assert!(
         git(&project.repo, &["branch", "--list", "feature-a"])?
             .trim()
-            .is_empty(),
-        "test contract condition failed"
+            .is_empty()
     );
     Ok(())
 }
@@ -147,28 +117,18 @@ fn failed_git_worktree_add_leaves_no_published_manifest_or_stackstead_root() -> 
         .args(["create", "feature-a", "--json"])
         .assert()
         .failure();
-    assert!(
-        output_text(&assert.get_output().stderr)?.contains("intentional worktree failure"),
-        "test contract condition failed"
-    );
-    assert!(
-        state_stackstead_directories(&project)?.is_empty(),
-        "test contract condition failed"
-    );
+    assert!(output_text(&assert.get_output().stderr)?.contains("intentional worktree failure"));
+    assert!(state_stackstead_directories(&project)?.is_empty());
     let registry: Value = serde_json::from_slice(
         &fs::read(test_state_home(&project.repo).join("stackstead/port-leases.json"))
             .test_context("read rolled-back port lease registry")?,
     )
     .test_context("parse rolled-back port lease registry")?;
-    assert!(
-        registry["leases"].as_array().test()?.is_empty(),
-        "test contract condition failed"
-    );
+    assert!(registry["leases"].as_array().test()?.is_empty());
     assert!(
         git(&project.repo, &["branch", "--list", "feature-a"])?
             .trim()
-            .is_empty(),
-        "test contract condition failed"
+            .is_empty()
     );
     Ok(())
 }

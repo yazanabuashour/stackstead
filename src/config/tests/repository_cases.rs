@@ -57,20 +57,6 @@ fn rejects_state_root_that_normalizes_to_filesystem_root() -> anyhow::Result<()>
 }
 
 #[test]
-fn validates_yarn_link_shape() -> anyhow::Result<()> {
-    let mut config = StacksteadConfig::from_yaml(SAMPLE).test()?;
-    config.dependencies.provider = DependencyProvider::YarnClassic;
-    config.dependencies.link = Some(LinkConfig {
-        enabled: true,
-        ..LinkConfig::default()
-    });
-    (config.validate()).test_err()?;
-    config.dependencies.link.as_mut().test()?.command = "./scripts/link-packages.sh".into();
-    (config.validate()).test()?;
-    Ok(())
-}
-
-#[test]
 fn validates_http_and_command_health_checks() -> anyhow::Result<()> {
     let mut config = StacksteadConfig::from_yaml(SAMPLE).test()?;
     config.health.checks = vec![

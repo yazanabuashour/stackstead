@@ -10,10 +10,9 @@ use crate::{
     manifest::{StacksteadManifest, StacksteadPointer},
     paths,
     slug::make_stackstead_id,
-    template::render_template,
 };
 
-use super::{contract::template_context, ensure_no_teardown, types::ProjectRuntime};
+use super::{ensure_no_teardown, types::ProjectRuntime};
 
 pub fn validate_manifest_binding(
     runtime: &ProjectRuntime,
@@ -32,6 +31,7 @@ pub(super) fn validate_durable_manifest_binding(
     manifest: &StacksteadManifest,
 ) -> anyhow::Result<()> {
     paths::validate_destroy_target(manifest, &manifest.project_state_root)?;
+    manifest.readiness.validate()?;
     validate_compose_project(&manifest.compose_project)?;
     let expected_id = make_stackstead_id(&manifest.slug, &manifest.short_id)?;
     if manifest.stackstead_id != expected_id {
@@ -97,14 +97,9 @@ pub fn validate_current_contract(
     let expected_env = paths::safe_generated_path(&manifest.worktree, &runtime.config.env.file)?;
     let expected_context =
         paths::safe_generated_path(&manifest.worktree, &runtime.config.agent.context_file)?;
-    let rendered_compose_project = render_template(
-        &runtime.config.runtime.project_name_template,
-        &template_context(manifest),
-    )?;
     if manifest.compose_files != expected_compose_files
         || manifest.env_file != expected_env
         || manifest.agent_context != expected_context
-        || rendered_compose_project != manifest.compose_project
     {
         anyhow::bail!(
             "current stackstead.yaml contract differs from {}; restore it or recreate the stackstead before regeneration",
@@ -188,6 +183,19 @@ pub(super) fn validate_contract_binding(
     config: &StacksteadConfig,
     manifest: &StacksteadManifest,
 ) -> anyhow::Result<()> {
+    manifest.readiness.validate()?;
+    if manifest.readiness.required()
+        != config
+            .runtime
+            .readiness
+            .as_ref()
+            .map(|readiness| &readiness.required)
+    {
+        anyhow::bail!(
+            "configured readiness role declaration differs from {}; restore it or recreate the stackstead before regeneration",
+            manifest.stackstead_id
+        );
+    }
     let configured_ports = configured_container_ports(config);
     if manifest.container_ports != configured_ports
         || manifest.ports.keys().ne(configured_ports.keys())

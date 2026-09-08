@@ -18,22 +18,12 @@ fn tampered_manifest_destroy_fails_before_external_mutation() -> anyhow::Result<
         .failure();
     assert!(
         output_text(&assert.get_output().stderr)?
-            .contains("project identity does not match the discovered project"),
-        "test contract condition failed"
+            .contains("project identity does not match the discovered project")
     );
-    assert!(
-        assert.get_output().stdout.is_empty(),
-        "test contract condition failed"
-    );
-    assert!(
-        manifest.stackstead_root.is_dir(),
-        "test contract condition failed"
-    );
-    assert!(manifest.worktree.is_dir(), "test contract condition failed");
-    assert!(
-        !event_types(&manifest.event_log)?.contains(&"destroyed".into()),
-        "test contract condition failed"
-    );
+    assert!(assert.get_output().stdout.is_empty());
+    assert!(manifest.stackstead_root.is_dir());
+    assert!(manifest.worktree.is_dir());
+    assert!(!event_types(&manifest.event_log)?.contains(&"destroyed".into()));
     Ok(())
 }
 
@@ -63,22 +53,10 @@ fn repair_rejects_a_generated_directory_symlink_escape() -> anyhow::Result<()> {
         stderr.contains("symlink") || stderr.contains("escapes") || stderr.contains("unsafe"),
         "unexpected symlink error: {stderr}"
     );
-    assert!(
-        !outside.join(".env").exists(),
-        "test contract condition failed"
-    );
-    assert!(
-        !outside.join("AGENT_CONTEXT.md").exists(),
-        "test contract condition failed"
-    );
-    assert!(
-        !outside.join("stackstead.json").exists(),
-        "test contract condition failed"
-    );
-    assert!(
-        manifest.stackstead_root.is_dir(),
-        "test contract condition failed"
-    );
+    assert!(!outside.join(".env").exists());
+    assert!(!outside.join("AGENT_CONTEXT.md").exists());
+    assert!(!outside.join("stackstead.json").exists());
+    assert!(manifest.stackstead_root.is_dir());
     Ok(())
 }
 
@@ -94,15 +72,11 @@ fn destroy_refuses_a_dirty_worktree_before_touching_runtime_state() -> anyhow::R
         .failure();
     assert!(
         String::from_utf8_lossy(&assert.get_output().stderr)
-            .contains("uncommitted or untracked changes"),
-        "test contract condition failed"
+            .contains("uncommitted or untracked changes")
     );
 
-    assert!(
-        manifest.manifest_path().is_file(),
-        "test contract condition failed"
-    );
-    assert!(manifest.worktree.is_dir(), "test contract condition failed");
+    assert!(manifest.manifest_path().is_file());
+    assert!(manifest.worktree.is_dir());
     Ok(())
 }
 
@@ -128,14 +102,8 @@ fn destroy_uses_the_durable_manifest_after_non_destructive_config_path_changes()
         .assert()
         .success();
 
-    assert!(
-        !manifest.stackstead_root.exists(),
-        "test contract condition failed"
-    );
-    assert!(
-        !manifest.worktree.exists(),
-        "test contract condition failed"
-    );
+    assert!(!manifest.stackstead_root.exists());
+    assert!(!manifest.worktree.exists());
     Ok(())
 }
 
@@ -152,17 +120,8 @@ fn repair_rejects_changed_generated_paths_without_writing_them() -> anyhow::Resu
         .args(["repair", "feature-a", "--json"])
         .assert()
         .failure();
-    assert!(
-        !manifest.worktree.join(".stackstead-next").exists(),
-        "test contract condition failed"
-    );
-    assert!(
-        manifest.env_file.is_file(),
-        "test contract condition failed"
-    );
-    assert!(
-        manifest.agent_context.is_file(),
-        "test contract condition failed"
-    );
+    assert!(!manifest.worktree.join(".stackstead-next").exists());
+    assert!(manifest.env_file.is_file());
+    assert!(manifest.agent_context.is_file());
     Ok(())
 }

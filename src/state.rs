@@ -110,6 +110,7 @@ mod tests {
             event_log: root.join("state/events.jsonl"),
             env_keys: vec![],
             status: ManifestStatus::default(),
+            readiness: crate::readiness::Contract::Unconfigured {},
             database: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
@@ -123,13 +124,11 @@ mod tests {
             resolve_manifest(&manifests, "feature-a-a17c")
                 .test()?
                 .short_id,
-            "a17c",
-            "test contract values differ"
+            "a17c"
         );
         assert_eq!(
             resolve_manifest(&manifests, "feature-a").test()?.short_id,
-            "a17c",
-            "test contract values differ"
+            "a17c"
         );
         Ok(())
     }
@@ -143,14 +142,8 @@ mod tests {
         let error = resolve_manifest(&manifests, "feature-a")
             .test_err()?
             .to_string();
-        assert!(
-            error.contains("feature-a-a17c"),
-            "test contract condition failed"
-        );
-        assert!(
-            error.contains("feature-a-b92d"),
-            "test contract condition failed"
-        );
+        assert!(error.contains("feature-a-a17c"));
+        assert!(error.contains("feature-a-b92d"));
         Ok(())
     }
 
@@ -163,18 +156,9 @@ mod tests {
         let error = resolve_manifest(&manifests, "feature-a-a17c")
             .test_err()?
             .to_string();
-        assert!(
-            error.contains("ambiguous"),
-            "test contract condition failed"
-        );
-        assert!(
-            error.contains("feature-a-a17c"),
-            "test contract condition failed"
-        );
-        assert!(
-            error.contains("other-b92d"),
-            "test contract condition failed"
-        );
+        assert!(error.contains("ambiguous"));
+        assert!(error.contains("feature-a-a17c"));
+        assert!(error.contains("other-b92d"));
         Ok(())
     }
 }

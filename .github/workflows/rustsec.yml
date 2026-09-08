@@ -33,7 +33,7 @@ concurrency:
 jobs:
   audit:
     runs-on: ubuntu-24.04
-    # One clean cargo-audit install and eight audits took 54 seconds on 2026-08-28.
+    # The hosted-run timing receipt is unavailable; remeasure before changing this timeout.
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

@@ -10,13 +10,9 @@ fn in_repo_state_is_rejected_before_creating_state() -> anyhow::Result<()> {
         .failure();
     assert!(
         output_text(&rejected.get_output().stderr)?
-            .contains("state.root must resolve outside the repository"),
-        "test contract condition failed"
+            .contains("state.root must resolve outside the repository")
     );
-    assert!(
-        !project.repo.join(".stacksteads").exists(),
-        "test contract condition failed"
-    );
+    assert!(!project.repo.join(".stacksteads").exists());
     Ok(())
 }
 
@@ -40,33 +36,16 @@ fn create_rejects_a_project_lock_symlink_without_touching_its_target() -> anyhow
         .args(["create", "feature-a"])
         .assert()
         .failure();
-    assert_eq!(
-        fs::read_to_string(&marker).test()?,
-        "unchanged\n",
-        "test contract values differ"
-    );
-    assert!(
-        fs::symlink_metadata(&lock).test()?.file_type().is_symlink(),
-        "test contract condition failed"
-    );
+    assert_eq!(fs::read_to_string(&marker).test()?, "unchanged\n");
+    assert!(fs::symlink_metadata(&lock).test()?.file_type().is_symlink());
     for entry in fs::read_dir(lock.parent().test()?).test()? {
-        assert!(
-            !entry.test()?.file_type().test()?.is_dir(),
-            "test contract condition failed"
-        );
+        assert!(!entry.test()?.file_type().test()?.is_dir());
     }
 
     fs::remove_file(&lock).test()?;
     let manifest = project.create("feature-a")?;
-    assert!(
-        manifest.manifest_path().is_file(),
-        "test contract condition failed"
-    );
-    assert_eq!(
-        fs::read_to_string(marker).test()?,
-        "unchanged\n",
-        "test contract values differ"
-    );
+    assert!(manifest.manifest_path().is_file());
+    assert_eq!(fs::read_to_string(marker).test()?, "unchanged\n");
     Ok(())
 }
 
@@ -91,15 +70,11 @@ fn state_parent_symlinks_are_resolved_to_safe_external_targets() -> anyhow::Resu
         .args(["create", "feature-a"])
         .assert()
         .success();
-    assert!(
-        !created.get_output().stdout.is_empty(),
-        "test contract condition failed"
-    );
+    assert!(!created.get_output().stdout.is_empty());
     assert!(
         fs::read_to_string(lock_target)
             .test()?
-            .contains("acquired_at="),
-        "test contract condition failed"
+            .contains("acquired_at=")
     );
     Ok(())
 }

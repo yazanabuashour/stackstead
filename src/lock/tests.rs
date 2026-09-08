@@ -15,15 +15,8 @@ fn lock_acquisition_rejects_symlinks_without_modifying_the_target() -> anyhow::R
     (LockGuard::acquire(&lock, "stackstead")).test_err()?;
     (LockGuard::acquire_existing(&lock, "stackstead")).test_err()?;
     (LockGuard::acquire_existing_shared(&lock, "stackstead")).test_err()?;
-    assert!(
-        !LockGuard::can_acquire(&lock),
-        "test contract condition failed"
-    );
-    assert_eq!(
-        std::fs::read(&target).test()?,
-        b"unchanged",
-        "test contract values differ"
-    );
+    assert!(!LockGuard::can_acquire(&lock));
+    assert_eq!(std::fs::read(&target).test()?, b"unchanged");
     Ok(())
 }
 
@@ -33,10 +26,7 @@ fn lock_acquisition_preserves_regular_file_behavior() -> anyhow::Result<()> {
     let path = directory.path().join("lock");
 
     drop(LockGuard::acquire(&path, "stackstead").test()?);
-    assert!(
-        LockGuard::can_acquire(&path),
-        "test contract condition failed"
-    );
+    assert!(LockGuard::can_acquire(&path));
     drop(LockGuard::acquire_existing(&path, "stackstead").test()?);
     drop(LockGuard::acquire_existing_shared(&path, "stackstead").test()?);
     Ok(())
@@ -108,14 +98,8 @@ fn existing_lock_acquisition_never_recreates_destroyed_state() -> anyhow::Result
     let directory = tempfile::tempdir().test()?;
     let path = directory.path().join("destroyed/state/lock");
     (LockGuard::acquire_existing(&path, "stackstead")).test_err()?;
-    assert!(
-        !directory.path().join("destroyed").exists(),
-        "test contract condition failed"
-    );
+    assert!(!directory.path().join("destroyed").exists());
     (LockGuard::acquire_existing_shared(&path, "stackstead")).test_err()?;
-    assert!(
-        !directory.path().join("destroyed").exists(),
-        "test contract condition failed"
-    );
+    assert!(!directory.path().join("destroyed").exists());
     Ok(())
 }

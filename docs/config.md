@@ -7,7 +7,7 @@ Run `stackstead init` to discover the first conventional Compose file, published
 ## Complete example
 
 ```yaml
-version: "1"
+version: "2"
 kind: StacksteadProject
 
 project:
@@ -24,7 +24,6 @@ runtime:
   provider: docker-compose
   files:
     - docker-compose.yml
-  project_name_template: "{{ project.name }}-{{ stackstead.id }}"
 
 resources:
   ports:
@@ -42,7 +41,6 @@ resources:
         container: 5432
 
 dependencies:
-  provider: command
   install:
     command: ""
     shell: false
@@ -91,11 +89,11 @@ hooks:
 
 ## Top-level fields
 
-`version` must be `"1"` and `kind` must be `StacksteadProject`. Stackstead is pre-release and does not read or migrate older draft contracts. Both header fields are required. Optional sections receive conservative defaults, but `project.name` is required.
+`version` must be `"2"` and `kind` must be `StacksteadProject`. Both header fields and `project.name` are required. Optional sections receive conservative defaults.
 
 ### `project`
 
-`name` is a stable project identity. It participates in the state path and default Compose project name, so use a short filesystem- and Docker-safe name.
+`name` is a stable project identity. It participates in the state path and Compose project name, so use a short filesystem- and Docker-safe name.
 
 ### `source`
 
@@ -107,11 +105,49 @@ The only supported provider is `git-worktree`. `base` names the local branch or 
 
 ### `runtime`
 
-The only provider is `docker-compose`. `files` are resolved in the bound source worktree and passed to Compose in order. `project_name_template` must render the durable identity `{{ project.name }}-{{ stackstead.id }}`; this redundancy lets every lifecycle command reject a corrupted or redirected Compose target.
+The only provider is `docker-compose`. Stackstead resolves `files` in the bound source worktree and passes them to Compose in order. The Compose project name is always `project.name` + `"-"` + the full stackstead ID. Lifecycle commands independently validate the manifest's Compose identity and reject collisions with another owner.
 
-Stackstead appends a generated `.stackstead/compose-ownership.yaml` as the final Compose file on every invocation: `docker compose -p <project> --env-file <env> -f <configured>... -f .stackstead/compose-ownership.yaml ...`. The override applies the manifest v2 `io.stackstead.runtime-token` label to every direct service and managed network or volume. `include`, `extends`, anonymous volumes, undeclared named volumes, managed resource `name` values, interpolated `container_name` values, cross-file redeclarations of top-level networks or volumes, non-boolean `external` values, and resource shapes that cannot be labeled completely are rejected instead of being started without ownership metadata. External networks and volumes remain repository-owned and are not labeled.
+Stackstead appends a generated `.stackstead/compose-ownership.yaml` as the final Compose file on every invocation: `docker compose -p <project> --env-file <env> -f <configured>... -f .stackstead/compose-ownership.yaml ...`. The override applies the manifest v3 `io.stackstead.runtime-token` label to every direct service and managed network or volume. `include`, `extends`, anonymous volumes, undeclared named volumes, managed resource `name` values, interpolated `container_name` values, cross-file redeclarations of top-level networks or volumes, non-boolean `external` values, and resource shapes that cannot be labeled completely are rejected instead of being started without ownership metadata. External networks and volumes remain repository-owned and are not labeled.
 
 Before startup or teardown, Stackstead verifies a deterministic labeled claim volume and every project-labeled or exact conventional/custom-name container, network, and volume. A missing or mismatched label fails closed before Compose can target a peer resource. A newly created stackstead with no claim and no candidate Docker resources may be stopped or destroyed without invoking Compose.
+
+### `runtime.readiness`
+
+Readiness is optional in config version 2. Declare a nonempty `required` map
+using exact Compose service names and explicit `long-running` or `job` roles.
+For the [three-agent example](../examples/three-agent-demo/README.md), whose
+Compose file defines all three services:
+
+```yaml
+runtime:
+  provider: docker-compose
+  files:
+    - docker-compose.yml
+  readiness:
+    required:
+      web: long-running
+      postgres: long-running
+      setup: job
+```
+
+Omitting readiness means `unconfigured`, never `ready`. Stackstead does not infer
+roles from commands, restart policies, healthchecks, ports, exit codes, or
+`depends_on`. Required names identify Compose services, not Stackstead port
+aliases. Do not copy replica counts into this map. The effective Compose model
+determines counts and must contain every required service under the startup
+profiles. Missing, inactive, zero-replica, or provider-managed required services
+cannot resolve to owned container requirements.
+
+A long-running instance must be running and, if its actual container has a
+healthcheck, healthy. This includes image-provided healthchecks. A job must have
+an observed `exited` state with exit code zero; a disappeared container is not
+success. Optional service failures remain visible without blocking the explicit
+required set. Application checks under `health` remain independent.
+
+Commit declarations with the Compose files before creating an environment.
+Changing the required services or roles for an existing environment fails
+current-contract validation before regeneration. See [Compose readiness
+evidence](compose.md#readiness-evidence) and [startup](lifecycle.md#start).
 
 ### `resources.ports`
 
@@ -127,24 +163,9 @@ The Compose file must consume the exact generated host-port variable for every c
 
 ### `dependencies`
 
-`provider: command` optionally runs `install.command` before Compose starts. With `shell: false`, Stackstead parses the command into an executable and arguments; shell operators such as pipes and redirects do not work. Set `shell: true` only when the repository intentionally requires platform-shell semantics.
+`install.command` optionally runs from the bound worktree before Compose starts and during `repair`, with the generated environment available. With `shell: false`, Stackstead parses the command into an executable and arguments; shell operators such as pipes and redirects do not work. Set `shell: true` only when the repository intentionally requires platform-shell semantics. Keep installation safe to rerun.
 
-`provider: yarn-classic` adds a stackstead-local link folder:
-
-```yaml
-dependencies:
-  provider: yarn-classic
-  install:
-    command: "yarn install --frozen-lockfile"
-    shell: false
-  link:
-    enabled: true
-    link_folder: ".stackstead/yarn-links"
-    command: "sh ./scripts/link-packages.sh"
-    shell: false
-```
-
-Stackstead exposes the resolved folder as `YARN_LINK_FOLDER`, records link state, and can rerun the configured command during repair. It does not infer package relationships. The [Yarn Classic example](../examples/yarn-classic/README.md) is a runnable reference configuration.
+For package linking, use a repository script through `dependencies.install`. Pass repository-defined environment values through `env.generate`, or derive script-local paths from the pinned `STACKSTEAD_WORKTREE`. The script owns link-folder creation, containment checks, package relationships, and any link-state records. The [Yarn Classic example](../examples/yarn-classic/README.md) shows this recipe.
 
 ### `database.postgres`
 
@@ -154,7 +175,12 @@ See [Database behavior](database.md).
 
 ### `health`
 
-`up` waits for every configured check after Compose, Postgres seeding, and `post_up` hooks. A check must set exactly one of `url` or `command.command`:
+After Compose, Postgres seeding, and `post_up` hooks, `up` verifies declared
+runtime readiness and every application check under one shared deadline using
+`health.timeout_seconds` and `health.interval_millis`. These settings do not
+bound the entire startup operation. Empty application checks mean health is
+unconfigured and its status is `unknown`, even when runtime readiness is `ready`.
+A check must set exactly one of `url` or `command.command`:
 
 ```yaml
 health:
@@ -170,11 +196,11 @@ health:
         shell: false
 ```
 
-HTTP checks support loopback `http` or `https` URL templates and an expected status from 100 through 599. HTTPS uses WebPKI roots; self-signed, mkcert, or private-CA endpoints need a publicly trusted certificate or a command check that invokes the repository's approved CA-aware client. Redirects are not followed, so the configured status is the status being tested. Command checks use the same direct-command model and generated environment as hooks, with trusted manifest-derived `STACKSTEAD_*` and `COMPOSE_PROJECT_NAME` values applied last. A timeout terminates the configured process tree, makes `up` fail, and persists health as `failed`. A new `up` clears stale health/database readiness before doing work. `inspect` passively re-probes HTTP-only health contracts only while the runtime is reported running; it reports persisted status for command-backed checks rather than executing repository code during inspection.
+HTTP checks support loopback `http` or `https` URL templates and an expected status from 100 through 599. HTTPS uses WebPKI roots; self-signed, mkcert, or private-CA endpoints need a publicly trusted certificate or a command check that invokes the repository's approved CA-aware client. Redirects are not followed, so the configured status is the status being tested. Command checks use the same direct-command model and generated environment as hooks, with trusted manifest-derived `STACKSTEAD_*` and `COMPOSE_PROJECT_NAME` values applied last. A timeout terminates the configured process tree, makes `up` fail, and persists health as `failed`. A new `up` clears stale health/database status and resolved runtime requirements before doing work. `inspect` may passively re-probe HTTP-only health contracts while containers are running and checks endpoint ownership where it can correlate a target. For command-backed checks it uses recorded status while the runtime is running, rather than executing repository code. `ps` runs no application probes. Runtime readiness failures do not overwrite the independent application-health result.
 
 ### `env`
 
-`file` is relative to the generated worktree, normally `.stackstead/.env`. Keys under `generate` must be valid environment variable names. The v1 contract rejects process-, state-location-, and Docker-control names such as `PATH`, `HOME`, `XDG_STATE_HOME`, `LD_*`, `DYLD_*`, and `DOCKER_*`/`COMPOSE_*`; a tracked app contract cannot redirect executable lookup, the global lease registry, or the Docker daemon. Every generated file's exact key set is checked against its manifest before use. Output order is deterministic.
+`file` is relative to the generated worktree, normally `.stackstead/.env`. Keys under `generate` must be valid environment variable names. Stackstead rejects process-, state-location-, and Docker-control names such as `PATH`, `HOME`, `XDG_STATE_HOME`, `LD_*`, `DYLD_*`, and `DOCKER_*`/`COMPOSE_*`; a tracked app contract cannot redirect executable lookup, the global lease registry, or the Docker daemon. Every generated file's exact key set is checked against its manifest before use. Output order is deterministic.
 
 Values whose names contain `PASSWORD`, `TOKEN`, `SECRET`, `KEY`, `CREDENTIAL`, or `AUTH` are redacted from normal output and logs, but the generated env file itself is not a secret store. Keep sensitive source material out of version control and protect the local state directory appropriately.
 

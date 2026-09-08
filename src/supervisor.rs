@@ -1,11 +1,17 @@
 #[cfg(unix)]
 use std::{
     ffi::OsString,
-    io::Read,
-    os::{fd::AsFd, unix::process::CommandExt},
+    os::{fd::AsFd, unix::process::CommandExt as _},
     process::Command,
-    time::{Duration, Instant},
+    time::Duration,
 };
+
+#[cfg(unix)]
+mod cleanup;
+#[cfg(unix)]
+mod target;
+#[cfg(unix)]
+mod wait;
 
 #[cfg(unix)]
 pub const ARGUMENT: &str = "__stackstead_run_supervisor_v1";
@@ -49,38 +55,26 @@ fn run() -> anyhow::Result<i32> {
     validate_lease(&lease_fd, lease_dev, lease_ino)?;
     set_cloexec(&lease_fd, true)?;
     set_cloexec(&control_fd, true)?;
+    crate::command::require_waitable_children()?;
     #[cfg(target_os = "linux")]
-    set_subreaper()?;
+    cleanup::set_subreaper()?;
     let mut control = std::os::unix::net::UnixStream::from(control_fd);
     control.set_nonblocking(true)?;
+    if wait::parent_closed(&mut control)? {
+        return Ok(143);
+    }
 
     let mut command = Command::new(program);
     command.args(args).process_group(0);
-    let child = command.spawn()?;
-    let group = rustix::process::Pid::from_child(&child);
-    let mut target = TargetGuard {
-        child,
-        group,
-        armed: true,
-    };
-
-    loop {
-        if let Some(status) = target.child.try_wait()? {
-            target.finish()?;
-            return Ok(crate::agent::exit_code(status));
-        }
-        let mut byte = [0_u8; 1];
-        match control.read(&mut byte) {
-            Ok(0) => {
-                target.cancel()?;
-                return Ok(143);
-            }
-            Ok(_) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
-            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
-            Err(error) => return Err(error.into()),
-        }
-        std::thread::sleep(Duration::from_millis(25));
+    // Guard the child before the completion pair or observer thread can fail.
+    let mut target = target::TargetGuard::new(command.spawn()?);
+    target.start_observer()?;
+    let cancelled = !target.wait(&mut control)?;
+    let status = target.finish(cancelled)?;
+    if cancelled {
+        Ok(143)
+    } else {
+        Ok(crate::agent::exit_code(status))
     }
 }
 
@@ -105,40 +99,6 @@ where
         })?
         .parse()
         .map_err(Into::into)
-}
-
-#[cfg(unix)]
-struct TargetGuard {
-    child: std::process::Child,
-    group: rustix::process::Pid,
-    armed: bool,
-}
-
-#[cfg(unix)]
-impl TargetGuard {
-    fn cancel(&mut self) -> std::io::Result<()> {
-        cancel_target(&mut self.child, self.group)?;
-        cleanup_adopted_children()?;
-        self.armed = false;
-        Ok(())
-    }
-
-    fn finish(&mut self) -> std::io::Result<()> {
-        cleanup_group(self.group)?;
-        cleanup_adopted_children()?;
-        self.armed = false;
-        Ok(())
-    }
-}
-
-#[cfg(unix)]
-impl Drop for TargetGuard {
-    fn drop(&mut self) {
-        if self.armed {
-            drop(cancel_target(&mut self.child, self.group));
-            drop(cleanup_adopted_children());
-        }
-    }
 }
 
 #[cfg(unix)]
@@ -186,108 +146,4 @@ fn take_inherited_fd(raw_fd: std::os::fd::RawFd) -> std::io::Result<std::os::fd:
     // across exec, and adopted during single-threaded process startup, so no
     // other Rust value owns or can concurrently close this descriptor.
     Ok(unsafe { std::os::fd::OwnedFd::from_raw_fd(raw_fd) })
-}
-
-#[cfg(unix)]
-fn signal_group(
-    group: rustix::process::Pid,
-    signal: rustix::process::Signal,
-) -> std::io::Result<()> {
-    match rustix::process::kill_process_group(group, signal) {
-        Ok(()) | Err(rustix::io::Errno::SRCH) => Ok(()),
-        Err(error) => Err(error.into()),
-    }
-}
-
-#[cfg(unix)]
-fn cancel_target(
-    child: &mut std::process::Child,
-    group: rustix::process::Pid,
-) -> std::io::Result<()> {
-    signal_group(group, rustix::process::Signal::TERM)?;
-    let deadline = Instant::now()
-        .checked_add(GRACE)
-        .ok_or_else(|| std::io::Error::other("supervisor grace period exceeds Instant range"))?;
-    while Instant::now() < deadline {
-        match child.try_wait() {
-            Ok(Some(_)) => {
-                signal_group(group, rustix::process::Signal::KILL)?;
-                return Ok(());
-            }
-            Ok(None) => {}
-            Err(_) => break,
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    }
-    signal_group(group, rustix::process::Signal::KILL)?;
-    child.wait().map(|_| ())
-}
-
-#[cfg(unix)]
-fn cleanup_group(group: rustix::process::Pid) -> std::io::Result<()> {
-    match rustix::process::kill_process_group(group, rustix::process::Signal::TERM) {
-        Ok(()) => {}
-        Err(rustix::io::Errno::SRCH) => return Ok(()),
-        Err(error) => return Err(error.into()),
-    }
-    std::thread::sleep(GRACE);
-    signal_group(group, rustix::process::Signal::KILL)
-}
-
-#[cfg(target_os = "linux")]
-fn set_subreaper() -> std::io::Result<()> {
-    rustix::process::set_child_subreaper(Some(rustix::process::Pid::INIT)).map_err(Into::into)
-}
-
-#[cfg(target_os = "linux")]
-fn cleanup_adopted_children() -> std::io::Result<()> {
-    let path = format!("/proc/self/task/{}/children", std::process::id());
-    for _ in 0..25 {
-        reap_children()?;
-        let children = std::fs::read_to_string(&path)?
-            .split_whitespace()
-            .map(str::parse::<i32>)
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(std::io::Error::other)?;
-        if children.is_empty() {
-            return Ok(());
-        }
-        for child in children {
-            let child = rustix::process::Pid::from_raw(child)
-                .ok_or_else(|| std::io::Error::other("adopted child PID is zero"))?;
-            match rustix::process::kill_process(child, rustix::process::Signal::KILL) {
-                Ok(()) | Err(rustix::io::Errno::SRCH) => {}
-                Err(error) => return Err(error.into()),
-            }
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    }
-    reap_children()?;
-    if std::fs::read_to_string(path)?
-        .split_whitespace()
-        .next()
-        .is_some()
-    {
-        Err(std::io::Error::other(
-            "could not reap all descendants of the interrupted run",
-        ))
-    } else {
-        Ok(())
-    }
-}
-
-#[cfg(not(target_os = "linux"))]
-fn cleanup_adopted_children() -> std::io::Result<()> {
-    Ok(())
-}
-
-#[cfg(target_os = "linux")]
-fn reap_children() -> std::io::Result<()> {
-    loop {
-        match rustix::process::wait(rustix::process::WaitOptions::NOHANG) {
-            Ok(Some(_)) => {}
-            Ok(None) | Err(rustix::io::Errno::CHILD) => return Ok(()),
-            Err(error) => return Err(error.into()),
-        }
-    }
 }

@@ -2,7 +2,7 @@ use super::*;
 
 #[cfg(unix)]
 #[test]
-fn custom_compose_project_contract_is_rejected() -> anyhow::Result<()> {
+fn tampered_compose_project_is_rejected_before_destroy_runs_docker() -> anyhow::Result<()> {
     let project = Project::initialized()?;
     let mut manifest = project.create("feature-a")?;
     manifest.compose_project = format!(
@@ -10,29 +10,26 @@ fn custom_compose_project_contract_is_rejected() -> anyhow::Result<()> {
         manifest.project, manifest.slug, manifest.short_id
     );
     manifest
-        .save_atomic()
-        .test_context("write legacy manifest")?;
-    let mut config = load_config(&project.repo.join("stackstead.yaml"))?;
-    config["runtime"]["project_name_template"] =
-        "{{ project.name }}_{{ stackstead.slug }}_{{ stackstead.short_id }}".into();
-    project.write_config(&config, "preserve legacy Compose identity")?;
+        .write_fixture()
+        .test_context("write tampered Compose identity")?;
 
     let marker = project.repo.parent().test()?.join("docker-ran");
     let path = fake_docker_path(
         project.repo.parent().test()?,
-        "legacy-project-fake-bin",
+        "tampered-project-fake-bin",
         &format!("#!/bin/sh\ntouch '{}'\nexit 0\n", marker.display()),
     )?;
-    stackstead(&project.repo)
+    let rejected = stackstead(&project.repo)
         .env("PATH", path)
-        .args(["destroy", "feature-a", "--yes"])
+        .args(["destroy", &manifest.stackstead_id, "--yes"])
         .assert()
         .failure();
     assert!(
-        manifest.stackstead_root.exists(),
-        "test contract condition failed"
+        output_text(&rejected.get_output().stderr)?
+            .contains("manifest Compose project does not match the durable stackstead identity")
     );
-    assert!(!marker.exists(), "test contract condition failed");
+    assert!(manifest.stackstead_root.exists());
+    assert!(!marker.exists());
     Ok(())
 }
 
@@ -267,13 +264,7 @@ esac
         .args(["up", &manifest.stackstead_id])
         .assert()
         .failure();
-    assert!(
-        output_text(&rejected.get_output().stderr)?.contains("foreign"),
-        "test contract condition failed"
-    );
-    assert!(
-        !state.join("compose-ran").exists(),
-        "test contract condition failed"
-    );
+    assert!(output_text(&rejected.get_output().stderr)?.contains("foreign"));
+    assert!(!state.join("compose-ran").exists());
     Ok(())
 }

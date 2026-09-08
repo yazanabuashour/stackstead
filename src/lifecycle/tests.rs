@@ -75,6 +75,7 @@ fn cleanup_manifest(root: &Path, ownership: SourceOwnership) -> anyhow::Result<S
         event_log,
         env_keys: vec![],
         status: ManifestStatus::default(),
+        readiness: crate::readiness::Contract::Unconfigured {},
         database: None,
         created_at: Utc::now(),
         updated_at: Utc::now(),
@@ -109,12 +110,8 @@ fn generated_config_parses() -> anyhow::Result<()> {
     };
     let yaml = default_config("demo", "main", &plan).test()?;
     let config = crate::config::StacksteadConfig::from_yaml(&yaml).test()?;
-    assert_eq!(config.project.name, "demo", "test contract values differ");
-    assert_eq!(
-        config.resources.ports.expose.len(),
-        2,
-        "test contract values differ"
-    );
+    assert_eq!(config.project.name, "demo");
+    assert_eq!(config.resources.ports.expose.len(), 2);
     Ok(())
 }
 
@@ -145,8 +142,8 @@ fn manifest_binding_rejects_mismatched_port_service_sets() -> anyhow::Result<()>
         .test_err()?
         .to_string();
     assert_eq!(
-        error, "manifest host and container port service sets differ",
-        "test contract values differ"
+        error,
+        "manifest host and container port service sets differ"
     );
     Ok(())
 }

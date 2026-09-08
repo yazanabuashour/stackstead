@@ -2,9 +2,9 @@ use std::path::Path;
 
 use super::{
     Cli, LogsArgs,
-    presentation::{next_actions, print_json, print_urls},
+    presentation::{next_actions, print_json, print_runtime, print_urls},
 };
-use crate::{compose, database, envfile, lifecycle, output};
+use crate::{compose, envfile, lifecycle, output};
 
 impl Cli {
     pub(super) fn ps(&self, cwd: &Path) -> anyhow::Result<()> {
@@ -14,14 +14,11 @@ impl Cli {
             .manifests()?
             .into_iter()
             .map(|manifest| {
-                let status = match compose::is_running(&manifest) {
-                    Ok(true) => "running".into(),
-                    Ok(false) => "stopped".into(),
-                    Err(_) => "unknown".into(),
-                };
-                output::StacksteadSummaryOutput::new(manifest, status)
+                lifecycle::validate_manifest_binding(&runtime, &manifest)?;
+                let observation = lifecycle::observe_runtime(&manifest);
+                Ok(output::StacksteadSummaryOutput::new(manifest, &observation))
             })
-            .collect::<Vec<_>>();
+            .collect::<anyhow::Result<Vec<_>>>()?;
         let output = output::StacksteadListOutput::new(stacksteads);
         if self.json {
             print_json(&output)?;
@@ -29,8 +26,8 @@ impl Cli {
             println!("No stacksteads. Create one with `stackstead create <name>`.");
         } else {
             println!(
-                "{:<28} {:<24} {:<10} PORTS",
-                "STACKSTEAD", "BRANCH", "STATUS"
+                "{:<28} {:<24} {:<10} {:<12} PORTS",
+                "STACKSTEAD", "BRANCH", "ACTIVITY", "READINESS"
             );
             for item in output.stacksteads() {
                 let ports = item
@@ -40,12 +37,19 @@ impl Cli {
                     .collect::<Vec<_>>()
                     .join(" ");
                 println!(
-                    "{:<28} {:<24} {:<10} {}",
+                    "{:<28} {:<24} {:<10} {:<12} {}",
                     item.stackstead_id(),
                     item.branch(),
                     item.runtime(),
+                    item.readiness(),
                     ports
                 );
+                for service in item.service_statuses() {
+                    println!("  {service}");
+                }
+                for issue in item.issues() {
+                    println!("  - {issue}");
+                }
             }
         }
         Ok(())
@@ -57,10 +61,6 @@ impl Cli {
             return print_json(&crate::output::StacksteadInspectionOutput::new(&output));
         }
         let manifest = &output.manifest;
-        let database_status = manifest
-            .database
-            .as_ref()
-            .map(|_| database::live_status(manifest, output.live.runtime_status));
         println!("Stackstead: {}\n", manifest.stackstead_id);
         println!("Source:        {}", manifest.status.source);
         println!("Dependencies:  {}", manifest.status.dependencies);
@@ -68,32 +68,17 @@ impl Cli {
             "Recorded:      runtime={} database={} health={}",
             manifest.status.runtime, manifest.status.database, manifest.status.health
         );
-        println!("Live runtime:  {}", output.live.runtime_status);
-        println!(
-            "Effective:     runtime={} ({}) health={} ({})",
-            output.effective.runtime.status,
-            output.effective.runtime.basis,
-            output.effective.health.status,
-            output.effective.health.basis
-        );
-        println!("Services:");
-        if output.live.services.is_empty() {
-            println!("  none");
-        } else {
-            for service in &output.live.services {
-                println!("  {:<14} {}", service.service, service.status());
-            }
-        }
+        print_runtime(&output);
         println!(
             "Database:      {}",
-            database_status.map_or_else(|| "not configured".into(), |status| status.to_string())
+            output
+                .live
+                .database_status
+                .map_or_else(|| "not configured".into(), |status| status.to_string())
         );
         println!(
-            "Health:        {}\n",
-            output.live.health_healthy.map_or_else(
-                || manifest.status.health.to_string(),
-                |healthy| if healthy { "ready" } else { "failed" }.into()
-            )
+            "Application health: {} ({})\n",
+            output.effective.health.status, output.effective.health.basis
         );
         println!("Branch:        {}", manifest.branch);
         println!("Worktree:      {}", manifest.worktree.display());
@@ -127,7 +112,7 @@ impl Cli {
             }
         }
         println!("\nNext:");
-        for action in next_actions(&manifest.stackstead_id, output.live.runtime_status) {
+        for action in next_actions(&manifest.stackstead_id, output.live.runtime.status()) {
             println!("  {action}");
         }
         Ok(())

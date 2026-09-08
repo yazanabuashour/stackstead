@@ -25,7 +25,7 @@ pub fn write_agent_context(manifest: &StacksteadManifest, rules: &[String]) -> a
 pub fn render_agent_context(manifest: &StacksteadManifest, rules: &[String]) -> String {
     let mut output = format!(
         "# Stackstead: {}\n\nProject: {}  \nBranch: {}  \nWorktree: {}  \nCompose project: {}\n\n\
-         ## Runtime Contract\n\nThis stackstead owns this source checkout, Compose project, env file, ports, database state, and logs. Its runtime identity and state are isolated from peer stacksteads.\n\n\
+         ## Runtime Contract\n\nUse the checkout, ports, URLs, and generated files named here. Stackstead preserves externally owned worktrees, including adopted source, during destroy. External networks, external volumes, and shared host paths can still share state; follow the repository rules below.\n\n\
          Do not use shared development ports or shared development databases while working in this stackstead.\n\n\
          ## URLs and Ports\n\n",
         manifest.stackstead_id,
@@ -114,8 +114,9 @@ mod tests {
 
     fn manifest(database: bool, urls: serde_json::Value) -> anyhow::Result<StacksteadManifest> {
         let mut value = serde_json::json!({
-            "kind":"StacksteadManifest","version":"2","stackstead_id":"a-b123","slug":"a","short_id":"b123",
+            "kind":"StacksteadManifest","version":"3","stackstead_id":"a-b123","slug":"a","short_id":"b123",
             "runtime_token":"0123456789abcdef0123456789abcdef",
+            "readiness":{"configuration":"unconfigured"},
             "project":"demo","branch":"a","base":"main","repo_root":"/repo","project_state_root":"/state",
             "source_ownership":"stackstead",
             "stackstead_root":"/state/demo/a-b123","worktree":"/state/demo/a-b123/source","state_dir":"/state/demo/a-b123/state",
@@ -136,18 +137,19 @@ mod tests {
 
     #[test]
     fn useful_commands_follow_the_manifest_services() -> anyhow::Result<()> {
+        let mut external = manifest(false, serde_json::json!({}))?;
+        external.source_ownership = crate::manifest::SourceOwnership::External;
         let without_database = render_agent_context(
-            &manifest(false, serde_json::json!({}))?,
+            &external,
             &["Run stackstead db status before migrations.".into()],
         );
+        assert!(!without_database.contains("db status"));
+        assert!(!without_database.contains("open a web"));
         assert!(
-            !without_database.contains("db status"),
-            "test contract condition failed"
+            without_database
+                .contains("preserves externally owned worktrees, including adopted source")
         );
-        assert!(
-            !without_database.contains("open a web"),
-            "test contract condition failed"
-        );
+        assert!(!without_database.contains("owns this source checkout"));
 
         let configured = render_agent_context(
             &manifest(
@@ -159,62 +161,22 @@ mod tests {
             )?,
             &[],
         );
-        assert!(
-            configured.contains("stackstead db status a-b123\n```"),
-            "test contract condition failed"
-        );
-        assert!(
-            configured.contains("Service: postgres"),
-            "test contract condition failed"
-        );
-        assert!(
-            configured.contains("Endpoint: 127.0.0.1:39001"),
-            "test contract condition failed"
-        );
-        assert!(
-            configured.contains("Database: app"),
-            "test contract condition failed"
-        );
-        assert!(
-            configured.contains("stackstead open a-b123 api --print"),
-            "test contract condition failed"
-        );
-        assert!(
-            configured.contains("stackstead open a-b123 dashboard --print"),
-            "test contract condition failed"
-        );
-        assert!(
-            configured.contains("stackstead context a-b123 --print"),
-            "test contract condition failed"
-        );
-        assert!(
-            configured.contains("stackstead up a-b123"),
-            "test contract condition failed"
-        );
-        assert!(
-            configured.contains("may rerun configured dependency installation"),
-            "test contract condition failed"
-        );
-        assert!(
-            configured.contains("stackstead repair a-b123"),
-            "test contract condition failed"
-        );
-        assert!(
-            configured.contains("stackstead stop a-b123"),
-            "test contract condition failed"
-        );
-        assert!(
-            configured.contains("stackstead destroy a-b123 --yes"),
-            "test contract condition failed"
-        );
-        assert!(
-            !configured.contains("stackstead inspect a\n"),
-            "test contract condition failed"
-        );
-        assert!(
-            !configured.contains("postgres://"),
-            "test contract condition failed"
-        );
+        assert!(configured.contains("preserves externally owned worktrees"));
+        assert!(configured.contains("shared host paths can still share state"));
+        assert!(configured.contains("stackstead db status a-b123\n```"));
+        assert!(configured.contains("Service: postgres"));
+        assert!(configured.contains("Endpoint: 127.0.0.1:39001"));
+        assert!(configured.contains("Database: app"));
+        assert!(configured.contains("stackstead open a-b123 api --print"));
+        assert!(configured.contains("stackstead open a-b123 dashboard --print"));
+        assert!(configured.contains("stackstead context a-b123 --print"));
+        assert!(configured.contains("stackstead up a-b123"));
+        assert!(configured.contains("may rerun configured dependency installation"));
+        assert!(configured.contains("stackstead repair a-b123"));
+        assert!(configured.contains("stackstead stop a-b123"));
+        assert!(configured.contains("stackstead destroy a-b123 --yes"));
+        assert!(!configured.contains("stackstead inspect a\n"));
+        assert!(!configured.contains("postgres://"));
         Ok(())
     }
 }

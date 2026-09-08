@@ -18,26 +18,39 @@ pub fn wait(
     if config.checks.is_empty() {
         return Ok(());
     }
-    let deadline = Instant::now()
-        .checked_add(Duration::from_secs(config.timeout_seconds))
-        .ok_or_else(|| anyhow::anyhow!("health timeout exceeds the supported Instant range"))?;
+    let deadline = deadline(config)?;
     loop {
         let failed = failed_checks(config, manifest, environment, deadline);
-        if failed.is_empty() {
+        let expired = Instant::now() >= deadline;
+        if failed.is_empty() && !expired {
             return Ok(());
         }
-        if Instant::now() >= deadline {
-            anyhow::bail!(
-                "health checks did not pass within {}s: {}",
-                config.timeout_seconds,
+        if expired {
+            let reason = if failed.is_empty() {
+                "verification completed after the shared deadline".into()
+            } else {
                 failed.join(", ")
+            };
+            anyhow::bail!(
+                "health checks did not pass within {}s: {reason}",
+                config.timeout_seconds,
             );
         }
-        std::thread::sleep(
-            Duration::from_millis(config.interval_millis)
-                .min(deadline.saturating_duration_since(Instant::now())),
-        );
+        pause(config, deadline);
     }
+}
+
+pub fn deadline(config: &HealthConfig) -> anyhow::Result<Instant> {
+    Instant::now()
+        .checked_add(Duration::from_secs(config.timeout_seconds))
+        .ok_or_else(|| anyhow::anyhow!("health timeout exceeds the supported Instant range"))
+}
+
+pub fn pause(config: &HealthConfig, deadline: Instant) {
+    std::thread::sleep(
+        Duration::from_millis(config.interval_millis)
+            .min(deadline.saturating_duration_since(Instant::now())),
+    );
 }
 
 pub fn healthy_passive(
@@ -52,7 +65,7 @@ pub fn healthy_passive(
     Some(failed_checks(config, manifest, environment, deadline).is_empty())
 }
 
-fn failed_checks(
+pub fn failed_checks(
     config: &HealthConfig,
     manifest: &StacksteadManifest,
     environment: &BTreeMap<String, String>,
@@ -159,6 +172,7 @@ mod tests {
             env_keys: vec![],
             status: ManifestStatus::default(),
             database: None,
+            readiness: crate::readiness::Contract::Unconfigured {},
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }
@@ -199,8 +213,7 @@ mod tests {
         };
         assert_eq!(
             healthy_passive(&config, &manifest(port), &BTreeMap::new()),
-            Some(true),
-            "test contract values differ"
+            Some(true)
         );
         server.join().test()??;
         Ok(())
@@ -228,8 +241,7 @@ mod tests {
         };
         assert_eq!(
             healthy_passive(&config, &manifest(port), &BTreeMap::new()),
-            Some(true),
-            "test contract values differ"
+            Some(true)
         );
         server.join().test()??;
         Ok(())
@@ -251,8 +263,7 @@ mod tests {
         };
         assert_eq!(
             healthy_passive(&config, &manifest(1), &BTreeMap::new()),
-            None,
-            "test contract values differ"
+            None
         );
         Ok(())
     }
@@ -275,10 +286,7 @@ mod tests {
         };
         let started = Instant::now();
         (wait(&config, &manifest(1), &BTreeMap::new())).test_err()?;
-        assert!(
-            started.elapsed() < Duration::from_secs(2),
-            "test contract condition failed"
-        );
+        assert!(started.elapsed() < Duration::from_secs(2));
         Ok(())
     }
 }

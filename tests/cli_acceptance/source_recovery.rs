@@ -13,14 +13,10 @@ fn nested_worktree_commands_use_the_pointer_before_the_copied_config() -> anyhow
         .success();
     let output: Value =
         serde_json::from_slice(&assert.get_output().stdout).test_context("parse context output")?;
-    assert_eq!(
-        output["stackstead_id"], manifest.stackstead_id,
-        "test contract values differ"
-    );
+    assert_eq!(output["stackstead_id"], manifest.stackstead_id);
     assert_eq!(
         output["path"],
-        manifest.agent_context.to_string_lossy().as_ref(),
-        "test contract values differ"
+        manifest.agent_context.to_string_lossy().as_ref()
     );
     Ok(())
 }
@@ -35,7 +31,7 @@ fn pointer_state_root_cannot_normalize_to_the_filesystem_root() -> anyhow::Resul
     manifest.project_state_root = PathBuf::from("/tmp/..");
     pointer.project_state_root = manifest.project_state_root.clone();
     manifest
-        .save_atomic()
+        .write_fixture()
         .test_context("write tampered manifest")?;
     fs::write(
         &manifest.pointer_file,
@@ -47,10 +43,7 @@ fn pointer_state_root_cannot_normalize_to_the_filesystem_root() -> anyhow::Resul
         .args(["context", "feature-a", "--json"])
         .assert()
         .failure();
-    assert!(
-        output_text(&assert.get_output().stderr)?.contains("filesystem root"),
-        "test contract condition failed"
-    );
+    assert!(output_text(&assert.get_output().stderr)?.contains("filesystem root"));
     Ok(())
 }
 
@@ -76,7 +69,7 @@ fn legacy_pointer_v1_discovers_normally_and_repair_rewrites_v2() -> anyhow::Resu
         .success();
     let rewritten: StacksteadPointer =
         serde_json::from_slice(&fs::read(&manifest.pointer_file).test()?).test()?;
-    assert_eq!(rewritten.version, "2", "test contract values differ");
+    assert_eq!(rewritten.version, "2");
     Ok(())
 }
 
@@ -87,22 +80,16 @@ fn destroy_recovers_a_persisted_prepublication_create() -> anyhow::Result<()> {
     fs::remove_file(&manifest.pointer_file).test()?;
     fs::remove_file(&manifest.event_log).test()?;
     manifest.status.source = ComponentStatus::Created;
-    manifest.save_atomic().test()?;
+    manifest.write_fixture().test()?;
     stackstead(&project.repo)
         .args(["destroy", &manifest.stackstead_id, "--yes"])
         .assert()
         .success();
-    assert!(
-        !manifest.stackstead_root.exists(),
-        "test contract condition failed"
-    );
+    assert!(!manifest.stackstead_root.exists());
     let registry: Value = serde_json::from_slice(
         &fs::read(test_state_home(&project.repo).join("stackstead/port-leases.json")).test()?,
     )
     .test()?;
-    assert!(
-        registry["leases"].as_array().test()?.is_empty(),
-        "test contract condition failed"
-    );
+    assert!(registry["leases"].as_array().test()?.is_empty());
     Ok(())
 }

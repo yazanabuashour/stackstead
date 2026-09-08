@@ -45,6 +45,11 @@ with `stackstead --json create <name>`, capture its full `stackstead_id`, run
 or manager supplies its exact full ID.
 ```
 
+For JSON consumers, validate `kind: "StacksteadChange"`, `version: "1"`, and
+`action: "created"` before reading `.stackstead.stackstead_id` from `create`.
+`adopt` uses the same nested ID with action `adopted`; `current` instead returns
+`.stackstead_id` at the top level. See the [CLI JSON reference](agent-contract.md#cli-json).
+
 `doctor` verifies this marker in a root `AGENTS.md` or `CLAUDE.md`. Other
 instruction filenames remain valid for agents, but Stackstead cannot detect
 their policy version.

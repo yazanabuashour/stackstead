@@ -15,15 +15,11 @@ fn create_refuses_a_runtime_contract_missing_from_the_configured_base() -> anyho
             && stderr.contains("commit or merge stackstead.yaml"),
         "unexpected error: {stderr}"
     );
-    assert!(
-        state_stackstead_directories(&project)?.is_empty(),
-        "test contract condition failed"
-    );
+    assert!(state_stackstead_directories(&project)?.is_empty());
     assert!(
         git(&project.repo, &["branch", "--list", "feature-a"])?
             .trim()
-            .is_empty(),
-        "test contract condition failed"
+            .is_empty()
     );
     Ok(())
 }
@@ -40,19 +36,12 @@ fn create_refuses_locally_modified_contract_files_without_allocating_state() -> 
         .args(["create", "feature-a"])
         .assert()
         .failure();
-    assert!(
-        output_text(&assert.get_output().stderr)?.contains("differs from source.base commit"),
-        "test contract condition failed"
-    );
-    assert!(
-        state_stackstead_directories(&project)?.is_empty(),
-        "test contract condition failed"
-    );
+    assert!(output_text(&assert.get_output().stderr)?.contains("differs from source.base commit"));
+    assert!(state_stackstead_directories(&project)?.is_empty());
     assert!(
         git(&project.repo, &["branch", "--list", "feature-a"])?
             .trim()
-            .is_empty(),
-        "test contract condition failed"
+            .is_empty()
     );
     Ok(())
 }
@@ -95,7 +84,7 @@ fn create_compares_clean_contract_files_through_git_filters() -> anyhow::Result<
         "Git did not consider the filtered contract clean: {status:?}"
     );
     let manifest = project.create("feature-a")?;
-    assert!(manifest.worktree.is_dir(), "test contract condition failed");
+    assert!(manifest.worktree.is_dir());
     Ok(())
 }
 
@@ -111,7 +100,7 @@ fn create_pins_the_configured_base_when_called_from_another_branch() -> anyhow::
     let caller = git(&project.repo, &["rev-parse", "caller-branch"])?;
 
     let manifest = project.create("feature-a")?;
-    assert_eq!(manifest.base, main.trim(), "test contract values differ");
+    assert_eq!(manifest.base, main.trim());
     assert_ne!(
         manifest.base,
         caller.trim(),
@@ -120,8 +109,7 @@ fn create_pins_the_configured_base_when_called_from_another_branch() -> anyhow::
     assert_eq!(
         fs::read_to_string(manifest.worktree.join("README.md"))
             .test_context("read created README")?,
-        "# Demo project\n",
-        "test contract values differ"
+        "# Demo project\n"
     );
     Ok(())
 }
@@ -151,13 +139,9 @@ fn recreating_an_existing_branch_rejects_a_base_it_does_not_contain() -> anyhow:
         .assert()
         .failure();
     assert!(
-        output_text(&assert.get_output().stderr)?.contains("does not contain pinned source.base"),
-        "test contract condition failed"
+        output_text(&assert.get_output().stderr)?.contains("does not contain pinned source.base")
     );
-    assert!(
-        state_stackstead_directories(&project)?.is_empty(),
-        "test contract condition failed"
-    );
+    assert!(state_stackstead_directories(&project)?.is_empty());
     Ok(())
 }
 
@@ -171,8 +155,7 @@ fn normalized_compose_paths_survive_create_and_resolution() -> anyhow::Result<()
     let manifest = project.create("feature-a")?;
     assert_eq!(
         manifest.compose_files,
-        [manifest.worktree.join("docker-compose.yml")],
-        "test contract values differ"
+        [manifest.worktree.join("docker-compose.yml")]
     );
     stackstead(&project.repo)
         .args(["context", "feature-a", "--json"])

@@ -4,27 +4,15 @@ use serde::{Deserialize, Serialize};
 
 use super::helpers::{
     default_agent_rules, default_context_file, default_env_file, default_health_interval_millis,
-    default_health_status, default_health_timeout_seconds, default_link_folder,
-    default_postgres_database, default_postgres_service, default_postgres_user,
+    default_health_status, default_health_timeout_seconds, default_postgres_database,
+    default_postgres_service, default_postgres_user,
 };
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct DependencyConfig {
     #[serde(default)]
-    pub provider: DependencyProvider,
-    #[serde(default)]
     pub install: CommandConfig,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub link: Option<LinkConfig>,
-}
-
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "kebab-case")]
-pub enum DependencyProvider {
-    #[default]
-    Command,
-    YarnClassic,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -34,30 +22,6 @@ pub struct CommandConfig {
     pub command: String,
     #[serde(default)]
     pub shell: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct LinkConfig {
-    #[serde(default)]
-    pub enabled: bool,
-    #[serde(default = "default_link_folder")]
-    pub link_folder: PathBuf,
-    #[serde(default)]
-    pub command: String,
-    #[serde(default)]
-    pub shell: bool,
-}
-
-impl Default for LinkConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            link_folder: default_link_folder(),
-            command: String::new(),
-            shell: false,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]

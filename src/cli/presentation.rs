@@ -19,6 +19,63 @@ pub(super) fn next_actions(stackstead_id: &str, runtime_status: ComponentStatus)
     ]
 }
 
+pub(super) fn print_runtime(inspection: &lifecycle::InspectOutput) {
+    let runtime = &inspection.live.runtime;
+    println!("Runtime activity: {}", runtime.activity());
+    println!("Runtime readiness: {}", runtime.readiness.status);
+    for service in &runtime.readiness.required {
+        let expected = service
+            .expected_instances
+            .map_or_else(|| "unknown".into(), |count| count.to_string());
+        println!(
+            "  {} ({}): {} instances satisfied={}/{} observed={}",
+            service.service,
+            service.role.as_str(),
+            service.status,
+            service.satisfied_instances,
+            expected,
+            service.observed_containers
+        );
+    }
+    for issue in &runtime.readiness.issues {
+        println!("  - {issue}");
+    }
+    println!("Live runtime:  {}", runtime.status());
+    println!(
+        "Effective:     runtime={} ({}) health={} ({})",
+        inspection.effective.runtime.status,
+        inspection.effective.runtime.basis,
+        inspection.effective.health.status,
+        inspection.effective.health.basis
+    );
+    println!("Services:");
+    match &runtime.services {
+        None => println!("  unknown"),
+        Some(services) if services.is_empty() => println!("  none"),
+        Some(services) => {
+            for service in services {
+                let health = service.health.as_deref().unwrap_or_else(|| {
+                    if service.healthcheck_enabled == Some(false) {
+                        "not configured"
+                    } else {
+                        "unknown"
+                    }
+                });
+                let name = if service.service.is_empty() {
+                    "unattributed"
+                } else {
+                    &service.service
+                };
+                println!(
+                    "  {name}/{}: {} health={health}",
+                    service.container,
+                    service.status()
+                );
+            }
+        }
+    }
+}
+
 pub(super) fn print_up_timings(timings: &lifecycle::UpTimings) {
     println!("\nTimings:");
     print_timing("Dependencies", timings.dependencies);

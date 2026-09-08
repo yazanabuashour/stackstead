@@ -12,6 +12,7 @@ use crate::{
         new_runtime_token,
     },
     paths,
+    readiness::Contract,
     slug::{make_stackstead_id, new_short_id},
     template::{TemplateContext, render_template},
 };
@@ -86,7 +87,7 @@ pub(super) fn build(
         &ports,
     );
     let (urls, compose_project) =
-        render_urls_and_compose(prepared, &identity, &mut context, existing)?;
+        resolve_urls_and_compose(prepared, &identity, &mut context, existing)?;
     let worktree = &identity.worktree;
     let compose_files = configured_compose_files(&prepared.runtime.config, worktree)?;
     let env_file = paths::safe_generated_path(worktree, &prepared.runtime.config.env.file)?;
@@ -113,6 +114,13 @@ pub(super) fn build(
         port_lease_state_dir,
         compose_project,
         compose_files,
+        readiness: prepared.runtime.config.runtime.readiness.as_ref().map_or(
+            Contract::Unconfigured {},
+            |readiness| Contract::Declared {
+                required: readiness.required.clone(),
+                resolved: None,
+            },
+        ),
         ports,
         container_ports: configured_container_ports(&prepared.runtime.config),
         urls,
@@ -161,7 +169,7 @@ fn build_template_context(
     context
 }
 
-fn render_urls_and_compose(
+fn resolve_urls_and_compose(
     prepared: &PreparedProvision,
     identity: &ProvisionIdentity,
     context: &mut TemplateContext,
@@ -175,26 +183,17 @@ fn render_urls_and_compose(
             urls.insert(service.clone(), url);
         }
     }
-    let configured = render_template(
-        &prepared.runtime.config.runtime.project_name_template,
-        context,
-    )?;
     let compose_project = format!(
         "{}-{}",
         prepared.runtime.config.project.name, identity.stackstead_id
     );
-    if configured != compose_project {
-        anyhow::bail!(
-            "runtime.project_name_template must render the durable identity `{compose_project}`; use `{{{{ project.name }}}}-{{{{ stackstead.id }}}}`"
-        );
-    }
     validate_compose_project(&compose_project)?;
     if let Some(owner) = existing
         .iter()
         .find(|manifest| manifest.compose_project == compose_project)
     {
         anyhow::bail!(
-            "Compose project `{compose_project}` is already owned by {}; make runtime.project_name_template include a stackstead-unique value",
+            "Compose project `{compose_project}` is already owned by {}; refusing to reuse its runtime identity",
             owner.stackstead_id
         );
     }
@@ -239,4 +238,50 @@ fn database_manifest(
         seed_status: ComponentStatus::Unknown,
         last_seed_at: None,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        config::ReadinessConfig, readiness::Role, state::ProjectPaths,
+        test_support::TestResultExt as _,
+    };
+
+    #[test]
+    fn provisioning_copies_roles_without_resolving_or_inferring_them() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir().test()?;
+        for readiness in [
+            None,
+            Some(ReadinessConfig {
+                required: BTreeMap::from([("Worker.api_1".into(), Role::Job)]),
+            }),
+        ] {
+            let mut config = StacksteadConfig::default();
+            config.project.name = "demo".into();
+            config.runtime.readiness = readiness.clone();
+            let prepared = PreparedProvision {
+                runtime: ProjectRuntime {
+                    config,
+                    paths: ProjectPaths::new(
+                        directory.path().join("repo"),
+                        directory.path().join("state"),
+                        "demo",
+                    ),
+                },
+                external_worktree: None,
+                base_commit: "base".into(),
+            };
+            let identity = prepare_identity(&prepared, "feature".into(), &[]).test()?;
+            let (manifest, _) = build(&prepared, identity, BTreeMap::new(), None, &[]).test()?;
+            assert_eq!(manifest.version, "3");
+            assert_eq!(
+                manifest.readiness.required(),
+                readiness.as_ref().map(|config| &config.required)
+            );
+            assert!(manifest.readiness.resolved().is_none());
+            manifest.readiness.validate().test()?;
+        }
+        Ok(())
+    }
 }
