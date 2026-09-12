@@ -26,6 +26,10 @@ pub fn prepare_owned_source_removal(manifest: &StacksteadManifest) -> anyhow::Re
         .worktree
         .to_str()
         .ok_or_else(|| anyhow::anyhow!("managed worktree path is not UTF-8"))?;
+    let owner = manifest
+        .state_dir
+        .to_str()
+        .ok_or_else(|| anyhow::anyhow!("state directory path is not UTF-8"))?;
     let helper = format!("{}-stackstead-owner", manifest.compose_project);
     let list = vec![
         "container".into(),
@@ -64,14 +68,6 @@ pub fn prepare_owned_source_removal(manifest: &StacksteadManifest) -> anyhow::Re
             None,
         )?;
     }
-    #[cfg(unix)]
-    let (uid, gid) = {
-        use std::os::unix::fs::MetadataExt;
-        let metadata = std::fs::metadata(&manifest.worktree)?;
-        (metadata.uid(), metadata.gid())
-    };
-    #[cfg(not(unix))]
-    let (uid, gid) = (0_u32, 0_u32);
     let mut args = vec![
         "run".into(),
         "--rm".into(),
@@ -87,24 +83,25 @@ pub fn prepare_owned_source_removal(manifest: &StacksteadManifest) -> anyhow::Re
     ];
     #[cfg(target_os = "linux")]
     args.push("--userns=host".into());
+    // Read the unchanged state owner's IDs inside the helper's namespace. Host IDs
+    // differ under rootless Docker, and source ownership may already be damaged.
     args.extend([
         "--mount".into(),
-        ownership_bind_mount(source),
+        ownership_bind_mount(source, "/stackstead-source"),
+        "--mount".into(),
+        format!("{},readonly", ownership_bind_mount(owner, "/stackstead-owner")),
         OWNERSHIP_HELPER_IMAGE.into(),
         "sh".into(),
         "-ceu".into(),
-        "chown -R \"$1:$2\" /stackstead-source; chmod -R u+rwX /stackstead-source".into(),
-        "stackstead-owner".into(),
-        uid.to_string(),
-        gid.to_string(),
+        "owner=$(stat -c '%u:%g' /stackstead-owner); chown -R \"$owner\" /stackstead-source; chmod -R u+rwX /stackstead-source".into(),
     ]);
     run_docker_control(manifest, &args, None)?;
     Ok(())
 }
 
-pub(super) fn ownership_bind_mount(source: &str) -> String {
+pub(super) fn ownership_bind_mount(source: &str, destination: &str) -> String {
     format!(
-        "type=bind,\"src={}\",dst=/stackstead-source",
+        "type=bind,\"src={}\",dst={destination}",
         source.replace('"', "\"\"")
     )
 }

@@ -89,9 +89,8 @@ impl Cli {
     }
 
     pub(super) fn up(&self, cwd: &Path, name: &str) -> anyhow::Result<()> {
-        let lifecycle::UpOutcome {
-            manifest, timings, ..
-        } = lifecycle::up(cwd, name)?;
+        let outcome = lifecycle::up(cwd, name)?;
+        let manifest = outcome.environment.into_manifest();
         if self.json {
             print_json(&output::StacksteadChangeOutput::new("started", &manifest))?;
         } else {
@@ -100,7 +99,7 @@ impl Cli {
                 manifest.stackstead_id, manifest.compose_project
             );
             print_urls(&manifest.urls);
-            print_up_timings(&timings);
+            print_up_timings(&outcome.timings);
         }
         Ok(())
     }
@@ -143,24 +142,16 @@ impl Cli {
             .split_first()
             .ok_or_else(|| anyhow::anyhow!("launch requires a command after `--`"))?;
         let created = lifecycle::create_for_launch(cwd, name)?;
-        println!("Created {}", created.manifest.stackstead_id);
-        let stackstead_id = created.manifest.stackstead_id.clone();
-        let outcome = lifecycle::up_after_create(cwd, &stackstead_id, created.mutation_lock)?;
+        println!("Created {}", created.manifest().stackstead_id);
+        let outcome = lifecycle::up_after_create(cwd, created)?;
+        let manifest = outcome.environment.manifest();
         println!(
             "Running {} ({})",
-            outcome.manifest.stackstead_id, outcome.manifest.compose_project
+            manifest.stackstead_id, manifest.compose_project
         );
-        print_urls(&outcome.manifest.urls);
+        print_urls(&manifest.urls);
         print_up_timings(&outcome.timings);
-        agent::run_after_up(
-            cwd,
-            &outcome.manifest.stackstead_id,
-            program,
-            args,
-            outcome.mutation_lock,
-            outcome.run_lease,
-        )
-        .map(agent::exit_code)
+        agent::run_after_up(cwd, outcome.environment, program, args).map(agent::exit_code)
     }
 
     fn reject_json_stream(&self, command: &str, reason: &str) -> anyhow::Result<()> {

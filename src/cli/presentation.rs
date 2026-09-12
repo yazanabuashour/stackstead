@@ -49,9 +49,9 @@ pub(super) fn print_runtime(inspection: &lifecycle::InspectOutput) {
         inspection.effective.health.basis
     );
     println!("Services:");
-    match &runtime.services {
+    match runtime.evidence() {
         None => println!("  unknown"),
-        Some(services) if services.is_empty() => println!("  none"),
+        Some([]) => println!("  none"),
         Some(services) => {
             for service in services {
                 let health = service.health.as_deref().unwrap_or_else(|| {

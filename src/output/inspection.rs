@@ -91,8 +91,7 @@ impl StacksteadInspectionOutput {
                 services: inspection
                     .live
                     .runtime
-                    .services
-                    .as_ref()
+                    .evidence()
                     .map(|services| services.iter().map(Into::into).collect()),
                 readiness: (&inspection.live.runtime.readiness).into(),
                 database,

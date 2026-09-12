@@ -14,6 +14,7 @@ mod resources;
 mod runtime;
 mod runtime_names;
 mod services;
+mod snapshot;
 mod yaml;
 
 pub use apply::apply_at;
@@ -32,6 +33,7 @@ pub use services::{
     endpoint_is_published, ensure_endpoint_published, follow_logs, is_running, logs,
     postgres_is_ready, service_is_running, service_observations,
 };
+pub use snapshot::RuntimeSnapshot;
 
 #[cfg(test)]
 pub use apply::apply;

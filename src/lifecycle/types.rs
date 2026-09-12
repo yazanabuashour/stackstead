@@ -4,7 +4,6 @@ use chrono::Utc;
 
 use crate::{
     config::StacksteadConfig,
-    lock::LockGuard,
     manifest::{ComponentStatus, SourceOwnership, StacksteadManifest},
     state::ProjectPaths,
 };
@@ -99,13 +98,6 @@ pub struct UpTimings {
 }
 
 pub struct UpOutcome {
-    pub manifest: StacksteadManifest,
+    pub environment: super::HeldEnvironment,
     pub timings: UpTimings,
-    pub mutation_lock: LockGuard,
-    pub run_lease: LockGuard,
-}
-
-pub struct CreateOutcome {
-    pub manifest: StacksteadManifest,
-    pub mutation_lock: LockGuard,
 }

@@ -2,9 +2,9 @@ use crate::{command, manifest::StacksteadManifest};
 
 use super::{
     docker::{base_args, docker_environment, run_docker_compose, sanitize_generated_error},
-    model::ServiceObservation,
     ownership::verify_ownership_override,
     resources::owned_service_observations,
+    snapshot::RuntimeSnapshot,
 };
 
 pub fn logs(
@@ -61,7 +61,7 @@ pub fn is_running(manifest: &StacksteadManifest) -> anyhow::Result<bool> {
 pub fn service_observations(
     manifest: &StacksteadManifest,
     deadline: Option<std::time::Instant>,
-) -> anyhow::Result<Vec<ServiceObservation>> {
+) -> anyhow::Result<RuntimeSnapshot> {
     let generated = manifest.validated_environment().map_err(|_error| {
         anyhow::anyhow!(
             "cannot validate generated Compose environment; run Stackstead repair; details withheld"
@@ -69,6 +69,7 @@ pub fn service_observations(
     })?;
     verify_ownership_override(manifest)
         .and_then(|()| owned_service_observations(manifest, deadline))
+        .map(RuntimeSnapshot::new)
         .map_err(|error| sanitize_generated_error(&error, &generated))
 }
 

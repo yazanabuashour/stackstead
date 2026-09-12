@@ -67,11 +67,7 @@ fn observe_live(
         database::reachable(&database.host, database.port, Duration::from_millis(250))
     });
     let health_healthy = if runtime_status == ComponentStatus::Running {
-        match observed_passive_health(
-            config,
-            manifest,
-            runtime.services.as_deref().unwrap_or_default(),
-        ) {
+        match observed_passive_health(config, manifest, runtime.evidence().unwrap_or_default()) {
             Ok(status) => status,
             Err(error) => {
                 warnings.push(format!(

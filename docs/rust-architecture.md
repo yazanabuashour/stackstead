@@ -83,6 +83,27 @@ A project lock serializes project-local state and index changes. A host-wide per
 
 Locks are intentionally simple cross-process file locks. `doctor` diagnoses suspicious lock state rather than implementing automatic lease stealing. `run` retains the shared lease through a private Unix supervisor that binds host-child cleanup to it. `exec` keeps the Compose client in the foreground and hands the lease into that process.
 
+### Hold an environment across lifecycle work
+
+`lifecycle/access.rs` owns mutation-lock acquisition, run-lease acquisition, and
+manifest reload in that order. Its `HeldEnvironment` keeps the manifest and guards
+together and rejects a changed full ID, runtime token, or state directory after
+waiting. `up`, `stop`, `repair`, `run`, and `exec` use this module rather than
+reassembling the lock protocol.
+
+Creation returns a `CreateOutcome` that privately retains its mutation lock.
+`launch` transfers this outcome into startup, then transfers the held environment
+into agent execution; CLI code never supplies an identity and raw guards
+independently. Converting startup's exclusive run lease to shared access retains
+the mutation lock across the conversion. Agent execution releases mutation access
+only after its checks and transfers the shared lease to the existing child
+supervision or foreground-execution path.
+
+Held access is not proof of a valid runtime contract. Each operation still checks
+the reloaded manifest according to its own policy: repair may restore a missing
+pointer, stop uses the durable contract, and startup and agent execution require
+the current contract. Destroy keeps its separate recovery-aware locking sequence.
+
 ## Reliability scope budget
 
 The four reproduced reliability fixes have a budget of 2,500 net new production
@@ -96,6 +117,21 @@ being folded into these mechanisms speculatively.
 ## Internal adapters
 
 Git worktrees and Docker Compose are small internal modules around command construction and execution. Git distinguishes Stackstead-owned source from explicitly adopted manager-owned worktrees. Compose discovery and rewriting are intentionally narrower than lifecycle execution; structural startup validation binds every published port variable to its manifest allocation. Lifecycle generation appends a last-wins ownership override that labels every directly managed Compose resource with the manifest runtime token. Raw Docker control creates and verifies a deterministic claim volume, enumerates both project labels and exact resource names, and aborts before mutating an occupied namespace; actual Compose subprocesses additionally remove generated key names from the inherited shell, pin the manifest Compose identity, and consume values only from the explicit env file. Postgres support probes the configured host port and runs an optional project seed command; generic health checks cover loopback HTTP statuses and repository commands. Dependency installation executes `dependencies.install` with the generated environment. Repository scripts own any package-link workflow.
+
+### Interpret runtime evidence
+
+`compose::service_observations` returns a `RuntimeSnapshot` after the existing
+claim, inventory, ownership, and generated-contract checks. The snapshot owns
+Docker activity and service-state interpretation in `compose/snapshot.rs` and
+exposes borrowed container evidence for readiness evaluation and command-owned
+output DTOs. Startup uses the snapshot directly to calculate runtime status
+without building an inspection aggregate.
+
+A snapshot is neither an atomic Docker view nor ongoing mutation authority.
+Unavailable evidence remains distinct from an observed empty runtime. Activity,
+declared readiness, and application health remain independent: completed jobs
+can be ready while inactive. Inspection retains its manifest-change detection;
+startup retains model-drift rejection and its shared verification deadline.
 
 These boundaries make behavior testable without pretending that providers are interchangeable. Unit and CLI acceptance tests assert command construction, discovery, parsing, ownership, safety, and generated artifacts. The three-agent Postgres/Nginx failure-recovery proof is a mandatory Docker-backed CI job.
 

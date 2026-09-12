@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn ownership_mount_quotes_valid_commas_and_quotes() -> anyhow::Result<()> {
     assert_eq!(
-        ownership_bind_mount("/tmp/source,\"quoted\""),
+        ownership_bind_mount("/tmp/source,\"quoted\"", "/stackstead-source"),
         "type=bind,\"src=/tmp/source,\"\"quoted\"\"\",dst=/stackstead-source"
     );
     Ok(())

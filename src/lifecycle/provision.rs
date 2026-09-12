@@ -17,7 +17,7 @@ use super::{
 };
 
 pub fn create(cwd: &Path, name: &str) -> anyhow::Result<StacksteadManifest> {
-    Ok(provision(cwd, name, None)?.manifest)
+    Ok(provision(cwd, name, None)?.into_manifest())
 }
 
 pub fn create_for_launch(cwd: &Path, name: &str) -> anyhow::Result<CreateOutcome> {
@@ -25,7 +25,7 @@ pub fn create_for_launch(cwd: &Path, name: &str) -> anyhow::Result<CreateOutcome
 }
 
 pub fn adopt(cwd: &Path, name: &str, worktree: &Path) -> anyhow::Result<StacksteadManifest> {
-    Ok(provision(cwd, name, Some(worktree))?.manifest)
+    Ok(provision(cwd, name, Some(worktree))?.into_manifest())
 }
 
 fn provision(
@@ -103,10 +103,7 @@ fn provision_locked(prepared: &PreparedProvision, name: &str) -> anyhow::Result<
     {
         return Err(rollback_failed_source(&prepared.runtime, &manifest, error));
     }
-    Ok(CreateOutcome {
-        manifest,
-        mutation_lock: cell_lock,
-    })
+    Ok(CreateOutcome::new(manifest, cell_lock))
 }
 
 fn initialize_manifest(manifest: &StacksteadManifest) -> anyhow::Result<LockGuard> {

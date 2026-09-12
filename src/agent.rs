@@ -4,7 +4,12 @@ use std::{
     process::{Command, ExitStatus},
 };
 
-use crate::{compose, lifecycle, lock::LockGuard, manifest::StacksteadManifest};
+use crate::{
+    compose,
+    lifecycle::{self, HeldEnvironment},
+    lock::LockGuard,
+    manifest::StacksteadManifest,
+};
 
 /// Run a command inside a named stackstead with its generated runtime contract.
 ///
@@ -17,18 +22,17 @@ pub fn run(
     program: &OsStr,
     args: &[OsString],
 ) -> anyhow::Result<ExitStatus> {
-    run_with_locks(cwd, name, program, args, None)
+    run_with_environment(cwd, name, program, args, None)
 }
 
 pub fn run_after_up(
     cwd: &Path,
-    name: &str,
+    held: HeldEnvironment,
     program: &OsStr,
     args: &[OsString],
-    mutation_lock: LockGuard,
-    run_lease: LockGuard,
 ) -> anyhow::Result<ExitStatus> {
-    run_with_locks(cwd, name, program, args, Some((mutation_lock, run_lease)))
+    let name = held.manifest().stackstead_id.clone();
+    run_with_environment(cwd, &name, program, args, Some(held))
 }
 
 /// Run a command inside one running service of a named stackstead.
@@ -46,35 +50,29 @@ pub fn exec(
     }
 
     let runtime = lifecycle::load_project(cwd)?;
-    let mut resolved = runtime.resolve(name)?;
-    let mutation_lock =
-        LockGuard::acquire_existing(&resolved.state_dir.join("lock"), "stackstead")?;
-    let run_lease = LockGuard::acquire_existing_shared(
-        &resolved.state_dir.join("run.lock"),
-        "stackstead service exec",
-    )?;
-    resolved = StacksteadManifest::read(&resolved.manifest_path())?;
-    validate_contract(&runtime, &resolved)?;
-    lifecycle::validate_pointer_binding(&resolved)?;
-    lifecycle::verify_port_leases(&resolved)?;
-    let (removed, environment) = compose::docker_environment(&resolved).map_err(|error| {
+    let held = HeldEnvironment::shared(runtime.resolve(name)?, "stackstead service exec")?;
+    let resolved = held.manifest();
+    validate_contract(&runtime, resolved)?;
+    lifecycle::validate_pointer_binding(resolved)?;
+    lifecycle::verify_port_leases(resolved)?;
+    let (removed, environment) = compose::docker_environment(resolved).map_err(|error| {
         anyhow::anyhow!(
             "cannot read generated environment for {} at {}: {error}",
             resolved.stackstead_id,
             resolved.env_file.display()
         )
     })?;
-    compose::verify_owned_runtime(&resolved)?;
-    compose::ensure_service_configured(&resolved, service)?;
-    if !compose::service_is_running(&resolved, service)? {
+    compose::verify_owned_runtime(resolved)?;
+    compose::ensure_service_configured(resolved, service)?;
+    if !compose::service_is_running(resolved, service)? {
         anyhow::bail!(
             "Compose service `{service}` is not running for {}; run `stackstead inspect {}`",
             resolved.stackstead_id,
             resolved.stackstead_id
         );
     }
-    compose::verify_ownership_override(&resolved)?;
-    drop(mutation_lock);
+    compose::verify_ownership_override(resolved)?;
+    let (resolved, run_lease) = held.into_run()?;
 
     let mut docker_args = compose::base_args(&resolved)
         .into_iter()
@@ -123,33 +121,26 @@ fn foreground_status(
     Ok(status)
 }
 
-fn run_with_locks(
+fn run_with_environment(
     cwd: &Path,
     name: &str,
     program: &OsStr,
     args: &[OsString],
-    locks: Option<(LockGuard, LockGuard)>,
+    environment: Option<HeldEnvironment>,
 ) -> anyhow::Result<ExitStatus> {
     if program.is_empty() {
         anyhow::bail!("a program is required after `--`");
     }
 
     let runtime = lifecycle::load_project(cwd)?;
-    let mut resolved = runtime.resolve(name)?;
-    let (mutation_lock, run_lease) = match locks {
-        Some((mutation_lock, run_lease)) => (mutation_lock, run_lease.downgrade_to_shared()?),
-        None => (
-            LockGuard::acquire_existing(&resolved.state_dir.join("lock"), "stackstead")?,
-            LockGuard::acquire_existing_shared(
-                &resolved.state_dir.join("run.lock"),
-                "stackstead agent run",
-            )?,
-        ),
+    let resolved = runtime.resolve(name)?;
+    let held = match environment {
+        Some(held) => held.for_run(&resolved)?,
+        None => HeldEnvironment::shared(resolved, "stackstead agent run")?,
     };
-    resolved = StacksteadManifest::read(&resolved.manifest_path())?;
-    validate_contract(&runtime, &resolved)?;
-    lifecycle::verify_port_leases(&resolved)?;
-    drop(mutation_lock);
+    validate_contract(&runtime, held.manifest())?;
+    lifecycle::verify_port_leases(held.manifest())?;
+    let (resolved, run_lease) = held.into_run()?;
     let generated = resolved.validated_environment().map_err(|error| {
         anyhow::anyhow!(
             "cannot read generated environment for {} at {}: {error}",

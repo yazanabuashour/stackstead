@@ -59,8 +59,7 @@ impl StacksteadSummaryOutput {
             runtime: observation.activity(),
             readiness: (&observation.readiness).into(),
             services: observation
-                .services
-                .as_ref()
+                .evidence()
                 .map(|services| services.iter().map(Into::into).collect()),
             issues: observation.issues.clone(),
             worktree: manifest.worktree,

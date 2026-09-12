@@ -87,20 +87,20 @@ fn observe_readiness(
     expected: &Requirements,
     deadline: std::time::Instant,
 ) -> anyhow::Result<readiness::ReadinessReport> {
-    let observations =
+    let snapshot =
         compose::service_observations(manifest, Some(deadline)).inspect_err(|_error| {
             manifest.status.runtime = ComponentStatus::Unknown;
         })?;
-    let observation = super::RuntimeObservation {
-        readiness: readiness::evaluate(&manifest.readiness, Some(expected), Some(&observations)),
-        services: Some(observations),
-        issues: Vec::new(),
-    };
-    manifest.status.runtime = observation.status();
+    let readiness = readiness::evaluate(
+        &manifest.readiness,
+        Some(expected),
+        Some(snapshot.evidence()),
+    );
+    manifest.status.runtime = snapshot.status();
     // Application probes can execute commands. Reject model drift after those probes
     // and observations before accepting a pass.
     verify_current(manifest, expected, deadline)?;
-    Ok(observation.readiness)
+    Ok(readiness)
 }
 
 fn verify_current(

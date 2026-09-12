@@ -6,78 +6,42 @@ use crate::{
 
 #[derive(Debug, Clone)]
 pub struct RuntimeObservation {
-    pub services: Option<Vec<compose::ServiceObservation>>,
+    pub snapshot: Option<compose::RuntimeSnapshot>,
     pub readiness: ReadinessReport,
     pub issues: Vec<String>,
 }
 
 impl RuntimeObservation {
+    pub fn evidence(&self) -> Option<&[compose::ServiceObservation]> {
+        self.snapshot
+            .as_ref()
+            .map(compose::RuntimeSnapshot::evidence)
+    }
+
     pub fn activity(&self) -> &'static str {
-        let Some(services) = &self.services else {
-            return "unknown";
-        };
-        if services
-            .iter()
-            .any(|service| matches!(service.state.as_str(), "running" | "paused" | "restarting"))
-        {
-            "active"
-        } else if services
-            .iter()
-            .all(|service| matches!(service.state.as_str(), "created" | "exited" | "dead"))
-        {
-            "inactive"
-        } else {
-            "unknown"
-        }
+        self.snapshot
+            .as_ref()
+            .map_or("unknown", compose::RuntimeSnapshot::activity)
     }
 
     pub fn running(&self) -> Option<bool> {
-        let services = self.services.as_ref()?;
-        if services.iter().any(|service| service.state == "running") {
-            Some(true)
-        } else if services.iter().all(|service| {
-            matches!(
-                service.state.as_str(),
-                "created" | "exited" | "dead" | "paused" | "restarting"
-            )
-        }) {
-            Some(false)
-        } else {
-            None
-        }
+        self.snapshot
+            .as_ref()
+            .and_then(compose::RuntimeSnapshot::running)
     }
 
     pub fn service_status(&self, name: &str) -> ComponentStatus {
-        let Some(services) = &self.services else {
-            return ComponentStatus::Unknown;
-        };
-        let mut status = ComponentStatus::Stopped;
-        for service in services {
-            if service.oneoff == Some(true) {
-                continue;
-            }
-            if service.service.is_empty() || (service.service == name && service.oneoff.is_none()) {
-                status = ComponentStatus::Unknown;
-                continue;
-            }
-            if service.service != name {
-                continue;
-            }
-            match service.state.as_str() {
-                "running" => return ComponentStatus::Running,
-                "created" | "exited" | "dead" | "paused" | "restarting" => {}
-                _ => status = ComponentStatus::Unknown,
-            }
-        }
-        status
+        self.snapshot
+            .as_ref()
+            .map_or(ComponentStatus::Unknown, |snapshot| {
+                snapshot.service_status(name)
+            })
     }
 
     pub fn status(&self) -> ComponentStatus {
-        match self.running() {
-            Some(true) => ComponentStatus::Running,
-            Some(false) => ComponentStatus::Stopped,
-            None => ComponentStatus::Unknown,
-        }
+        self.snapshot
+            .as_ref()
+            .map_or(ComponentStatus::Unknown, compose::RuntimeSnapshot::status)
     }
 }
 
@@ -103,8 +67,8 @@ pub fn observe_runtime(manifest: &StacksteadManifest) -> RuntimeObservation {
         }
         _ => None,
     };
-    let services = match compose::service_observations(manifest, None) {
-        Ok(services) => Some(services),
+    let snapshot = match compose::service_observations(manifest, None) {
+        Ok(snapshot) => Some(snapshot),
         Err(error) => {
             issues.push(format!("could not inspect Docker runtime: {error}"));
             None
@@ -127,9 +91,13 @@ pub fn observe_runtime(manifest: &StacksteadManifest) -> RuntimeObservation {
             }
         }
     }
-    let readiness = readiness::evaluate(&manifest.readiness, current.as_ref(), services.as_deref());
+    let readiness = readiness::evaluate(
+        &manifest.readiness,
+        current.as_ref(),
+        snapshot.as_ref().map(compose::RuntimeSnapshot::evidence),
+    );
     RuntimeObservation {
-        services,
+        snapshot,
         readiness,
         issues,
     }

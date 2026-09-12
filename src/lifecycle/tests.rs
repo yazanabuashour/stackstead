@@ -4,12 +4,14 @@ use chrono::Utc;
 
 use crate::{
     compose, events,
+    lock::LockGuard,
     manifest::{ManifestStatus, SourceOwnership, StacksteadManifest},
     state::ProjectPaths,
     test_support::{TestResultErrorExt as _, TestResultExt as _},
 };
 
 use super::{
+    CreateOutcome, HeldEnvironment,
     project::default_config,
     teardown::{TeardownPhase, validate_completed_source_cleanup, write_teardown},
     types::ProjectRuntime,
@@ -80,6 +82,62 @@ fn cleanup_manifest(root: &Path, ownership: SourceOwnership) -> anyhow::Result<S
         created_at: Utc::now(),
         updated_at: Utc::now(),
     })
+}
+
+#[test]
+fn held_environment_reloads_state_and_transfers_only_the_run_lease() -> anyhow::Result<()> {
+    let directory = tempfile::tempdir().test()?;
+    let mut manifest = cleanup_manifest(directory.path(), SourceOwnership::Stackstead)?;
+    let mutation_path = manifest.state_dir.join("lock");
+    let run_path = manifest.state_dir.join("run.lock");
+    let mutation_lock = LockGuard::acquire(&mutation_path, "test creation").test()?;
+    drop(LockGuard::acquire(&run_path, "test run lease").test()?);
+    manifest.save_atomic().test()?;
+    let created = CreateOutcome::new(manifest.clone(), mutation_lock);
+    manifest.status.dependencies = crate::manifest::ComponentStatus::Ready;
+    manifest.save_atomic().test()?;
+
+    let held = HeldEnvironment::after_create(created, &manifest).test()?;
+    assert_eq!(
+        held.manifest().status.dependencies,
+        manifest.status.dependencies
+    );
+    assert!(!LockGuard::can_acquire(&mutation_path));
+    assert!(!LockGuard::can_acquire(&run_path));
+    let held = held.for_run(&manifest).test()?;
+    assert!(!LockGuard::can_acquire(&mutation_path));
+    let (resolved, lease) = held.into_run().test()?;
+    assert_eq!(resolved.stackstead_id, manifest.stackstead_id);
+    assert!(LockGuard::can_acquire(&mutation_path));
+    assert!(!LockGuard::can_acquire(&run_path));
+    drop(lease);
+    assert!(LockGuard::can_acquire(&run_path));
+    Ok(())
+}
+
+#[test]
+fn held_environment_rejects_identity_changes_at_acquisition_and_handoff() -> anyhow::Result<()> {
+    let directory = tempfile::tempdir().test()?;
+    let mut manifest = cleanup_manifest(directory.path(), SourceOwnership::Stackstead)?;
+    drop(LockGuard::acquire(&manifest.state_dir.join("lock"), "test mutation").test()?);
+    drop(LockGuard::acquire(&manifest.state_dir.join("run.lock"), "test run lease").test()?);
+    manifest.save_atomic().test()?;
+    let mut foreign = manifest.clone();
+    foreign.runtime_token = "fedcba9876543210fedcba9876543210".into();
+    foreign.save_atomic().test()?;
+    let error = HeldEnvironment::exclusive(manifest.clone()).test_err()?;
+    assert!(error.to_string().contains("environment identity changed"));
+
+    manifest.save_atomic().test()?;
+    let held = HeldEnvironment::exclusive(manifest.clone()).test()?;
+    let error = held.for_run(&foreign).test_err()?;
+    assert!(error.to_string().contains("environment identity changed"));
+
+    let held = HeldEnvironment::exclusive(manifest.clone()).test()?;
+    foreign.save_atomic().test()?;
+    let error = held.for_run(&manifest).test_err()?;
+    assert!(error.to_string().contains("environment identity changed"));
+    Ok(())
 }
 
 #[test]

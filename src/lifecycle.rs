@@ -1,3 +1,4 @@
+mod access;
 mod contract;
 mod destroy;
 mod inspect;
@@ -17,6 +18,7 @@ mod up_database;
 mod up_readiness;
 mod validation;
 
+pub use access::{CreateOutcome, HeldEnvironment};
 pub use contract::{install_dependencies, regenerate_contract, template_context};
 pub use destroy::{destroy, resolve_destroy};
 pub use inspect::inspect;
@@ -30,8 +32,8 @@ pub use provision::{adopt, create, create_for_launch};
 pub use stop::stop;
 pub use teardown::ensure_no_teardown;
 pub use types::{
-    CreateOutcome, CurrentIdentity, EffectiveComponent, EffectiveStatus, InspectOutput, LiveStatus,
-    ProjectRuntime, StatusBasis, UpOutcome, UpTimings,
+    CurrentIdentity, EffectiveComponent, EffectiveStatus, InspectOutput, LiveStatus,
+    ProjectRuntime, StatusBasis, UpTimings,
 };
 pub use up::{up, up_after_create};
 pub use validation::{
