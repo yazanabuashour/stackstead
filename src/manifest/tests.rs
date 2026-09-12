@@ -20,7 +20,7 @@ fn manifest_value(version: &str) -> serde_json::Value {
 }
 
 #[test]
-fn pointer_round_trip_and_legacy_read() -> anyhow::Result<()> {
+fn pointer_round_trip_rejects_legacy_version() -> anyhow::Result<()> {
     let directory = tempfile::tempdir().test()?;
     let path = directory.path().join("stackstead.json");
     let pointer = StacksteadPointer {
@@ -34,13 +34,18 @@ fn pointer_round_trip_and_legacy_read() -> anyhow::Result<()> {
         stackstead_root: directory.path().join("cell"),
     };
     write_pointer(&path, &pointer).test()?;
-    let actual: StacksteadPointer = serde_json::from_reader(File::open(&path).test()?).test()?;
+    let actual = StacksteadPointer::read(&path).test()?;
     assert_eq!(actual, pointer);
 
     let mut legacy = serde_json::to_value(&pointer).test()?;
     legacy["version"] = serde_json::json!("1");
     write_json_atomic(&path, &legacy).test()?;
-    assert_eq!(StacksteadPointer::read(&path).test()?.version, "1");
+    assert!(
+        StacksteadPointer::read(&path)
+            .test_err()?
+            .to_string()
+            .contains("unsupported pointer contract")
+    );
     Ok(())
 }
 

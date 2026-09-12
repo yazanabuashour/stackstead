@@ -219,7 +219,7 @@ Repositories can append specific rules through `agent.rules` in `stackstead.yaml
 
 `.stackstead/stackstead.json` is a small, non-secret pointer containing the stackstead ID, project identity, and absolute locations of the manifest, repository root, project state root, and stackstead root. It lets commands issued anywhere under the generated source checkout find the original contract without recalculating `state.root` from a copied config.
 
-The pointer is not the manifest and is not authority to delete a path. Stackstead writes pointer version 2; the authoritative manifest is version 3. Every resolved operation requires the pointer and manifest to reciprocally agree on full ID, project, repository, state root, stackstead root, manifest path, and the exact lexical location from which discovery found the pointer. Destructive operations additionally validate containment, source ownership, branch binding, locks, the runtime ownership token, and the exact Compose identity.
+The pointer is not the manifest and is not authority to delete a path. Stackstead reads and writes only pointer version 2; the authoritative manifest is version 3. Earlier pointer versions are rejected, including by `repair`; destroy those environments with the binary that created them, then recreate them with the current binary. Every resolved operation requires the pointer and manifest to reciprocally agree on full ID, project, repository, state root, stackstead root, manifest path, and the exact lexical location from which discovery found the pointer. Destructive operations additionally validate containment, source ownership, branch binding, locks, the runtime ownership token, and the exact Compose identity.
 
 ## Generated environment
 

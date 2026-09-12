@@ -1,7 +1,10 @@
 use std::{collections::BTreeMap, path::Path};
 
 use super::Diagnostic;
-use crate::{lock, manifest::StacksteadManifest};
+use crate::{
+    lock,
+    manifest::{MANIFEST_VERSION, StacksteadManifest},
+};
 
 pub(super) fn read_manifests(
     project_state_dir: &Path,
@@ -58,7 +61,7 @@ pub(super) fn read_manifests(
             Err(error) => diagnostics.push(Diagnostic::error(
                 "manifest.unreadable",
                 format!("cannot read {}: {error}", manifest_path.display()),
-                "restore a valid StacksteadManifest version 2 file; destroy version 1 stacksteads with the older binary that created them, then recreate them with this version",
+                format!("restore a valid StacksteadManifest version {MANIFEST_VERSION} file; destroy unsupported stacksteads with the binary that created them, then recreate them with this version"),
             )),
         }
     }

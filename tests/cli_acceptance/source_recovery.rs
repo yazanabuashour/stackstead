@@ -48,7 +48,7 @@ fn pointer_state_root_cannot_normalize_to_the_filesystem_root() -> anyhow::Resul
 }
 
 #[test]
-fn legacy_pointer_v1_discovers_normally_and_repair_rewrites_v2() -> anyhow::Result<()> {
+fn legacy_pointer_v1_blocks_discovery_and_repair_without_rewriting() -> anyhow::Result<()> {
     let project = Project::initialized()?;
     let manifest = project.create("feature-a")?;
     let mut pointer: StacksteadPointer =
@@ -59,17 +59,15 @@ fn legacy_pointer_v1_discovers_normally_and_repair_rewrites_v2() -> anyhow::Resu
         serde_json::to_vec_pretty(&pointer).test()?,
     )
     .test()?;
-    stackstead(&manifest.worktree)
-        .args(["context", "feature-a", "--json"])
-        .assert()
-        .success();
-    stackstead(&project.repo)
-        .args(["repair", "feature-a", "--json"])
-        .assert()
-        .success();
-    let rewritten: StacksteadPointer =
-        serde_json::from_slice(&fs::read(&manifest.pointer_file).test()?).test()?;
-    assert_eq!(rewritten.version, "2");
+    let original = fs::read(&manifest.pointer_file).test()?;
+    for (directory, command) in [(&manifest.worktree, "context"), (&project.repo, "repair")] {
+        let assert = stackstead(directory)
+            .args([command, &manifest.stackstead_id, "--json"])
+            .assert()
+            .failure();
+        assert!(output_text(&assert.get_output().stderr)?.contains("unsupported pointer contract"));
+    }
+    assert_eq!(fs::read(&manifest.pointer_file).test()?, original);
     Ok(())
 }
 
