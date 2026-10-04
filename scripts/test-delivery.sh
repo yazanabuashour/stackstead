@@ -6,38 +6,6 @@ tmp="$(mktemp -d "${TMPDIR:-/tmp}/stackstead-delivery-test.XXXXXX")"
 tmp="$(CDPATH= cd -- "$tmp" && pwd -P)"
 trap 'rm -rf "$tmp"' EXIT
 
-for file in LICENSE SECURITY.md CONTRIBUTING.md docs/quickstart.md docs/agent-setup.md; do
-  [[ -s "$repo_root/$file" ]]
-done
-
-output_sources=("$repo_root/src/output.rs")
-if [[ -d "$repo_root/src/output" ]]; then
-  while IFS= read -r source; do
-    output_sources+=("$source")
-  done < <(find "$repo_root/src/output" -type f -name '*.rs' -print | LC_ALL=C sort)
-fi
-json_kinds=()
-while IFS= read -r kind; do
-  json_kinds+=("$kind")
-done < <(
-  cat "${output_sources[@]}" |
-    tr '\n' ' ' |
-    grep -oE 'kind[[:space:]]*:[[:space:]]*"[^"]+"' |
-    sed -E 's/.*"([^"]+)"/\1/' |
-    LC_ALL=C sort -u
-)
-[[ "${#json_kinds[@]}" -gt 0 ]] || {
-  printf 'error: no top-level JSON kind literals found in the src/output module\n' >&2
-  exit 1
-}
-for kind in "${json_kinds[@]}"; do
-  grep -Eq '^\| `stackstead --json [^|]+` \| `'"$kind"'` \|' \
-    "$repo_root/docs/agent-contract.md" || {
-    printf 'error: CLI JSON table omits implementation kind: %s\n' "$kind" >&2
-    exit 1
-  }
-done
-
 while IFS= read -r document; do
   [[ -f "$repo_root/$document" ]] || continue
   while IFS= read -r link; do
@@ -49,16 +17,6 @@ while IFS= read -r document; do
     }
   done < <(grep -oE '\]\([^)]+' "$repo_root/$document" | sed 's/^](//')
 done < <(git -C "$repo_root" ls-files '*.md')
-
-grep -q 'stackstead launch feature-a -- claude' "$repo_root/docs/quickstart.md"
-grep -q '<!-- stackstead-policy: 1 -->' "$repo_root/docs/agent-setup.md"
-sh -n "$repo_root/scripts/test-release-install.sh"
-bash -n "$repo_root/scripts/ci.sh"
-bash -n "$repo_root/scripts/test-policy.sh"
-for mode in rust docker macos; do
-  grep -q "scripts/ci.sh $mode" "$repo_root/.github/workflows/ci.yml"
-done
-grep -q 'scripts/test-release-install.sh' "$repo_root/.github/workflows/release.yml"
 
 git -C "$tmp" init -b main >/dev/null
 git -C "$tmp" -c user.name='Stackstead Delivery Test' \

@@ -46,7 +46,12 @@ fn ownership_override_defaults_an_omitted_volume_type() -> anyhow::Result<()> {
     let mut manifest = manifest()?;
     manifest.compose_files = vec![compose];
 
-    (render_ownership_override(&manifest)).test()?;
+    let rendered: serde_yaml::Value =
+        serde_yaml::from_str(&render_ownership_override(&manifest).test()?).test()?;
+    assert_eq!(
+        rendered["volumes"]["data"]["labels"]["io.stackstead.runtime-token"],
+        manifest.runtime_token
+    );
     Ok(())
 }
 

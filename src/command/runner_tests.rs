@@ -53,6 +53,7 @@ fn non_utf8_environment_is_lossless_for_execution_and_safe_for_diagnostics() -> 
             "--exact",
             "command::runner::tests::non_utf8_environment_fixture",
             "--nocapture",
+            "--ignored",
         ])
         .env("STACKSTEAD_NON_UTF8_FIXTURE", "1")
         .env("COMPOSE_PROFILES", OsString::from_vec(vec![0xff]))
@@ -66,10 +67,15 @@ fn non_utf8_environment_is_lossless_for_execution_and_safe_for_diagnostics() -> 
         output.status.success(),
         "non-UTF-8 subprocess fixture failed"
     );
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("1 passed"),
+        "subprocess fixture did not run"
+    );
     Ok(())
 }
 
 #[test]
+#[ignore = "invoked by the parent test in a process with isolated environment or signal policy"]
 fn non_utf8_environment_fixture() -> anyhow::Result<()> {
     if std::env::var_os("STACKSTEAD_NON_UTF8_FIXTURE").is_none() {
         return Ok(());

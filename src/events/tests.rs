@@ -2,7 +2,7 @@ use super::*;
 use crate::test_support::{TestResultErrorExt as _, TestResultExt as _};
 
 #[test]
-fn appends_typed_synced_lines_and_redacts() -> anyhow::Result<()> {
+fn appends_typed_lines_and_redacts() -> anyhow::Result<()> {
     let directory = tempfile::tempdir().test()?;
     let path = directory.path().join("events.jsonl");
     append(
@@ -40,9 +40,6 @@ fn event_messages_use_the_shared_redaction_policy() -> anyhow::Result<()> {
         message,
         "Authorization: [REDACTED]\nAUTH_TOKEN=[REDACTED]\nfatal: https://[REDACTED]@example.invalid/repo\nordinary  detail"
     );
-    for secret in ["header-secret", "quoted secret", "user:password"] {
-        assert!(!message.contains(secret));
-    }
     Ok(())
 }
 

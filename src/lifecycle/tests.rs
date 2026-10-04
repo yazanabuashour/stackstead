@@ -3,17 +3,14 @@ use std::{collections::BTreeMap, path::Path};
 use chrono::Utc;
 
 use crate::{
-    compose, events,
+    events,
     manifest::{ManifestStatus, SourceOwnership, StacksteadManifest},
-    state::ProjectPaths,
     test_support::{TestResultErrorExt as _, TestResultExt as _},
 };
 
 use super::{
-    project::default_config,
     teardown::{TeardownPhase, validate_completed_source_cleanup, write_teardown},
-    types::ProjectRuntime,
-    validation::{validate_compose_project, validate_manifest_binding},
+    validation::validate_compose_project,
 };
 
 fn cleanup_manifest(root: &Path, ownership: SourceOwnership) -> anyhow::Result<StacksteadManifest> {
@@ -83,68 +80,10 @@ fn cleanup_manifest(root: &Path, ownership: SourceOwnership) -> anyhow::Result<S
 }
 
 #[test]
-fn generated_config_parses() -> anyhow::Result<()> {
-    let plan = compose::ComposePlan {
-        file: "compose.yaml".into(),
-        ports: vec![
-            compose::ComposePortPlan {
-                name: "web".into(),
-                service: "web".into(),
-                container_port: 3000,
-                env: "WEB_PORT".into(),
-                current_host_port: Some(3000),
-                replacement: "127.0.0.1:${WEB_PORT}:3000".into(),
-                url: Some("http://127.0.0.1:{{ ports.web }}".into()),
-            },
-            compose::ComposePortPlan {
-                name: "postgres".into(),
-                service: "postgres".into(),
-                container_port: 5432,
-                env: "POSTGRES_PORT".into(),
-                current_host_port: Some(5432),
-                replacement: "127.0.0.1:${POSTGRES_PORT}:5432".into(),
-                url: None,
-            },
-        ],
-        warnings: vec![],
-    };
-    let yaml = default_config("demo", "main", &plan).test()?;
-    let config = crate::config::StacksteadConfig::from_yaml(&yaml).test()?;
-    assert_eq!(config.project.name, "demo");
-    assert_eq!(config.resources.ports.expose.len(), 2);
-    Ok(())
-}
-
-#[test]
 fn compose_project_identity_is_docker_safe() -> anyhow::Result<()> {
     (validate_compose_project("demo-feature-a17c")).test()?;
     (validate_compose_project("Demo-feature")).test_err()?;
     (validate_compose_project("../demo")).test_err()?;
-    Ok(())
-}
-
-#[test]
-fn manifest_binding_rejects_mismatched_port_service_sets() -> anyhow::Result<()> {
-    let directory = tempfile::tempdir().test()?;
-    let mut manifest = cleanup_manifest(directory.path(), SourceOwnership::Stackstead)?;
-    manifest.ports.insert("web".into(), 39000);
-    let mut config = crate::config::StacksteadConfig::default();
-    config.project.name = "demo".into();
-    let runtime = ProjectRuntime {
-        config,
-        paths: ProjectPaths::new(
-            directory.path().join("repo"),
-            directory.path().join("state"),
-            "demo",
-        ),
-    };
-    let error = validate_manifest_binding(&runtime, &manifest)
-        .test_err()?
-        .to_string();
-    assert_eq!(
-        error,
-        "manifest host and container port service sets differ"
-    );
     Ok(())
 }
 

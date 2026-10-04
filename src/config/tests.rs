@@ -3,7 +3,6 @@ use crate::test_support::{TestResultErrorExt as _, TestResultExt as _};
 use std::{
     fs,
     path::{Path, PathBuf},
-    time::{SystemTime, UNIX_EPOCH},
 };
 
 const SAMPLE: &str = r#"

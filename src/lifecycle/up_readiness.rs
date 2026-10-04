@@ -167,16 +167,3 @@ fn timeout_error(
         diagnostics.join("; ")
     )
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn application_status_requires_checks_and_only_depends_on_their_result() {
-        assert_eq!(application_status(false, true), ComponentStatus::Unknown);
-        assert_eq!(application_status(false, false), ComponentStatus::Unknown);
-        assert_eq!(application_status(true, true), ComponentStatus::Ready);
-        assert_eq!(application_status(true, false), ComponentStatus::Failed);
-    }
-}

@@ -172,6 +172,7 @@ fn automatic_reaping_policy_is_rejected_before_spawning() -> anyhow::Result<()> 
             "--exact",
             "command::captured::tests::nonwaitable_fixture",
             "--nocapture",
+            "--ignored",
         ])
         .env("STACKSTEAD_NONWAITABLE_FIXTURE", "1")
         .env("MARKER", &marker);
@@ -189,11 +190,16 @@ fn automatic_reaping_policy_is_rejected_before_spawning() -> anyhow::Result<()> 
         result.status.success(),
         "automatic-reaping subprocess fixture failed: {result:?}"
     );
+    assert!(
+        String::from_utf8_lossy(&result.stdout).contains("1 passed"),
+        "subprocess fixture did not run"
+    );
     assert!(!marker.exists());
     Ok(())
 }
 
 #[test]
+#[ignore = "invoked by the parent test in a process with isolated environment or signal policy"]
 fn nonwaitable_fixture() -> anyhow::Result<()> {
     if std::env::var_os("STACKSTEAD_NONWAITABLE_FIXTURE").is_none() {
         return Ok(());

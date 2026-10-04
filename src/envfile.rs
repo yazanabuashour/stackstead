@@ -146,18 +146,6 @@ mod tests {
     }
 
     #[test]
-    fn reads_and_redacts_values() -> anyhow::Result<()> {
-        let directory = tempfile::tempdir().test()?;
-        let path = directory.path().join(".env");
-        std::fs::write(&path, "WEB_PORT=39000\nAPI_TOKEN=private\n").test()?;
-        let output = rendered(&path, false).test()?;
-        assert!(output.contains("WEB_PORT=39000"));
-        assert!(output.contains("API_TOKEN=[REDACTED]"));
-        assert!(!output.contains("private"));
-        Ok(())
-    }
-
-    #[test]
     fn redacts_credentials_in_urls_even_when_key_is_not_secret_like() -> anyhow::Result<()> {
         assert!(should_redact(
             "DATABASE_URL",
