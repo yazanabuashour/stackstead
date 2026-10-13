@@ -105,11 +105,12 @@ The only supported provider is `git-worktree`. `base` names the local branch or 
 
 ### `runtime`
 
-The only provider is `docker-compose`. Stackstead resolves `files` in the bound source worktree and passes them to Compose in order. The Compose project name is always `project.name` + `"-"` + the full stackstead ID. Lifecycle commands independently validate the manifest's Compose identity and reject collisions with another owner.
-
-Stackstead appends a generated `.stackstead/compose-ownership.yaml` as the final Compose file on every invocation: `docker compose -p <project> --env-file <env> -f <configured>... -f .stackstead/compose-ownership.yaml ...`. The override applies the manifest v3 `io.stackstead.runtime-token` label to every direct service and managed network or volume. `include`, `extends`, anonymous volumes, undeclared named volumes, managed resource `name` values, interpolated `container_name` values, cross-file redeclarations of top-level networks or volumes, non-boolean `external` values, and resource shapes that cannot be labeled completely are rejected instead of being started without ownership metadata. External networks and volumes remain repository-owned and are not labeled.
-
-Before startup or teardown, Stackstead verifies a deterministic labeled claim volume and every project-labeled or exact conventional/custom-name container, network, and volume. A missing or mismatched label fails closed before Compose can target a peer resource. A newly created stackstead with no claim and no candidate Docker resources may be stopped or destroyed without invoking Compose.
+The only provider is `docker-compose`. Stackstead resolves `files` in the bound
+source worktree and passes them to Compose in order, followed by its generated
+ownership override. The project name is `project.name` + `"-"` + the full
+stackstead ID, not a configurable Compose identity. See [Compose identity and
+ownership checks](compose.md#project-identity) for accepted resource shapes and
+fail-closed runtime validation.
 
 ### `runtime.readiness`
 
@@ -169,7 +170,12 @@ For package linking, use a repository script through `dependencies.install`. Pas
 
 ### `database.postgres`
 
-Only `strategy: compose-volume` is supported. `service` must identify the Postgres Compose service, while `database`, `user`, and `password` describe its connection settings. A non-empty seed command runs from the worktree with generated environment values available after Postgres becomes reachable. Make seed commands idempotent.
+Only `strategy: compose-volume` is supported. `service` must identify the
+Postgres Compose service and an identically named key in
+`resources.ports.expose`; the database contract does not support a port alias.
+`database`, `user`, and `password` describe its connection settings. A non-empty
+seed command runs from the worktree with generated environment values available
+after Postgres becomes reachable. Make seed commands idempotent.
 
 See [Database behavior](database.md).
 
@@ -214,7 +220,10 @@ Hooks use the same command model as dependencies. They run at `post_create`, `pr
 
 ## Template variables
 
-Stackstead supports simple `{{ key }}` interpolation, not a general template language:
+Stackstead interpolates `{{ key }}` only in `resources.ports.expose.*.url`,
+`env.generate` values, and HTTP health-check URLs. Command strings are not
+templated; pass their inputs through the generated environment. This is not a
+general template language. Supported keys are:
 
 ```text
 {{ project.name }}

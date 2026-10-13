@@ -8,10 +8,6 @@ Start with the guide that matches what you are trying to do.
   its operating model, and when it is not the right tool.
 - [Installation](install.md) covers supported platforms, checksummed releases,
   upgrades, and source builds.
-- [Upgrade from 0.1.3 to 0.1.4](upgrade-0.1.4.md) covers the inspection transport,
-  hook rollout, and exact-target recovery for an already failed teardown.
-- [Upgrade from 0.1.4 to 0.1.5](upgrade-0.1.5.md) covers the current-worktree
-  identity contract and matching manager-hook rollout.
 - [Quickstart](quickstart.md) configures and launches a first environment.
 - [Agent setup](agent-setup.md) is the copyable setup contract for coding agents.
 
@@ -26,12 +22,21 @@ Start with the guide that matches what you are trying to do.
 
 ## Integrate
 
-- [Agent integration](agent-integration.md) covers generated context, JSON, and
-  host or service command execution.
+- [Agent integration](agent-integration.md) covers host/service execution,
+  generated context, and injected environment.
 - [Manager integrations](integrations.md) covers Worktrunk, workmux, webmux, and
   generic launchers.
-- [Agent and manifest contract](agent-contract.md) documents generated state and
-  versioned transport boundaries.
+- [Agent contract](agent-contract.md) is the CLI JSON and persisted-identity
+  reference.
+
+## Upgrade
+
+- [Upgrade from 0.1.3 to 0.1.4](upgrade-0.1.4.md) covers the inspection transport,
+  hook rollout, and exact-target recovery for an already failed teardown.
+- [Upgrade from 0.1.4 to 0.1.5](upgrade-0.1.5.md) covers the current-worktree
+  identity contract and matching manager-hook rollout.
+- [Stackstead 0.1.4 release notes](releases/v0.1.4.md) explain that release's
+  reliability changes. Use the current contract reference for current JSON.
 
 ## Trust and participate
 
@@ -41,9 +46,6 @@ Start with the guide that matches what you are trying to do.
   receipts.
 - [Early adopter program](early-adopters.md) explains who the current release is
   for and how to participate.
-- [Rust architecture](rust-architecture.md) documents the internal boundaries and
-  deliberate scope budget.
-- [Contributing](../CONTRIBUTING.md) and [Security policy](../SECURITY.md) cover
-  changes and private vulnerability reporting.
-- [Stackstead 0.1.4 release notes](releases/v0.1.4.md) describe the 0.1.4
-  reliability changes and upgrade considerations.
+- [Contributing](../CONTRIBUTING.md) covers the code map, checks, and release
+  packaging; [Rust architecture](rust-architecture.md) explains internal invariants.
+- [Security policy](../SECURITY.md) covers private vulnerability reporting.

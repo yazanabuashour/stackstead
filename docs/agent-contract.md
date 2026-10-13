@@ -1,6 +1,8 @@
 # Agent contract
 
-Use command-owned CLI JSON for automation and generated `AGENT_CONTEXT.md` for agent instructions. Both identify the same environment. The manifest and pointer sections below explain persisted state.
+Use command-owned CLI JSON for automation, not the manifest. This reference
+covers response envelopes and persisted identity. For host/service execution,
+generated context, and injected environment, see [Agent integration](agent-integration.md).
 
 ## Current worktree identity
 
@@ -158,16 +160,9 @@ mandatory `readiness` object. Unknown fields and missing or corrupt readiness
 contracts fail closed. Readers validate the contract header before interpreting
 the body.
 
-- Kind and version
-- Stackstead ID, slug, cryptographically random short ID, runtime ownership token, project, branch, pinned base commit, and explicit source ownership
-- Canonical repository, project-state, stackstead, worktree, state, and per-user port-lease registry paths
-- Compose project identity and resolved Compose file paths
-- Service-to-host-port, container-port, and service-to-URL maps
-- Generated env, context, pointer, and event-log paths plus generated env key names
-- Source, dependency, runtime, database, and health status
-- Readiness declaration and its resolved Compose requirements
-- Optional Postgres seed metadata
-- Creation and update timestamps
+The field definitions live in [`StacksteadManifest`](../src/manifest.rs) and
+[`readiness::Contract`](../src/readiness/model.rs). These are persisted internal
+contracts, not Rust SDK types or a substitute for command-owned output.
 
 `readiness.configuration` is `unconfigured` or `declared`. A declared contract
 has a nonempty exact service-to-role `required` map. Its optional `resolved`
@@ -181,54 +176,12 @@ environment values that may contain secrets. It retains the raw non-secret
 startup profile selection, not the normalized Compose model. Writes are atomic
 where practical.
 
-## Process boundaries
-
-Stackstead also supplies direct host and service process boundaries:
-
-```sh
-stackstead run feature-a -- claude
-stackstead run feature-a -- <agent-or-command> [arguments...]
-stackstead exec feature-a api -- <command> [arguments...]
-```
-
-`run` starts the child in the exact recorded checkout with generated environment plus pinned Stackstead and Compose identity. `exec` starts the command in the exact configured, owned, running Compose service. Both commands return the child exit status. See [Agent integration](agent-integration.md).
-
-## Agent context Markdown
-
-The generated worktree contains `.stackstead/AGENT_CONTEXT.md`. It identifies the exact stackstead, branch, source path, Compose project, URLs, ports, environment file, manifest, event log, database service/strategy/endpoint/name, project rules, and exact full-ID commands for inspection, logs, recovery, and teardown. Credentials remain in the generated environment and are not copied into the context.
-
-An agent should begin runtime-sensitive work by reading it:
-
-```sh
-stackstead context feature-a --print
-stackstead inspect feature-a
-```
-
-The expected operating rules are simple:
-
-1. Use only the source checkout named in the context.
-2. Use only its generated ports, URLs, and env file.
-3. Do not fall back to a shared development database.
-4. Inspect status and logs before changing startup code.
-5. Check database reachability before applying migrations.
-6. Stop or destroy only through the named stackstead contract.
-
-Repositories can append specific rules through `agent.rules` in `stackstead.yaml`.
-
 ## Pointer file and discovery
 
 `.stackstead/stackstead.json` is a small, non-secret pointer containing the stackstead ID, project identity, and absolute locations of the manifest, repository root, project state root, and stackstead root. It lets commands issued anywhere under the generated source checkout find the original contract without recalculating `state.root` from a copied config.
 
 The pointer is not the manifest and is not authority to delete a path. Stackstead reads and writes only pointer version 2; the authoritative manifest is version 3. Earlier pointer versions are rejected, including by `repair`; destroy those environments with the binary that created them, then recreate them with the current binary. Every resolved operation requires the pointer and manifest to reciprocally agree on full ID, project, repository, state root, stackstead root, manifest path, and the exact lexical location from which discovery found the pointer. Destructive operations additionally validate containment, source ownership, branch binding, locks, the runtime ownership token, and the exact Compose identity.
 
-## Generated environment
-
-`.stackstead/.env` binds template output such as `WEB_PORT`, `DATABASE_URL`, and `STACKSTEAD_ID` to this stackstead. It starts with a generated-file warning and has deterministic key ordering.
-
-`stackstead env feature-a` reports its location and redacted keys. `stackstead env feature-a --print` remains redacted unless the user explicitly adds `--show-secrets`. Agents should not paste its contents into logs or durable knowledge.
-
-## Compose runtime boundary
-
-Compose-managed volumes use project-scoped names for separate environment data. Stackstead rejects custom `name` values on managed volumes and networks before startup, not only on collision. External resources and shared host bind mounts are accepted but can share state, as can host networking and services outside Stackstead. Document shared-state decisions in `agent.rules`; see [Compose isolation](compose.md#volume-isolation).
-
-Manifest v3 also binds Docker resources to `runtime_token`. Stackstead appends a generated ownership override to every Compose command, exposes that final file in JSON `compose_files`, labels each direct service and managed network or volume, and maintains a deterministic claim volume for the Compose namespace. Startup, stop, and destructive teardown enumerate project-labeled and exact-name resources and reject missing or mismatched ownership before Compose runs. Teardown re-enumerates resources before releasing the claim. A never-started stackstead with no claim and no candidate resources remains safe to stop or destroy as a no-op.
+Docker resources are independently bound to the manifest's `runtime_token`;
+see [Compose ownership checks](compose.md#project-identity). Filesystem identity
+does not prove resource ownership or [isolation from external state](compose.md#volume-isolation).

@@ -9,7 +9,7 @@ From a repository containing `compose.yaml`, `compose.yml`, `docker-compose.yaml
 ```sh
 stackstead init
 stackstead compose plan
-stackstead compose plan --json
+stackstead --json compose plan
 ```
 
 The plan identifies service and container ports, reuses an existing Compose variable such as `APP_PORT` when one is already present, proposes a generated variable only for fixed mappings, and infers loopback URLs only for conventional HTTP service/port combinations. `init` uses the same plan to generate `stackstead.yaml`. Unsupported, ambiguous, container-only, ranged, colliding-variable, or non-sequence port declarations are hard safety errors rather than warnings.
@@ -50,7 +50,11 @@ manifest. Compose then reads the generated values through the explicit
 Tracked config cannot define process-, Docker-, or Compose-control keys, so it
 cannot redirect executable lookup, the daemon, files, or project identity.
 
-Stop uses `stop`; destroy stops the verified runtime and uses `down -v --remove-orphans --rmi local`. If subsequent Stackstead-owned source removal fails, a pinned helper image restores ownership and permissions under only that exact worktree before one retry. The helper is skipped for external or normally removable source and never mounts a peer worktree. Compose removal deletes only Compose-local build images without a custom image tag while preserving pulled and explicitly tagged images. Logs use the same identity and file list with `logs --tail=<n>`. Stackstead does not rediscover a project by container labels or directory name when a manifest exists.
+Stop, destroy, and logs use the same identity and file list; they do not
+rediscover a project by container labels or directory name when a manifest
+exists. See [stop](lifecycle.md#stop) for retained resources and
+[destroy](lifecycle.md#destroy) for volume/image removal and source-recovery
+behavior.
 
 The final generated override labels every direct service and managed network or
 volume with the manifest's cryptographically random runtime token. Stackstead also
@@ -61,7 +65,11 @@ missing or mismatched token. A never-started stackstead with no claim and no
 resources remains a safe no-op; resources without the matching claim fail
 closed. Top-level `include`, service-level `extends`, anonymous volumes, and
 undeclared named volumes are rejected because Stackstead cannot verify ownership
-of the full resource set they introduce.
+of the full resource set they introduce. Interpolated `container_name` values,
+non-boolean `external` values, and resource shapes that cannot be labeled
+completely are also rejected. External networks and volumes remain
+repository-owned and are not labeled; managed-resource naming restrictions are
+covered under [volume isolation](#volume-isolation).
 
 ## Readiness evidence
 
@@ -140,7 +148,7 @@ ports:
 
 A container-only entry such as `ports: ["80"]` is also rejected: Docker would choose a random host port while the Stackstead manifest advertises a deterministic one. Write `127.0.0.1:${WEB_PORT}:80` explicitly. Stackstead models TCP loopback endpoints, so UDP, concrete non-loopback, and unspecified bindings such as `${WEB_PORT}:80`, `0.0.0.0`, or `::` are rejected. `compose apply` can convert an unqualified fixed mapping such as `3000:80` to the loopback generated form.
 
-`stackstead doctor`, `create`/`adopt`, and `up` structurally validate every `services.*.ports` entry. Every published port must consume the exact `env.generate` key whose value is `{{ ports.<name> }}`, and the container port must match the durable manifest. Fixed, missing, unsupported, inline, aliased, ranged, disconnected, or duplicate-variable mappings fail before Docker runs. To apply only the straightforward line edits:
+`stackstead doctor`, `create`/`adopt`, and `up` structurally validate every `services.*.ports` entry. Every published port must consume the exact `env.generate` key whose value is `{{ ports.<name> }}`, and the container port must match the durable manifest. Fixed, missing, unsupported, ranged, disconnected, or duplicate-variable mappings fail before Docker runs. Valid inline and YAML-aliased mappings are accepted by structural validation, but automatic rewriting also requires safely identifiable source lines. To apply only the straightforward line edits:
 
 ```sh
 stackstead compose plan

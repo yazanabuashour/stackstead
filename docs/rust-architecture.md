@@ -1,140 +1,91 @@
 # Rust architecture
 
-Stackstead is a single Rust CLI crate. Its architecture separates configuration and durable state from external command adapters, while keeping lifecycle sequencing explicit. There is no daemon, server, plugin loader, or hidden database.
+Stackstead is one Rust CLI crate, with no daemon, server, plugin loader, or
+hidden database. Use the [code map](../AGENTS.md#code-map) to find a subsystem and
+[Contributing](../CONTRIBUTING.md) to run its checks. This page explains the
+invariants that changes must preserve, not the current file split.
 
-## Module layout
+## Keep contracts separate
 
-```text
-src/
-  main.rs       CLI entry point
-  cli.rs        clap command and flag definitions
-  output.rs     versioned command-owned JSON response DTOs
-  error.rs      typed domain errors
-  config.rs     YAML types, parsing, defaults, validation
-  manifest.rs   versioned manifest types and atomic persistence
-  state.rs      project/stackstead state roots and lookup
-  discovery.rs  config and pointer-file discovery
-  lock.rs       project and stackstead file locks
-  paths.rs      canonicalization, containment, destroy safety
-  slug.rs       stackstead name sanitization and ID generation
-  ports.rs      deterministic port slots and bind probes
-  template.rs   small fail-closed {{ key }} interpolation
-  command.rs    process execution, capture, diagnostics, redaction
-  git.rs        local Git worktree operations
-  compose.rs    Compose discovery, narrow rewrites, runtime commands, port checks
-  envfile.rs    deterministic generated environment files
-  context.rs    generated AGENT_CONTEXT.md
-  agent.rs      exact stackstead command/agent execution boundary
-  database.rs   Postgres reachability and seed state
-  health.rs     generic loopback HTTP and custom-command readiness
-  lifecycle.rs  create/up/stop/destroy orchestration
-  doctor.rs     read-only diagnostics
-  repair.rs     conservative regeneration
-  events.rs     append-only JSONL events
-  open.rs       manifest URL selection and opening
-```
+Configuration declares the repository's runtime; the durable manifest records
+one environment's identity and allocated resources. Lifecycle code uses the
+manifest for worktree paths, Compose identity, ports, URLs, and generated files
+instead of rediscovering them from ambient state.
 
-The exact file split may stay smaller while implementation is compact. The important boundaries are configuration, persisted contracts, safety, external processes, and lifecycle orchestration—not one file per abstract concept.
+CLI JSON is a separate automation contract, not a serialized manifest. The
+sealed marker in [`output.rs`](../src/output.rs) permits only command-owned
+response types to reach the JSON writer. Adding a serializable internal field
+must not add it to stdout. See the [agent contract](agent-contract.md) for
+transport versions and persisted-state constraints.
 
-## Command runner
+The crate is binary-only and has no supported Rust SDK. Introduce a library or
+adapter abstraction only when concrete callers establish a durable boundary;
+internal modules are not compatibility promises. The supported providers are
+explicit configuration values, not interchangeable plugins.
 
-Built-in Git and Compose operations use `std::process::Command` with an executable and argument array. The runner captures stdout and stderr, includes useful command context in errors, records selected lifecycle boundaries, and redacts values associated with obvious secret names.
+## Preserve identity before mutation
 
-Repository-configured dependency installation, hooks, and seed commands use one shared command shape. `shell: false` is parsed into an executable and arguments. `shell: true` is an explicit project opt-in to platform-shell behavior. Stackstead-generated values are not concatenated into shell strings.
+The generated pointer binds a worktree to its original repository and manifest.
+Recalculating `state.root` from a copied config would resolve it relative to the
+wrong checkout. Discovery checks the pointer and manifest reciprocally; the
+pointer alone is never deletion authority.
 
-## Durable manifest
+[`paths`](../src/paths.rs) owns checked filesystem deletion.
+[`lifecycle/validation.rs`](../src/lifecycle/validation.rs) binds durable layout,
+source ownership, branch, and Compose identity. `--yes` skips confirmation, not
+validation. Manifest writes derive their destination from the manifest's state
+directory and use atomic persistence; generated secrets stay out of the manifest.
 
-`manifest.json` is the primary runtime contract. Versioned serde structs keep its shape explicit; CLI JSON is a separate transport contract made from owned response DTOs. Lifecycle code reads the manifest for worktree paths, Compose identity, ports, URLs, and generated files instead of rediscovering them from ambient state.
+Docker ownership is separate from filesystem containment. The Compose adapter
+labels managed resources with the manifest's runtime token, maintains a claim
+volume, and checks project-labeled and exact-name resources before mutation.
+Unsupported resource shapes fail closed rather than starting without complete
+ownership metadata. See [Compose identity](compose.md#project-identity) and
+[teardown recovery](lifecycle.md#destroy).
 
-Lifecycle manifest writes derive their destination from the manifest's canonical state directory, then use a temporary file, flush, and rename where practical. There is no path-taking compatibility writer or draft-format migration. Secret values stay in the generated env file rather than being copied into the manifest.
+## Hold access across lifecycle work
 
-## Rust and JSON surfaces
+[`lifecycle/access.rs`](../src/lifecycle/access.rs) acquires the mutation lock,
+then the run lease, then reloads the manifest. Its `HeldEnvironment` retains the
+guards and manifest together and rejects a changed full ID, runtime token, or
+state directory after waiting. Use it rather than reassembling the protocol.
 
-Stackstead ships one binary crate (`autolib = false`, `publish = false`) and intentionally has no supported Rust SDK yet. Internal modules may change together without creating a premature semver contract. A library should be introduced only when concrete embedding use cases establish a smaller durable API than the application internals.
+Creation's `CreateOutcome` privately retains its mutation lock. `launch` transfers
+that outcome into startup, then transfers held access into agent execution.
+Converting startup's exclusive run lease to shared access retains the mutation
+lock across the conversion. Agent execution releases mutation access only after
+its checks and transfers the shared lease to child supervision or foreground
+Compose execution.
 
-Machine-readable output is the supported automation surface. A sealed internal marker permits only command-owned DTOs to reach the JSON writer. Every response is a top-level object with a semantic `kind` and `version`; lists are wrapped rather than emitted as bare arrays. The [CLI JSON reference](agent-contract.md#cli-json) lists current response kinds and versions. DTO conversions copy only intended integration data, so manifest fields, doctor internals, and Compose implementation types cannot leak into stdout merely by gaining a serialization derive.
+Held access is not proof of a valid runtime contract. Repair may restore a
+missing pointer, stop uses the durable contract, and startup and agent execution
+require the current contract. Destroy keeps its separate recovery-aware locking
+sequence. Missing locks and port leases are errors, not state to reconstruct.
+See [concurrency and events](lifecycle.md#concurrency-and-events).
 
-## Pointer-file discovery
+## Keep runtime evidence distinct from authority
 
-Discovery has two deterministic paths:
-
-1. Inside generated source, locate `.stackstead/stackstead.json` and follow its absolute manifest/repository pointers.
-2. Otherwise, climb parents for `stackstead.yaml` and resolve the canonical repository state root.
-
-The pointer avoids a subtle bug: interpreting `../.stacksteads` relative to the generated worktree would find a different directory than interpreting it at the original repository. Pointer contents remain non-secret. Every normal resolution validates that pointer and manifest reciprocally identify the same full environment; repair alone may recreate a missing pointer after validating the manifest independently.
-
-## Path safety
-
-All destructive operations pass through centralized path checks. Safety invariants include:
-
-- Reject empty, relative traversal, root, or otherwise dangerous stackstead targets.
-- Canonicalize existing ancestors before containment comparisons.
-- Require the manifest identity to match the resolved stackstead.
-- Require the source/state path to belong to the configured Stackstead root or another explicitly recorded safe location.
-- Require Compose project identity to match the manifest.
-- Keep `remove_dir_all` behind the checked deletion boundary.
-- Never run broad Docker prune commands.
-
-The pointer file alone is not deletion authority. `--yes` skips an interactive prompt; it does not skip safety checks.
-
-## Locks and allocation
-
-A project lock serializes project-local state and index changes. A host-wide per-user lease registry serializes port allocation across repositories and retains exact runtime-token ownership until successful destroy cleanup. A pre-existing stackstead lock serializes lifecycle mutations, and a separate shared/exclusive run lease prevents teardown while an agent child is active. Creation holds the environment lock across first manifest publication and post-create hooks. Contended locks use one bounded 30-second wait. The deterministic allocator checks the lease registry and attempts to bind every candidate port on `127.0.0.1` before committing a slot.
-
-Locks are intentionally simple cross-process file locks. `doctor` diagnoses suspicious lock state rather than implementing automatic lease stealing. `run` retains the shared lease through a private Unix supervisor that binds host-child cleanup to it. `exec` keeps the Compose client in the foreground and hands the lease into that process.
-
-### Hold an environment across lifecycle work
-
-`lifecycle/access.rs` owns mutation-lock acquisition, run-lease acquisition, and
-manifest reload in that order. Its `HeldEnvironment` keeps the manifest and guards
-together and rejects a changed full ID, runtime token, or state directory after
-waiting. `up`, `stop`, `repair`, `run`, and `exec` use this module rather than
-reassembling the lock protocol.
-
-Creation returns a `CreateOutcome` that privately retains its mutation lock.
-`launch` transfers this outcome into startup, then transfers the held environment
-into agent execution; CLI code never supplies an identity and raw guards
-independently. Converting startup's exclusive run lease to shared access retains
-the mutation lock across the conversion. Agent execution releases mutation access
-only after its checks and transfers the shared lease to the existing child
-supervision or foreground-execution path.
-
-Held access is not proof of a valid runtime contract. Each operation still checks
-the reloaded manifest according to its own policy: repair may restore a missing
-pointer, stop uses the durable contract, and startup and agent execution require
-the current contract. Destroy keeps its separate recovery-aware locking sequence.
-
-## Reliability scope budget
-
-The four reproduced reliability fixes have a budget of 2,500 net new production
-lines, with a hard checkpoint cap of 3,500: teardown 1,100, run supervision 750,
-inspection 400, lock waiting 150, and glue 100. General helper supervision,
-installer refactors, hook hardening beyond the current JSON contract, journal
-compatibility, and recovery for unobserved states are outside this budget. A
-future expansion needs a reproduced failure and a regression test rather than
-being folded into these mechanisms speculatively.
-
-## Internal adapters
-
-Git worktrees and Docker Compose are small internal modules around command construction and execution. Git distinguishes Stackstead-owned source from explicitly adopted manager-owned worktrees. Compose discovery and rewriting are intentionally narrower than lifecycle execution; structural startup validation binds every published port variable to its manifest allocation. Lifecycle generation appends a last-wins ownership override that labels every directly managed Compose resource with the manifest runtime token. Raw Docker control creates and verifies a deterministic claim volume, enumerates both project labels and exact resource names, and aborts before mutating an occupied namespace; actual Compose subprocesses additionally remove generated key names from the inherited shell, pin the manifest Compose identity, and consume values only from the explicit env file. Postgres support probes the configured host port and runs an optional project seed command; generic health checks cover loopback HTTP statuses and repository commands. Dependency installation executes `dependencies.install` with the generated environment. Repository scripts own any package-link workflow.
-
-### Interpret runtime evidence
-
-`compose::service_observations` returns a `RuntimeSnapshot` after the existing
-claim, inventory, ownership, and generated-contract checks. The snapshot owns
-Docker activity and service-state interpretation in `compose/snapshot.rs` and
-exposes borrowed container evidence for readiness evaluation and command-owned
-output DTOs. Startup uses the snapshot directly to calculate runtime status
-without building an inspection aggregate.
+[`compose/snapshot.rs`](../src/compose/snapshot.rs) interprets owned container
+observations. Startup uses the snapshot directly; readiness evaluation and
+output conversion read its container evidence.
 
 A snapshot is neither an atomic Docker view nor ongoing mutation authority.
-Unavailable evidence remains distinct from an observed empty runtime. Activity,
-declared readiness, and application health remain independent: completed jobs
-can be ready while inactive. Inspection retains its manifest-change detection;
-startup retains model-drift rejection and its shared verification deadline.
+Unavailable evidence is not an empty runtime. Activity, declared readiness, and
+application health answer separate questions: completed jobs can be ready while
+inactive. Inspection retains manifest-change detection; startup retains
+model-drift rejection and its shared verification deadline. See [readiness
+evidence](compose.md#readiness-evidence) and [inspection fields](agent-contract.md#inspection-version-4-and-list-version-2).
 
-These boundaries make behavior testable without pretending that providers are interchangeable. Unit and CLI acceptance tests assert command construction, discovery, parsing, ownership, safety, and generated artifacts. The three-agent Postgres/Nginx failure-recovery proof is a mandatory Docker-backed CI job.
+## Keep process boundaries explicit
 
-## Why there is no plugin architecture
+Built-in Git and Docker operations use executable/argument arrays. Configured
+dependency, hook, seed, and health commands share a command shape: `shell: false`
+parses an executable and arguments; `shell: true` explicitly opts into the
+platform shell. Generated values are not concatenated into shell strings.
 
-The production contract supports Git worktrees, Docker Compose, one Postgres volume strategy, and a generic dependency install command. A public trait/plugin system would add compatibility promises before the boundaries have been proven. Rust enums make supported values and unsupported configuration explicit. New adapters should be added only after repeated real use demonstrates a stable common contract.
+The command adapter owns capture, diagnostics, and secret redaction. Host-agent
+supervision and foreground Compose execution own the active run lease; their
+cleanup guarantees differ by platform. Preserve the [documented process
+boundary](agent-integration.md), including its failure cases, when changing either
+path. Mocks do not establish live lifecycle, isolation, or teardown safety; those
+claims require the [Docker-backed checks](../CONTRIBUTING.md#required-checks).

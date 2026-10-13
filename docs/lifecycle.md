@@ -110,7 +110,11 @@ stackstead run <full-id> -- npm test
 stackstead exec <full-id> web -- nginx -t
 ```
 
-The [CLI JSON reference](agent-contract.md#cli-json) lists supported commands and their response contracts. `run`, `exec`, `launch`, and `logs --follow` reject JSON because they own stdout, while `destroy --json` requires `--yes` to prevent prompt output from contaminating JSON. `stackstead open ... --print` returns a configured URL without launching a browser. `stackstead env --print` redacts secret-like values and credential-bearing DSNs unless `--show-secrets` is explicitly supplied.
+The [CLI JSON reference](agent-contract.md#cli-json) lists supported commands,
+response contracts, and JSON restrictions. `stackstead open <full-id> --print`
+returns a configured URL without launching a browser.
+`stackstead env <full-id> --print` redacts secret-like values and credential-bearing
+DSNs unless `--show-secrets` is explicitly supplied.
 
 Read runtime activity, runtime readiness, and application health separately:
 

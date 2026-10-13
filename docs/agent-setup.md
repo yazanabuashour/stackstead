@@ -22,9 +22,14 @@ committing.
 3. If the plan requests only unambiguous fixed-port rewrites, run
    `stackstead compose apply --yes`. Propose any broader application or Compose
    changes before writing them.
-4. Add or update the repository's `AGENTS.md`, `CLAUDE.md`, or equivalent with
+4. Review `stackstead.yaml`: decide whether to declare
+   [runtime readiness](config.md#runtimereadiness), which `init` leaves
+   unconfigured, and verify any inferred [Postgres settings](config.md#databasepostgres)
+   against Compose. Discovery supplies placeholder database/user/password values,
+   not the service's actual connection settings.
+5. Add or update the repository's `AGENTS.md`, `CLAUDE.md`, or equivalent with
    the policy below.
-5. Run `stackstead doctor`, inspect `git diff`, and report the changes and any
+6. Run `stackstead doctor`, inspect `git diff`, and report the changes and any
    remaining project-specific work. Do not commit.
 
 ## Repository policy

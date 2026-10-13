@@ -15,7 +15,8 @@ database:
       shell: false
 ```
 
-The Postgres host port must also be exposed and generated:
+Expose the Postgres host port under the exact Compose service name configured
+in `database.postgres.service`, then generate its port variable:
 
 ```yaml
 resources:
@@ -51,14 +52,13 @@ volumes:
 
 ## Startup sequence
 
-`stackstead up <name>`:
-
-1. Generates the environment file.
-2. Runs configured dependency setup.
-3. Starts the manifest's Compose project.
-4. Verifies Compose publishes the configured Postgres container port on the manifest's allocated host port, requires that host port to accept TCP connections, and runs `pg_isready` inside the service until that database/user reports ready.
-5. Runs a non-empty seed command from the generated worktree with the generated environment loaded.
-6. Records database and seed status in the manifest and event log.
+During [startup](lifecycle.md#start), Stackstead verifies that the owned Compose
+service publishes the configured Postgres container port on the allocated host
+port. It requires that endpoint to accept TCP connections and runs `pg_isready`
+inside the service until the configured database/user reports ready. It then
+runs a non-empty seed command from the generated worktree with the generated
+environment loaded, recording database and seed status in the manifest and
+event log.
 
 `pg_isready` is Postgres-aware startup readiness, but it is not a schema, migration, credential, or application-query health check. Applications remain responsible for migrations and deeper readiness checks.
 
@@ -69,18 +69,23 @@ Seed commands should be safe to rerun. Stackstead records known seed status and 
 ## Status
 
 ```sh
-stackstead db status feature-a
-stackstead db status feature-a --json
+stackstead db status <full-id>
+stackstead --json db status <full-id>
 ```
 
 The [`DatabaseStatus` JSON response](agent-contract.md#cli-json) reports the configured strategy, service, host, allocated port, database, known seed state, and `reachable` TCP probe. `identity_status` is `reachable` only when the manifest's exact Compose project is running, the configured service and container port publish the allocated host endpoint, and that endpoint accepts a TCP connection; it is otherwise `unreachable` or `unknown`. `StacksteadInspection` exposes the same proof under `live.database.{reachable,status}`. Human output labels the raw TCP probe separately and uses the identity-aware status, so a listener owned by another process is not presented as the stackstead database. Status does not connect with a SQL client or expose the configured password.
 
 ## State ownership
 
-With a normal Compose-managed volume, the unique Compose project name makes database storage stackstead-local. `stackstead stop` preserves the volume. `stackstead destroy` runs `down -v --remove-orphans --rmi local`, permanently removing that stackstead's Compose volumes and local build images without a custom image tag after confirmation.
+With a normal Compose-managed volume, the unique Compose project name makes
+database storage stackstead-local. `stop` preserves the volume; `destroy`
+permanently removes it. Commit or export valuable data before
+[exact-ID teardown](lifecycle.md#destroy).
 
 Stackstead rejects custom `name` values on managed volumes and networks before startup. External volumes and shared host bind mounts are accepted but can share data; Stackstead does not treat them as branch-local or delete them as managed volumes. Use project-scoped managed volumes for separate database state. See [Compose isolation](compose.md#volume-isolation).
 
 ## Not included
 
-Stackstead does not implement schema diffs, snapshots, rollback testing, database forks, shared Postgres administration, query analysis, managed cloud databases, or production deployment. Future database adapters can build on the manifest and command boundaries after real use proves the need; they are not plugins in the current application.
+Stackstead does not implement schema diffs, snapshots, rollback testing,
+database forks, shared Postgres administration, query analysis, managed cloud
+databases, or production deployment.

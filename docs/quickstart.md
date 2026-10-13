@@ -51,7 +51,10 @@ The guide contains the current commands, repository policy, and safety boundarie
    ```
 
    For a nested Compose file, pass its repository-relative path with
-   `stackstead init --compose-file <path>`.
+   `stackstead init --compose-file <path>`. `init` leaves [runtime readiness](config.md#runtimereadiness)
+   unconfigured and guesses [Postgres connection settings](config.md#databasepostgres).
+   Choose the required services and roles if you need readiness verification,
+   and match database settings to Compose before committing.
 
 2. Add the [Stackstead repository policy](agent-setup.md#repository-policy) to
    `AGENTS.md`, `CLAUDE.md`, or the equivalent file used by your coding agents.

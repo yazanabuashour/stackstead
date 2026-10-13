@@ -73,41 +73,7 @@ using each exact full ID. Then remove `stackstead` from `~/.local/bin`, or from
 the custom directory passed to the installer. Removing only the binary leaves
 worktrees, runtime state, and volumes intact.
 
-## Homebrew formula
+## Homebrew
 
-Each release includes a generated `stackstead.rb` formula for maintainers of
-Homebrew taps. The project does not yet publish its own tap. To render the
-formula locally from a release checksum file:
-
-```sh
-packaging/homebrew/render-formula.sh VERSION SHA256SUMS stackstead.rb
-```
-
-Use the release version without a `v` prefix. Set `STACKSTEAD_REPOSITORY` for a
-fork, or pass a release base as the script's fourth argument for a mirror.
-
-## Maintainers
-
-### Publish a release
-
-Create and push a `v`-prefixed semantic version tag that exactly matches
-`Cargo.toml`. The release workflow verifies that the tagged commit is on
-`origin/main`, runs the full CI workflow, builds and tests every supported
-binary, and publishes the checksum-bound bundle through the protected
-`release` environment.
-
-### Test packaging locally
-
-The fixture test exercises pinned and latest installation, checksum failure,
-and Homebrew formula rendering without network access:
-
-```sh
-scripts/test-install.sh
-```
-
-The clean-install smoke test uses the real release binary:
-
-```sh
-cargo build --locked --release
-scripts/test-release-install.sh target/release/stackstead
-```
+The project does not publish a Homebrew tap. Releases include a checksummed
+`stackstead.rb` formula for tap maintainers; see [release packaging](../CONTRIBUTING.md#release-packaging).
