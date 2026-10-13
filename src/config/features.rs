@@ -24,6 +24,18 @@ pub struct CommandConfig {
     pub shell: bool,
 }
 
+impl CommandConfig {
+    pub fn parse(&self) -> anyhow::Result<Option<crate::command::ConfiguredCommand>> {
+        crate::command::ConfiguredCommand::parse(&self.command, self.shell)
+    }
+
+    pub(super) fn validate(&self, field: &str) -> Result<(), super::ConfigError> {
+        self.parse()
+            .map(|_| ())
+            .map_err(|error| super::ConfigError::Validation(format!("{field}: {error}")))
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct DatabaseConfig {

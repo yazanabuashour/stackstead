@@ -4,7 +4,6 @@ use std::{
 };
 
 use crate::{
-    command,
     config::{HealthCheckConfig, HealthConfig},
     manifest::StacksteadManifest,
     template::render_template,
@@ -112,14 +111,11 @@ fn check_passes(
             Err(_) => false,
         };
     }
+    let Ok(Some(command)) = check.command.parse() else {
+        return false;
+    };
     matches!(
-        command::configured_status_with_timeout(
-            &check.command.command,
-            check.command.shell,
-            &manifest.worktree,
-            environment,
-            timeout,
-        ),
+        command.status_with_timeout(&manifest.worktree, environment, timeout),
         Ok(Some(status)) if status.success()
     )
 }

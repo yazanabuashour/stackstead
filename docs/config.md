@@ -166,6 +166,13 @@ The Compose file must consume the exact generated host-port variable for every c
 
 `install.command` optionally runs from the bound worktree before Compose starts and during `repair`, with the generated environment available. With `shell: false`, Stackstead parses the command into an executable and arguments; shell operators such as pipes and redirects do not work. Set `shell: true` only when the repository intentionally requires platform-shell semantics. Keep installation safe to rerun.
 
+Configuration validation parses every non-shell dependency, hook, seed, and
+health command before lifecycle work. Malformed quoting or an empty executable
+fails with the configuration field, without creating an environment. Executable
+availability and shell-script syntax remain execution-time checks. Optional
+blank install and seed commands still mean no work; hooks and command health
+checks cannot be blank.
+
 For package linking, use a repository script through `dependencies.install`. Pass repository-defined environment values through `env.generate`, or derive script-local paths from the pinned `STACKSTEAD_WORKTREE`. The script owns link-folder creation, containment checks, package relationships, and any link-state records. The [Yarn Classic example](../examples/yarn-classic/README.md) shows this recipe.
 
 ### `database.postgres`

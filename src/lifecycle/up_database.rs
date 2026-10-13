@@ -23,9 +23,10 @@ pub(super) fn run(
     let Some(config) = config else {
         return Ok(());
     };
+    let seed = config.seed.parse()?;
     wait_for_database(&config, manifest, timings)?;
-    if !config.seed.command.trim().is_empty() {
-        seed_database(&config, manifest, environment, timings)?;
+    if let Some(seed) = seed {
+        seed_database(&seed, manifest, environment, timings)?;
     }
     Ok(())
 }
@@ -96,7 +97,7 @@ fn database_readiness(
 }
 
 fn seed_database(
-    config: &PostgresConfig,
+    seed: &command::ConfiguredCommand,
     manifest: &mut StacksteadManifest,
     environment: &BTreeMap<String, String>,
     timings: &mut UpTimings,
@@ -108,12 +109,7 @@ fn seed_database(
         events::EventStatus::Started,
         None,
     )?;
-    if let Err(error) = command::run_configured(
-        &config.seed.command,
-        config.seed.shell,
-        &manifest.worktree,
-        environment,
-    ) {
+    if let Err(error) = seed.run(&manifest.worktree, environment) {
         manifest
             .database
             .as_mut()

@@ -25,13 +25,8 @@ pub fn install_dependencies(
     manifest: &StacksteadManifest,
     environment: &BTreeMap<String, String>,
 ) -> anyhow::Result<()> {
-    if !config.dependencies.install.command.trim().is_empty() {
-        let output = command::run_configured(
-            &config.dependencies.install.command,
-            config.dependencies.install.shell,
-            &manifest.worktree,
-            environment,
-        )?;
+    if let Some(install) = config.dependencies.install.parse()? {
+        let output = install.run(&manifest.worktree, environment)?;
         write_command_log(
             &manifest.state_dir.join("logs/dependencies.log"),
             &output,
@@ -130,7 +125,9 @@ pub(super) fn run_commands(
     environment: &BTreeMap<String, String>,
 ) -> anyhow::Result<()> {
     for configured in commands {
-        command::run_configured(&configured.command, configured.shell, cwd, environment)?;
+        if let Some(command) = configured.parse()? {
+            command.run(cwd, environment)?;
+        }
     }
     Ok(())
 }

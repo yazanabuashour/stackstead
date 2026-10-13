@@ -208,4 +208,46 @@ fn rejects_unknown_templates_and_unsafe_generated_paths() -> anyhow::Result<()> 
     Ok(())
 }
 
+#[test]
+fn validates_configured_command_syntax_with_field_context() -> anyhow::Result<()> {
+    let header = "version: '2'\nkind: StacksteadProject\nproject: {name: demo}\nresources: {ports: {expose: {postgres: {container: 5432}}}}\n";
+    for (field, section) in [
+        (
+            "dependencies.install",
+            "dependencies:\n  install:\n    command: \"printf '\"\n",
+        ),
+        (
+            "database.postgres.seed",
+            "database:\n  postgres:\n    seed:\n      command: \"printf '\"\n",
+        ),
+        (
+            "hooks.post_create[0]",
+            "hooks:\n  post_create:\n    - command: \"printf '\"\n",
+        ),
+        (
+            "health.checks.probe.command",
+            "health:\n  checks:\n    - name: probe\n      command:\n        command: \"printf '\"\n",
+        ),
+    ] {
+        let error = StacksteadConfig::from_yaml(&format!("{header}{section}"))
+            .test_err()?
+            .to_string();
+        assert!(error.contains(field), "missing field context: {error}");
+        assert!(error.contains("cannot parse configured command"));
+    }
+    let mut config = StacksteadConfig::from_yaml(SAMPLE).test()?;
+    config.dependencies.install.command = "''".into();
+    assert!(
+        config
+            .validate()
+            .test_err()?
+            .to_string()
+            .contains("nonempty executable")
+    );
+    config.dependencies.install.command = "printf '".into();
+    config.dependencies.install.shell = true;
+    config.validate().test()?;
+    Ok(())
+}
+
 mod repository_cases;

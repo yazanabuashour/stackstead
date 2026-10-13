@@ -156,11 +156,16 @@ impl StacksteadConfig {
     }
 
     fn validate_commands(&self) -> Result<(), ConfigError> {
+        self.dependencies.install.validate("dependencies.install")?;
+        if let Some(postgres) = &self.database.postgres {
+            postgres.seed.validate("database.postgres.seed")?;
+        }
         for (hook_name, commands) in self.hooks.entries() {
-            for command in commands {
+            for (index, command) in commands.iter().enumerate() {
                 if command.command.trim().is_empty() {
                     return invalid(format!("hooks.{hook_name} contains an empty command"));
                 }
+                command.validate(&format!("hooks.{hook_name}[{index}]"))?;
             }
         }
         if self.health.timeout_seconds == 0
@@ -185,6 +190,9 @@ impl StacksteadConfig {
                     check.name
                 ));
             }
+            check
+                .command
+                .validate(&format!("health.checks.{}.command", check.name))?;
             if !(100..=599).contains(&check.expect_status) {
                 return invalid(format!(
                     "health check `{}` expect_status must be between 100 and 599",

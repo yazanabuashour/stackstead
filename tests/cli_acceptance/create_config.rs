@@ -47,6 +47,32 @@ fn create_refuses_locally_modified_contract_files_without_allocating_state() -> 
 }
 
 #[test]
+fn malformed_post_create_command_is_rejected_before_allocating_state() -> anyhow::Result<()> {
+    let project = Project::initialized()?;
+    let mut config = load_config(&project.repo.join("stackstead.yaml"))?;
+    config["hooks"]["post_create"] = serde_yaml::to_value([serde_json::json!({
+        "command": "printf '",
+        "shell": false,
+    })])
+    .test()?;
+    project.write_config(&config, "configure malformed post-create command")?;
+
+    let rejected = stackstead(&project.repo)
+        .args(["--json", "create", "feature-a"])
+        .assert()
+        .failure();
+    assert!(output_text(&rejected.get_output().stderr)?.contains("hooks.post_create[0]"));
+    assert!(rejected.get_output().stdout.is_empty());
+    assert!(state_stackstead_directories(&project)?.is_empty());
+    assert!(
+        git(&project.repo, &["branch", "--list", "feature-a"])?
+            .trim()
+            .is_empty()
+    );
+    Ok(())
+}
+
+#[test]
 fn create_compares_clean_contract_files_through_git_filters() -> anyhow::Result<()> {
     let project = Project::initialized()?;
     fs::write(

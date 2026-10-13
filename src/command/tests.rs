@@ -2,6 +2,7 @@ use super::*;
 use crate::test_support::{TestResultErrorExt as _, TestResultExt as _};
 #[cfg(target_os = "linux")]
 use std::thread;
+use std::time::Duration;
 
 #[cfg(unix)]
 #[test]
@@ -109,14 +110,12 @@ fn command_failures_use_header_and_environment_aware_redaction() -> anyhow::Resu
 #[cfg(unix)]
 #[test]
 fn configured_status_kills_a_command_at_its_deadline() -> anyhow::Result<()> {
-    let status = configured_status_with_timeout(
-        "sh -c 'while :; do :; done'",
-        false,
-        Path::new("/"),
-        &BTreeMap::new(),
-        Duration::from_millis(30),
-    )
-    .test()?;
+    let command = ConfiguredCommand::parse("sh -c 'while :; do :; done'", false)
+        .test()?
+        .test()?;
+    let status = command
+        .status_with_timeout(Path::new("/"), &BTreeMap::new(), Duration::from_millis(30))
+        .test()?;
     assert!(status.is_none());
     Ok(())
 }
@@ -128,15 +127,12 @@ fn configured_timeout_kills_descendants_in_the_process_group() -> anyhow::Result
     let pid_file = directory.path().join("descendant.pid");
     let command = format!("sh -c 'sleep 30 & echo $! > {} ; wait'", pid_file.display());
     assert!(
-        configured_status_with_timeout(
-            &command,
-            false,
-            Path::new("/"),
-            &BTreeMap::new(),
-            Duration::from_millis(100),
-        )
-        .test()?
-        .is_none()
+        ConfiguredCommand::parse(&command, false)
+            .test()?
+            .test()?
+            .status_with_timeout(Path::new("/"), &BTreeMap::new(), Duration::from_millis(100))
+            .test()?
+            .is_none()
     );
     let pid = std::fs::read_to_string(pid_file)
         .test()?
@@ -160,16 +156,13 @@ fn configured_success_also_kills_background_descendants() -> anyhow::Result<()> 
     let pid_file = directory.path().join("descendant.pid");
     let command = format!("sh -c 'sleep 30 & echo $! > {}'", pid_file.display());
     assert!(
-        configured_status_with_timeout(
-            &command,
-            false,
-            Path::new("/"),
-            &BTreeMap::new(),
-            Duration::from_secs(1),
-        )
-        .test()?
-        .test()?
-        .success()
+        ConfiguredCommand::parse(&command, false)
+            .test()?
+            .test()?
+            .status_with_timeout(Path::new("/"), &BTreeMap::new(), Duration::from_secs(1))
+            .test()?
+            .test()?
+            .success()
     );
     let pid = std::fs::read_to_string(pid_file)
         .test()?
