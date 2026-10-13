@@ -64,8 +64,12 @@ impl StacksteadConfig {
         self.validate_ports()?;
         validate_relative_file("env.file", &self.env.file)?;
         validate_relative_file("agent.context_file", &self.agent.context_file)?;
+        self.validate_generated_paths()?;
 
-        for name in self.env.generate.keys() {
+        for (name, value) in &self.env.generate {
+            crate::envfile::validate_value(value).map_err(|error| {
+                ConfigError::Validation(format!("env.generate.{name}: {error}"))
+            })?;
             if !valid_env_name(name) {
                 return invalid(format!("invalid env var name `{name}`"));
             }
@@ -238,7 +242,6 @@ impl StacksteadConfig {
         for (service, exposure) in &self.resources.ports.expose {
             if let Some(url) = &exposure.url {
                 validate(&format!("resources.ports.expose.{service}.url"), url)?;
-                validate_url_template(service, url, &allowed)?;
             }
         }
         for (name, value) in &self.env.generate {
@@ -250,6 +253,22 @@ impl StacksteadConfig {
                 validate_url_template(&check.name, url, &allowed)?;
             }
         }
+        let mut context = allowed
+            .iter()
+            .filter(|key| !key.starts_with("urls."))
+            .map(|key| {
+                (
+                    key.clone(),
+                    if key.starts_with("ports.") {
+                        "12345"
+                    } else {
+                        "value"
+                    }
+                    .into(),
+                )
+            })
+            .collect();
+        self.resolve_urls(&mut context)?;
         Ok(())
     }
 

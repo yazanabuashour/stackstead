@@ -7,7 +7,38 @@ fn env_outputs_redact_credentials_and_generation_is_deterministic() -> anyhow::R
         "    DATABASE_URL: postgres://app:app@127.0.0.1:{{ ports.postgres }}/app\n",
         "    Z_LAST: \"value#hash\"\n    SERVICE_DSN: postgresql://worker:dnspass@127.0.0.1:{{ ports.postgres }}/app\n    DATABASE_URL: postgres://app:app@127.0.0.1:{{ ports.postgres }}/app\n    A_FIRST: \"hello world\"\n",
     )?;
+    let literal = " whitespace\t$HOME ${HOME} $$ \\\" \\n ' # ";
+    let mut config = load_config(&project.repo.join("stackstead.yaml"))?;
+    config["env"]["generate"]["LITERAL"] = literal.into();
+    project.write_config(&config, "add literal env value")?;
     let manifest = project.create("feature-a")?;
+
+    let decoded = stackstead(&project.repo)
+        .args([
+            "--json",
+            "env",
+            &manifest.stackstead_id,
+            "--print",
+            "--show-secrets",
+        ])
+        .assert()
+        .success();
+    let decoded: Value = serde_json::from_slice(&decoded.get_output().stdout).test()?;
+    assert_eq!(decoded["values"]["LITERAL"], literal);
+    #[cfg(unix)]
+    stackstead(&project.repo)
+        .args([
+            "run",
+            &manifest.stackstead_id,
+            "--",
+            "sh",
+            "-c",
+            "test \"$LITERAL\" = \"$1\"",
+            "literal-probe",
+            literal,
+        ])
+        .assert()
+        .success();
 
     let env = fs::read_to_string(&manifest.env_file).test_context("read generated env")?;
     assert!(env.contains("A_FIRST=\"hello world\""));
@@ -50,6 +81,8 @@ fn env_outputs_redact_credentials_and_generation_is_deterministic() -> anyhow::R
         format!("{private_value}\n"),
         format!("{private_value} invalid-key=value\n"),
         format!("SECRET=\"{private_value}\n"),
+        format!("SECRET=\"{private_value}\\n\"\n"),
+        format!("SECRET={private_value}\0\n"),
     ] {
         fs::write(&manifest.env_file, malformed).test_context("corrupt generated env fixture")?;
         let rejected = stackstead(&project.repo)

@@ -105,7 +105,7 @@ pub(super) fn validate_recovery_source(manifest: &StacksteadManifest) -> anyhow:
     }
     validate_pointer_binding(manifest)?;
     validate_source_binding(manifest)?;
-    git::ensure_worktree_clean(&manifest.worktree)
+    super::generated::ensure_source_clean(manifest)
 }
 
 pub(super) fn finish_source_cleanup(manifest: &StacksteadManifest) -> anyhow::Result<()> {
@@ -133,13 +133,15 @@ pub(super) fn finish_source_cleanup(manifest: &StacksteadManifest) -> anyhow::Re
 }
 
 pub(super) fn source_cleanup_complete(manifest: &StacksteadManifest) -> bool {
-    if manifest.pointer_file.exists() {
+    if !paths::is_proven_absent(&manifest.pointer_file) {
         return false;
     }
     match manifest.source_ownership {
-        SourceOwnership::Stackstead => !manifest.worktree.exists(),
+        SourceOwnership::Stackstead => paths::is_proven_absent(&manifest.worktree),
         SourceOwnership::External => {
-            manifest.worktree.is_dir() && !manifest.worktree.join(".stackstead").exists()
+            manifest.worktree.is_dir()
+                && paths::is_proven_absent(&manifest.worktree.join(".stackstead"))
+                && super::generated::custom_outputs_removed(manifest)
         }
     }
 }
@@ -148,6 +150,7 @@ fn remove_bound_source(manifest: &StacksteadManifest) -> anyhow::Result<()> {
     match manifest.source_ownership {
         SourceOwnership::Stackstead => remove_owned_source(manifest)?,
         SourceOwnership::External => {
+            super::generated::remove_custom_outputs(manifest)?;
             paths::remove_generated_dir(&manifest.worktree, Path::new(".stackstead"))?;
         }
     }
@@ -155,6 +158,10 @@ fn remove_bound_source(manifest: &StacksteadManifest) -> anyhow::Result<()> {
 }
 
 fn remove_owned_source(manifest: &StacksteadManifest) -> anyhow::Result<()> {
+    if git::is_registered_worktree(&manifest.repo_root, &manifest.worktree)? {
+        super::generated::remove_custom_outputs(manifest)?;
+        super::generated::ensure_source_clean(manifest)?;
+    }
     if let Err(error) = git::remove_worktree(&manifest.repo_root, &manifest.worktree) {
         if git::is_registered_worktree(&manifest.repo_root, &manifest.worktree)? {
             return Err(error);

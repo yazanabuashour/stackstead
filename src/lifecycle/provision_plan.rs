@@ -4,7 +4,10 @@ use crate::{
     config::StacksteadConfig, git, manifest::StacksteadManifest, paths, slug::sanitize_slug,
 };
 
-use super::{project::load_project, types::ProjectRuntime, validation::validate_configured_ports};
+use super::{
+    contract::ensure_new_generated_outputs, project::load_project, types::ProjectRuntime,
+    validation::validate_configured_ports,
+};
 
 pub(super) struct PreparedProvision {
     pub runtime: ProjectRuntime,
@@ -73,6 +76,7 @@ fn validate_external_worktree(
     git::ensure_revision_ancestor(worktree, base_commit)?;
     git::ensure_contract_on_revision(worktree, base_commit, &runtime.config.runtime.files)?;
     validate_configured_ports(&runtime.config, worktree)?;
+    ensure_new_generated_outputs(&runtime.config, worktree)?;
     let generated = paths::safe_generated_path(worktree, Path::new(".stackstead"))?;
     if generated.exists() {
         anyhow::bail!(

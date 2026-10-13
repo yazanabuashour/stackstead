@@ -213,7 +213,13 @@ HTTP checks support loopback `http` or `https` URL templates and an expected sta
 
 ### `env`
 
-`file` is relative to the generated worktree, normally `.stackstead/.env`. Keys under `generate` must be valid environment variable names. Stackstead rejects process-, state-location-, and Docker-control names such as `PATH`, `HOME`, `XDG_STATE_HOME`, `LD_*`, `DYLD_*`, and `DOCKER_*`/`COMPOSE_*`; a tracked app contract cannot redirect executable lookup, the global lease registry, or the Docker daemon. Every generated file's exact key set is checked against its manifest before use. Output order is deterministic.
+`file` is relative to the generated worktree, normally `.stackstead/.env`. Keys under `generate` must be valid environment variable names. Stackstead rejects process-, state-location-, and Docker-control names such as `PATH`, `HOME`, `XDG_STATE_HOME`, `LD_*`, `DYLD_*`, and `DOCKER_*`/`COMPOSE_*`; a tracked app contract cannot redirect executable lookup, the global lease registry, or the Docker daemon. Every generated file's exact key set is checked against its manifest before use. Output order is deterministic. Values are single-line literal strings: CR, LF, and NUL are rejected. Stackstead escapes quoting, backslashes, tabs, and dollars so host commands and Compose receive the same values; `${NAME}` in a generated value is literal, not another interpolation step.
+
+Generated env and context paths must not overlap each other, configured Compose inputs, `stackstead.yaml`, Git metadata, or the reserved pointer and Compose ownership override. Creation and adoption refuse to overwrite existing files at these output paths; regeneration replaces the outputs already bound by the manifest. Filesystem aliases are rejected before publication.
+
+Custom output files receive exact Git exclusions, not directory-wide exclusions. Git shares these entries across worktrees; Stackstead marks its custom entries and treats files they hide as untracked source unless the current environment proves ownership. User ignore rules remain unchanged. Git cannot express CR/LF-containing names as literal exclude lines; lifecycle dirty checks recognize those files by their exact manifest paths and generated ownership headers instead. External-source cleanup verifies generated files against the pinned output declarations and ownership headers, then removes only those files; it preserves parent directories and unrelated files.
+
+Read-only commands do not rewrite older generated files. Correct unsupported values or conflicting paths in the committed configuration first. Existing environments gain literal-dollar encoding when [repair](lifecycle.md#repair) or [up](lifecycle.md#start) regenerates their contract; these commands can rerun configured setup work.
 
 Values whose names contain `PASSWORD`, `TOKEN`, `SECRET`, `KEY`, `CREDENTIAL`, or `AUTH` are redacted from normal output and logs, but the generated env file itself is not a secret store. Keep sensitive source material out of version control and protect the local state directory appropriately.
 
@@ -245,7 +251,7 @@ general template language. Supported keys are:
 {{ paths.state_dir }}
 ```
 
-Whitespace inside the braces is allowed. An unknown variable is an error rather than an unresolved string.
+Whitespace inside the braces is allowed. An unknown variable is an error rather than an unresolved string. Exposure URLs can reference other declared URLs regardless of name order; cyclic references are rejected.
 
 ## Path resolution
 

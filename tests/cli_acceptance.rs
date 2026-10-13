@@ -201,6 +201,12 @@ mod environment;
 mod exec;
 #[path = "cli_acceptance/exec_leases.rs"]
 mod exec_leases;
+#[path = "cli_acceptance/generated_aliases.rs"]
+mod generated_aliases;
+#[path = "cli_acceptance/generated_exclusions.rs"]
+mod generated_exclusions;
+#[path = "cli_acceptance/generated_outputs.rs"]
+mod generated_outputs;
 #[path = "cli_acceptance/health_inspection.rs"]
 mod health_inspection;
 #[path = "cli_acceptance/health_lifecycle.rs"]

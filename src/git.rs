@@ -238,30 +238,30 @@ fn canonicalize_if_exists(path: &Path) -> anyhow::Result<PathBuf> {
         .with_context(|| format!("cannot resolve worktree path {}", path.display()))
 }
 
-pub fn ensure_worktree_clean(worktree: &Path) -> anyhow::Result<()> {
+pub fn config_at_revision(
+    repo_root: &Path,
+    revision: &str,
+) -> anyhow::Result<crate::config::StacksteadConfig> {
     let output = command::run(
         "git",
         &[
-            "status".into(),
-            "--porcelain=v1".into(),
-            "--untracked-files=all".into(),
+            "cat-file".into(),
+            "blob".into(),
+            format!("{revision}:{}", crate::config::CONFIG_FILE),
         ],
-        worktree,
+        repo_root,
         &empty_env(),
     )?;
-    if !output.stdout.is_empty() {
-        anyhow::bail!(
-            "worktree {} has uncommitted or untracked changes; commit or remove them before destroy",
-            worktree.display()
-        );
-    }
-    Ok(())
+    serde_yaml::from_slice(&output.stdout).context("parse pinned generated-path declaration")
 }
+
+mod clean;
+pub use clean::{ensure_worktree_clean, is_tracked};
 
 mod exclude;
 #[cfg(test)]
 pub use exclude::ensure_excluded;
-pub use exclude::{ensure_stackstead_excluded, is_stackstead_ignored};
+pub use exclude::{ensure_generated_excluded, is_stackstead_ignored};
 
 #[cfg(all(test, unix))]
 mod tests;

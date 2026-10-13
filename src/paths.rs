@@ -14,6 +14,10 @@ pub fn absolute_from(base: &Path, value: &Path) -> anyhow::Result<PathBuf> {
     normalize_absolute(&joined)
 }
 
+pub fn is_proven_absent(path: &Path) -> bool {
+    std::fs::symlink_metadata(path).is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound)
+}
+
 pub fn safe_generated_path(worktree: &Path, relative: &Path) -> anyhow::Result<PathBuf> {
     if relative.is_absolute() {
         return Err(StacksteadError::UnsafePath(format!(

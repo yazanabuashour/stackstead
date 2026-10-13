@@ -8,7 +8,8 @@ use crate::{
 };
 
 use super::{
-    contract::{run_commands, write_contract},
+    contract::{ensure_new_generated_outputs, run_commands, write_contract},
+    generated::remove_custom_outputs,
     types::ProjectRuntime,
     validation::{validate_configured_ports, validate_pointer_binding, validate_source_binding},
 };
@@ -29,12 +30,27 @@ pub(super) fn create_source_and_contract(
             generated_dir.display()
         );
     }
-    git::ensure_stackstead_excluded(&manifest.worktree)?;
+    ensure_new_generated_outputs(config, &manifest.worktree)?;
+    git::ensure_generated_excluded(
+        &manifest.worktree,
+        [&config.env.file, &config.agent.context_file],
+    )?;
+    if let Err(error) = super::generated::validate_output_aliases(manifest) {
+        return match paths::remove_generated_dir(&manifest.worktree, Path::new(".stackstead")) {
+            Ok(()) => Err(error),
+            Err(cleanup) => Err(anyhow::anyhow!(
+                "{error}; failed to remove unpublished generated directory: {cleanup}"
+            )),
+        };
+    }
     std::fs::create_dir_all(&generated_dir)?;
     let result = write_source_contract(config, manifest, template_context);
     if let Err(error) = result {
         if !manifest.pointer_file.is_file() {
-            return match paths::remove_generated_dir(&manifest.worktree, Path::new(".stackstead")) {
+            let cleanup = remove_custom_outputs(manifest).and_then(|()| {
+                paths::remove_generated_dir(&manifest.worktree, Path::new(".stackstead"))
+            });
+            return match cleanup {
                 Ok(()) => Err(error),
                 Err(cleanup) => Err(anyhow::anyhow!(
                     "{error}; failed to remove partial generated contract: {cleanup}"
@@ -116,9 +132,12 @@ pub(super) fn cleanup_failed_create(
     if manifest.worktree.exists() {
         match manifest.source_ownership {
             SourceOwnership::Stackstead => {
+                super::generated::ensure_source_clean(manifest)?;
+                remove_custom_outputs(manifest)?;
                 git::remove_worktree(&manifest.repo_root, &manifest.worktree)?;
             }
             SourceOwnership::External => {
+                remove_custom_outputs(manifest)?;
                 paths::remove_generated_dir(&manifest.worktree, Path::new(".stackstead"))?;
             }
         }

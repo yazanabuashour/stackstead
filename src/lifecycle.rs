@@ -1,6 +1,7 @@
 mod access;
 mod contract;
 mod destroy;
+mod generated;
 mod inspect;
 mod inspect_health;
 mod lease;

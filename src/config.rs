@@ -36,8 +36,10 @@ impl Error for ConfigError {
 }
 
 mod features;
+mod generated;
 mod helpers;
 mod model;
+mod urls;
 mod validation;
 
 pub use features::*;

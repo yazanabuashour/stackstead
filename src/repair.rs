@@ -29,7 +29,10 @@ pub fn run(cwd: &Path, name: &str) -> anyhow::Result<StacksteadManifest> {
         );
     }
     std::fs::create_dir_all(manifest.state_dir.join("logs"))?;
-    git::ensure_stackstead_excluded(&manifest.worktree)?;
+    git::ensure_generated_excluded(
+        &manifest.worktree,
+        [&runtime.config.env.file, &runtime.config.agent.context_file],
+    )?;
     lifecycle::regenerate_contract(&runtime.config, manifest)?;
     let environment = manifest.trusted_environment(&manifest.validated_environment()?);
     lifecycle::install_dependencies(&runtime.config, manifest, &environment)?;

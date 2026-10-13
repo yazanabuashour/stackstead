@@ -6,10 +6,10 @@ use crate::{
     context, envfile,
     manifest::{POINTER_VERSION, StacksteadManifest, StacksteadPointer, write_pointer},
     paths,
-    template::{TemplateContext, render_template},
+    template::TemplateContext,
 };
 
-use super::validation::validate_contract_binding;
+use super::{generated::validate_output_aliases, validation::validate_contract_binding};
 
 pub fn regenerate_contract(
     config: &StacksteadConfig,
@@ -42,12 +42,8 @@ pub(super) fn write_contract(
     context_values: &TemplateContext,
 ) -> anyhow::Result<()> {
     validate_generated_paths(config, manifest)?;
-    let generated = config
-        .env
-        .generate
-        .iter()
-        .map(|(key, template)| Ok((key.clone(), render_template(template, context_values)?)))
-        .collect::<anyhow::Result<BTreeMap<_, _>>>()?;
+    let generated = config.generated_environment(context_values)?;
+    validate_output_aliases(manifest)?;
     manifest.env_keys = generated.keys().cloned().collect();
     envfile::write_generated(manifest, &generated)?;
     context::write_agent_context(manifest, &config.agent.rules)?;
@@ -66,6 +62,22 @@ pub(super) fn write_contract(
         },
     )?;
     manifest.save_atomic()?;
+    Ok(())
+}
+
+pub(super) fn ensure_new_generated_outputs(
+    config: &StacksteadConfig,
+    worktree: &Path,
+) -> anyhow::Result<()> {
+    for relative in [&config.env.file, &config.agent.context_file] {
+        let path = paths::safe_generated_path(worktree, relative)?;
+        if path.exists() {
+            anyhow::bail!(
+                "generated output {} already exists; refusing to overwrite source",
+                path.display()
+            );
+        }
+    }
     Ok(())
 }
 

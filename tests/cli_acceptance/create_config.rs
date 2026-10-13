@@ -1,6 +1,82 @@
 use super::*;
 
 #[test]
+fn creation_resolves_forward_urls_and_digit_prefixed_port_names_but_rejects_cycles()
+-> anyhow::Result<()> {
+    let project = Project::initialized()?;
+    let mut config = load_config(&project.repo.join("stackstead.yaml"))?;
+    let mut web = config["resources"]["ports"]["expose"]
+        .as_mapping_mut()
+        .test()?
+        .remove(serde_yaml::Value::String("web".into()))
+        .test()?;
+    web["url"] = "http://127.0.0.1:{{ ports.2web }}/?peer={{ urls.postgres }}".into();
+    config["resources"]["ports"]["expose"]["2web"] = web;
+    config["resources"]["ports"]["expose"]["postgres"]["url"] =
+        "http://127.0.0.1:{{ ports.postgres }}".into();
+    config["env"]["generate"]["WEB_PORT"] = "{{ ports.2web }}".into();
+    config["health"]["checks"][0]["url"] = "{{ urls.2web }}".into();
+    project.write_config(
+        &config,
+        "declare forward URL dependency and digit-prefixed allocation",
+    )?;
+    let manifest = project.create("forward")?;
+    assert_eq!(
+        manifest.urls["2web"],
+        format!(
+            "http://127.0.0.1:{}/?peer=http://127.0.0.1:{}",
+            manifest.ports["2web"], manifest.ports["postgres"]
+        )
+    );
+    assert_eq!(
+        manifest.urls["postgres"],
+        format!("http://127.0.0.1:{}", manifest.ports["postgres"])
+    );
+    config["resources"]["ports"]["expose"]["postgres"]["url"] =
+        "http://127.0.0.1:{{ ports.postgres }}/?peer={{ urls.2web }}".into();
+    project.write_config(&config, "declare URL dependency cycle")?;
+    let rejected = stackstead(&project.repo)
+        .args(["--json", "create", "cycle"])
+        .assert()
+        .failure();
+    assert!(
+        output_text(&rejected.get_output().stderr)?
+            .contains("cyclic or unresolved URL template references")
+    );
+    assert!(rejected.get_output().stdout.is_empty());
+    assert_eq!(state_stackstead_directories(&project)?.len(), 1);
+    assert!(
+        git(&project.repo, &["branch", "--list", "cycle"])?
+            .trim()
+            .is_empty()
+    );
+    Ok(())
+}
+
+#[test]
+fn creation_rejects_multiline_env_before_source_publication() -> anyhow::Result<()> {
+    let project = Project::initialized()?;
+    let mut config = load_config(&project.repo.join("stackstead.yaml"))?;
+    config["env"]["generate"]["PRIVATE"] = "private-value\nsecond-line".into();
+    project.write_config(&config, "declare invalid env value")?;
+    let rejected = stackstead(&project.repo)
+        .args(["--json", "create", "invalid-env"])
+        .assert()
+        .failure();
+    let error = output_text(&rejected.get_output().stderr)?;
+    assert!(error.contains("env.generate.PRIVATE"));
+    assert!(!error.contains("private-value"));
+    assert!(rejected.get_output().stdout.is_empty());
+    assert!(state_stackstead_directories(&project)?.is_empty());
+    assert!(
+        git(&project.repo, &["branch", "--list", "invalid-env"])?
+            .trim()
+            .is_empty()
+    );
+    Ok(())
+}
+
+#[test]
 fn create_refuses_a_runtime_contract_missing_from_the_configured_base() -> anyhow::Result<()> {
     let project = Project::git_repo()?;
     stackstead(&project.repo).arg("init").assert().success();

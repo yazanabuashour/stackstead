@@ -148,7 +148,7 @@ fn compose_project_identity_is_docker_safe() -> anyhow::Result<()> {
 #[test]
 fn partial_destroy_retry_requires_truthful_source_cleanup_state() -> anyhow::Result<()> {
     let directory = tempfile::tempdir().test()?;
-    let external = cleanup_manifest(directory.path(), SourceOwnership::External)?;
+    let mut external = cleanup_manifest(directory.path(), SourceOwnership::External)?;
     (validate_completed_source_cleanup(&external)).test_err()?;
     write_teardown(&external, TeardownPhase::Finalize, None).test()?;
     validate_completed_source_cleanup(&external).test()?;
@@ -156,6 +156,26 @@ fn partial_destroy_retry_requires_truthful_source_cleanup_state() -> anyhow::Res
     (validate_completed_source_cleanup(&external)).test_err()?;
 
     std::fs::remove_dir(external.worktree.join(".stackstead")).test()?;
+    external.env_file = external.worktree.join("generated.env");
+    std::fs::write(&external.env_file, "owned residue\n").test()?;
+    validate_completed_source_cleanup(&external).test_err()?;
+    std::fs::remove_file(&external.env_file).test()?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let parent = external.worktree.join("inaccessible");
+        std::fs::create_dir(&parent).test()?;
+        external.env_file = parent.join("generated.env");
+        std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o000)).test()?;
+        let completed = validate_completed_source_cleanup(&external);
+        std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o700)).test()?;
+        completed.test_err()?;
+        std::os::unix::fs::symlink(parent.join("missing-target"), &external.env_file).test()?;
+        validate_completed_source_cleanup(&external).test_err()?;
+        std::fs::remove_file(&external.env_file).test()?;
+    }
+    validate_completed_source_cleanup(&external).test()?;
     let owned = cleanup_manifest(directory.path(), SourceOwnership::Stackstead)?;
     write_teardown(&owned, TeardownPhase::Finalize, None).test()?;
     validate_completed_source_cleanup(&owned).test()?;

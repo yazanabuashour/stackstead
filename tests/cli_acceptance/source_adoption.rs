@@ -68,6 +68,50 @@ fn adopted_worktree_is_bound_but_preserved_on_destroy() -> anyhow::Result<()> {
 }
 
 #[test]
+fn adoption_rejects_generated_outputs_over_existing_source() -> anyhow::Result<()> {
+    for output in ["./docker-compose.yml", "README.md"] {
+        let project = Project::initialized()?;
+        let mut config = load_config(&project.repo.join("stackstead.yaml"))?;
+        config["agent"]["context_file"] = output.into();
+        project.write_config(&config, "declare conflicting context output")?;
+        let external = project.repo.parent().test()?.join("manager-owned");
+        git(
+            &project.repo,
+            &[
+                "worktree",
+                "add",
+                "-b",
+                "manager",
+                external.to_str().test()?,
+                "main",
+            ],
+        )?;
+        let compose_before = fs::read(external.join("docker-compose.yml")).test()?;
+        let readme_before = fs::read(external.join("README.md")).test()?;
+        let rejected = stackstead(&project.repo)
+            .args(["--json", "adopt", "manager", "--worktree"])
+            .arg(&external)
+            .assert()
+            .failure();
+        let error = output_text(&rejected.get_output().stderr)?;
+        assert!(error.contains(if output == "README.md" {
+            "refusing to overwrite source"
+        } else {
+            "overlaps protected source input"
+        }));
+        assert!(rejected.get_output().stdout.is_empty());
+        assert_eq!(
+            fs::read(external.join("docker-compose.yml")).test()?,
+            compose_before
+        );
+        assert_eq!(fs::read(external.join("README.md")).test()?, readme_before);
+        assert!(!external.join(".stackstead").exists());
+        assert!(state_stackstead_directories(&project)?.is_empty());
+    }
+    Ok(())
+}
+
+#[test]
 fn adoption_rejects_a_manager_worktree_that_does_not_contain_the_pinned_base() -> anyhow::Result<()>
 {
     let project = Project::initialized()?;

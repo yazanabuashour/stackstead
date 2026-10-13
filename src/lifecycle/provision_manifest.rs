@@ -14,7 +14,7 @@ use crate::{
     paths,
     readiness::Contract,
     slug::{make_stackstead_id, new_short_id},
-    template::{TemplateContext, render_template},
+    template::TemplateContext,
 };
 
 use super::{
@@ -175,14 +175,7 @@ fn resolve_urls_and_compose(
     context: &mut TemplateContext,
     existing: &[StacksteadManifest],
 ) -> anyhow::Result<(BTreeMap<String, String>, String)> {
-    let mut urls = BTreeMap::new();
-    for (service, exposure) in &prepared.runtime.config.resources.ports.expose {
-        if let Some(template) = &exposure.url {
-            let url = render_template(template, context)?;
-            context.insert(format!("urls.{service}"), url.clone());
-            urls.insert(service.clone(), url);
-        }
-    }
+    let urls = prepared.runtime.config.resolve_urls(context)?;
     let compose_project = format!(
         "{}-{}",
         prepared.runtime.config.project.name, identity.stackstead_id

@@ -21,6 +21,7 @@ pub use apply::apply_at;
 pub use claim::{prepare_owned_source_removal, remove_runtime_claim, verify_owned_runtime};
 pub use contract::{resolve_port_target, validate_port_contract};
 pub use docker::{base_args, docker_environment};
+pub use model::OWNERSHIP_OVERRIDE;
 pub use model::{ComposeApplyOutput, ComposePlan, ComposePortTarget, ServiceObservation};
 pub use ownership::{
     ensure_service_configured, verify_ownership_override, write_ownership_override,

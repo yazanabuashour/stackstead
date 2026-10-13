@@ -3,7 +3,7 @@ use std::path::Path;
 use anyhow::Context;
 
 use crate::{
-    compose, events, git,
+    compose, events,
     lock::LockGuard,
     manifest::{ComponentStatus, SourceOwnership, StacksteadManifest},
     paths,
@@ -12,6 +12,7 @@ use crate::{
 use super::{
     access::ensure_same_environment,
     contract::run_commands,
+    generated::ensure_source_clean,
     lease::{release_port_leases_after_destroy, verify_port_leases},
     project::load_project,
     provision_source::cleanup_failed_create,
@@ -78,7 +79,7 @@ fn begin_teardown(
 ) -> anyhow::Result<TeardownPhase> {
     validate_pointer_binding(manifest)?;
     validate_source_binding(manifest)?;
-    git::ensure_worktree_clean(&manifest.worktree)?;
+    ensure_source_clean(manifest)?;
     events::append(
         &manifest.event_log,
         events::EventType::Destroy,
@@ -98,7 +99,7 @@ fn begin_teardown(
 fn remove_runtime(manifest: &StacksteadManifest) -> anyhow::Result<()> {
     validate_source_binding(manifest)?;
     validate_pointer_binding(manifest)?;
-    git::ensure_worktree_clean(&manifest.worktree)?;
+    ensure_source_clean(manifest)?;
     events::append(
         &manifest.event_log,
         events::EventType::RuntimeRemove,

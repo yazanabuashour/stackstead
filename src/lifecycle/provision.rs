@@ -79,6 +79,7 @@ fn provision_locked(prepared: &PreparedProvision, name: &str) -> anyhow::Result<
         port_lease_state_dir,
         &existing,
     )?;
+    prepared.runtime.config.generated_environment(&context)?;
     let cell_lock = initialize_manifest(&manifest)?;
     let cell_lock = persist_initial_manifest(&prepared.runtime, &mut manifest, cell_lock)?;
     let leased_ports = manifest.ports.values().copied().collect();

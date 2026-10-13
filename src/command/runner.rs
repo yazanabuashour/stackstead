@@ -1,6 +1,7 @@
 use std::{
     collections::BTreeMap,
     ffi::{OsStr, OsString},
+    fs::File,
     path::Path,
     process::{Command, Output, Stdio},
     time::Instant,
@@ -17,6 +18,24 @@ pub fn run(
     env: &BTreeMap<String, String>,
 ) -> anyhow::Result<Output> {
     run_sanitized(program, args, cwd, env, std::iter::empty::<&str>())
+}
+
+pub fn run_with_stdin_file(
+    program: &str,
+    args: &[String],
+    cwd: &Path,
+    env: &BTreeMap<String, String>,
+    input: File,
+) -> anyhow::Result<Output> {
+    run_sanitized_with_stdin(
+        program,
+        args,
+        cwd,
+        env,
+        std::iter::empty::<&str>(),
+        None,
+        Stdio::from(input),
+    )
 }
 
 pub fn run_sanitized<'a>(
@@ -40,6 +59,18 @@ pub fn run_sanitized_until<'a>(
     removed: impl IntoIterator<Item = &'a str>,
     deadline: Option<Instant>,
 ) -> anyhow::Result<Output> {
+    run_sanitized_with_stdin(program, args, cwd, env, removed, deadline, Stdio::null())
+}
+
+fn run_sanitized_with_stdin<'a>(
+    program: &str,
+    args: &[String],
+    cwd: &Path,
+    env: &BTreeMap<String, String>,
+    removed: impl IntoIterator<Item = &'a str>,
+    deadline: Option<Instant>,
+    stdin: Stdio,
+) -> anyhow::Result<Output> {
     tracing::debug!(program, arg_count = args.len(), cwd = %cwd.display(), "running external command");
     let mut command = Command::new(program);
     command.args(args).current_dir(cwd);
@@ -61,7 +92,7 @@ pub fn run_sanitized_until<'a>(
     };
     command
         .envs(env)
-        .stdin(Stdio::null())
+        .stdin(stdin)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     let output = match deadline {

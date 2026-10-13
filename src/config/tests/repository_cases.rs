@@ -12,6 +12,80 @@ fn rejects_invalid_url_templates() -> anyhow::Result<()> {
         "https://example.com/{{ ports.web }}",
     );
     (StacksteadConfig::from_yaml(&remote)).test_err()?;
+    config
+        .resources
+        .ports
+        .expose
+        .get_mut("postgres")
+        .test()?
+        .url = Some("http://127.0.0.1".into());
+    config.resources.ports.expose.get_mut("web").test()?.url =
+        Some("{{ urls.postgres }}:{{ ports.web }}".into());
+    config.validate().test()?;
+    Ok(())
+}
+
+#[test]
+fn rejects_generated_path_aliases_and_ancestor_conflicts() -> anyhow::Result<()> {
+    for (env, context) in [
+        (".stackstead/.env", "./docker-compose.yml"),
+        ("stackstead.yaml", ".stackstead/AGENT_CONTEXT.md"),
+        (".git/config", ".stackstead/AGENT_CONTEXT.md"),
+        (".stackstead/.env", ".stackstead/./.env"),
+        ("generated", "generated/context.md"),
+        (
+            ".stackstead/stackstead.json",
+            ".stackstead/AGENT_CONTEXT.md",
+        ),
+        (".stackstead/.env", ".stackstead/compose-ownership.yaml"),
+    ] {
+        let mut config = StacksteadConfig::from_yaml(SAMPLE).test()?;
+        config.env.file = env.into();
+        config.agent.context_file = context.into();
+        assert!(
+            config
+                .validate()
+                .test_err()?
+                .to_string()
+                .contains("overlaps")
+        );
+    }
+    let mut config = StacksteadConfig::from_yaml(SAMPLE).test()?;
+    config.env.file = "generated/env".into();
+    config.agent.context_file = "generated/context.md".into();
+    config.validate().test()?;
+    Ok(())
+}
+
+#[test]
+fn rejects_non_single_line_env_values_without_echoing_them() -> anyhow::Result<()> {
+    for forbidden in ['\n', '\r', '\0'] {
+        let mut config = StacksteadConfig::from_yaml(SAMPLE).test()?;
+        config
+            .env
+            .generate
+            .insert("PRIVATE".into(), format!("private-value{forbidden}suffix"));
+        let error = config.validate().test_err()?.to_string();
+        assert!(error.contains("env.generate.PRIVATE"));
+        assert!(error.contains("CR, LF, or NUL"));
+        assert!(!error.contains("private-value"));
+    }
+    let mut config = StacksteadConfig::from_yaml(SAMPLE).test()?;
+    config.env.generate.clear();
+    config
+        .env
+        .generate
+        .insert("PRIVATE".into(), "{{ paths.worktree }}".into());
+    let context = crate::template::TemplateContext::from([(
+        "paths.worktree".into(),
+        "private-value\nsuffix".into(),
+    )]);
+    let error = config
+        .generated_environment(&context)
+        .test_err()?
+        .to_string();
+    assert!(error.contains("env.generate.PRIVATE"));
+    assert!(!error.contains("private-value"));
     Ok(())
 }
 

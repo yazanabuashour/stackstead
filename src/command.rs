@@ -10,7 +10,7 @@ mod configured;
 pub use configured::ConfiguredCommand;
 
 mod runner;
-pub use runner::{run, run_sanitized, run_sanitized_until};
+pub use runner::{run, run_sanitized, run_sanitized_until, run_with_stdin_file};
 
 #[cfg(unix)]
 mod process;

@@ -129,7 +129,7 @@ fn valid_key(key: &str) -> bool {
         let mut chars = segment.chars();
         chars
             .next()
-            .is_some_and(|first| first.is_ascii_alphabetic() || first == '_')
+            .is_some_and(|first| first.is_ascii_alphanumeric() || first == '_')
             && chars.all(|character| {
                 character.is_ascii_alphanumeric() || character == '_' || character == '-'
             })
