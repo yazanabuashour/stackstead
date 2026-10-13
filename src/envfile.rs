@@ -1,5 +1,7 @@
 use std::{collections::BTreeMap, io::Write, path::Path};
 
+use anyhow::Context as _;
+
 use crate::manifest::StacksteadManifest;
 
 pub fn write_generated(
@@ -29,19 +31,32 @@ pub fn write_generated(
 }
 
 pub fn read(path: &Path) -> anyhow::Result<BTreeMap<String, String>> {
+    let contents = std::fs::read_to_string(path)
+        .with_context(|| format!("cannot read generated environment {}", path.display()))?;
     let mut values = BTreeMap::new();
-    for line in std::fs::read_to_string(path)?.lines() {
+    for (index, line) in contents.lines().enumerate() {
         let line = line.trim();
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
-        let (key, value) = line
-            .split_once('=')
-            .ok_or_else(|| anyhow::anyhow!("invalid env line for key `{line}`"))?;
-        validate_env_name(key)?;
-        values.insert(key.to_string(), decode_value(value)?);
+        let (key, value) = parse_assignment(line).with_context(|| {
+            format!(
+                "invalid generated environment {} at line {}",
+                path.display(),
+                index.saturating_add(1)
+            )
+        })?;
+        values.insert(key, value);
     }
     Ok(values)
+}
+
+fn parse_assignment(line: &str) -> anyhow::Result<(String, String)> {
+    let (key, value) = line
+        .split_once('=')
+        .ok_or_else(|| anyhow::anyhow!("expected an environment assignment"))?;
+    validate_env_name(key)?;
+    Ok((key.to_string(), decode_value(value)?))
 }
 
 pub fn rendered(path: &Path, show_secrets: bool) -> anyhow::Result<String> {
@@ -102,7 +117,7 @@ pub fn validate_env_name(name: &str) -> anyhow::Result<()> {
         .is_some_and(|character| character == '_' || character.is_ascii_alphabetic())
         || !characters.all(|character| character == '_' || character.is_ascii_alphanumeric())
     {
-        anyhow::bail!("invalid environment variable name `{name}`");
+        anyhow::bail!("invalid environment variable name");
     }
     Ok(())
 }

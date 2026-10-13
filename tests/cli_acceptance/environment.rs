@@ -44,5 +44,23 @@ fn env_outputs_redact_credentials_and_generation_is_deterministic() -> anyhow::R
         assert!(stdout.contains("SERVICE_DSN"));
         assert!(stdout.contains("[REDACTED]"));
     }
+
+    let private_value = "malformed-private-value";
+    for malformed in [
+        format!("{private_value}\n"),
+        format!("{private_value} invalid-key=value\n"),
+        format!("SECRET=\"{private_value}\n"),
+    ] {
+        fs::write(&manifest.env_file, malformed).test_context("corrupt generated env fixture")?;
+        let rejected = stackstead(&project.repo)
+            .args(["--json", "env", &manifest.stackstead_id])
+            .assert()
+            .failure();
+        let stderr = output_text(&rejected.get_output().stderr)?;
+        assert!(!stderr.contains(private_value), "malformed env data leaked");
+        assert!(stderr.contains(manifest.env_file.to_string_lossy().as_ref()));
+        assert!(stderr.contains("line 1"));
+        assert!(rejected.get_output().stdout.is_empty());
+    }
     Ok(())
 }

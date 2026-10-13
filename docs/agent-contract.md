@@ -88,7 +88,8 @@ serialized manifest or internal type.
   `SECRET`, `KEY`, `CREDENTIAL`, or `AUTH`. It also redacts URLs with nonempty
   user information and a host around `@`. `--show-secrets` is valid only with
   `--print`; in JSON mode that combination puts unredacted values in `values`,
-  while `--print` alone remains redacted.
+  while `--print` alone remains redacted. Generated-env parse failures report the
+  file and line without echoing its contents.
 - JSON `open` never launches a browser and always reports `opened: false`;
   `--print` does not change that behavior. `context --print` includes `content`,
   while `content` is `null` without `--print`.
