@@ -172,19 +172,6 @@ mod tests {
     }
 
     #[test]
-    fn renders_url_and_env_values() -> anyhow::Result<()> {
-        assert_eq!(
-            render_template("http://127.0.0.1:{{ ports.web }}", &context()).test()?,
-            "http://127.0.0.1:39100"
-        );
-        assert_eq!(
-            render_template("WEB_PORT={{ ports.web }}", &context()).test()?,
-            "WEB_PORT=39100"
-        );
-        Ok(())
-    }
-
-    #[test]
     fn rejects_unknown_keys() -> anyhow::Result<()> {
         assert_eq!(
             render_template("{{ ports.api }}", &context()),

@@ -38,8 +38,6 @@ pub use snapshot::RuntimeSnapshot;
 #[cfg(test)]
 pub use apply::apply;
 #[cfg(test)]
-pub use model::ComposePortPlan;
-#[cfg(test)]
 pub use planning::{plan, plan_file};
 #[cfg(test)]
 pub use ports::detect_fixed_host_ports;

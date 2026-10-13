@@ -83,8 +83,7 @@ impl HeldEnvironment {
 
     pub fn for_run(mut self, resolved: &StacksteadManifest) -> anyhow::Result<Self> {
         ensure_same_environment(&self.manifest, resolved)?;
-        // Downgrading unlocks briefly. Keep mutation ownership through the conversion
-        // so lifecycle mutations cannot enter the gap between exclusive and shared.
+        // Keep mutation access while downgrading: the run lease briefly unlocks.
         self.run_lease = match self.run_lease {
             RunLease::Exclusive(lease) => RunLease::Shared(lease.downgrade_to_shared()?),
             RunLease::Shared(lease) => RunLease::Shared(lease),

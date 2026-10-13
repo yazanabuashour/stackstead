@@ -30,7 +30,8 @@ fn allocates_first_and_second_slots_deterministically() -> anyhow::Result<()> {
 fn reuses_a_hole_at_the_first_slot() -> anyhow::Result<()> {
     let used = BTreeSet::from([39050, 39051, 39052, 39053]);
     let allocation = allocate_ports_with_probe(39000, 50, &services(), &used, available).test()?;
-    assert_eq!(allocation.slot, 0);
+    assert_eq!(allocation.ports["web"], 39000);
+    assert!(allocation.ports.values().all(|port| !used.contains(port)));
     Ok(())
 }
 
@@ -40,7 +41,8 @@ fn skips_a_slot_with_an_occupied_os_port() -> anyhow::Result<()> {
         Ok(port != 39002)
     })
     .test()?;
-    assert_eq!(allocation.slot, 1);
+    assert_eq!(allocation.ports["web"], 39050);
+    assert!(!allocation.ports.values().any(|port| *port == 39002));
     Ok(())
 }
 

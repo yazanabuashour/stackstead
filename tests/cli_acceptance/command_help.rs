@@ -12,7 +12,11 @@ fn help_exposes_the_complete_command_surface() -> anyhow::Result<()> {
         "init", "compose", "create", "adopt", "up", "run", "exec", "launch", "ps", "current",
         "inspect", "env", "logs", "context", "open", "db", "stop", "destroy", "doctor", "repair",
     ] {
-        assert!(help.contains(command), "top-level help omits {command:?}");
+        assert!(
+            help.lines()
+                .any(|line| line.split_whitespace().next() == Some(command)),
+            "top-level help omits {command:?}"
+        );
     }
 
     for args in [

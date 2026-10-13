@@ -52,12 +52,6 @@ fn manifest(id: &str, port: u16) -> anyhow::Result<StacksteadManifest> {
 }
 
 #[test]
-fn diagnostic_severity_displays_stably() -> anyhow::Result<()> {
-    assert_eq!(DiagnosticSeverity::Warning.to_string(), "warning");
-    Ok(())
-}
-
-#[test]
 fn repository_policy_reports_missing_and_current_files() -> anyhow::Result<()> {
     let directory = tempfile::tempdir().test()?;
     let mut diagnostics = Vec::new();

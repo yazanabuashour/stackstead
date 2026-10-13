@@ -17,17 +17,12 @@ fn rejects_invalid_url_templates() -> anyhow::Result<()> {
 
 #[test]
 fn checks_compose_files_against_repo() -> anyhow::Result<()> {
-    let suffix = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .test()?
-        .as_nanos();
-    let root = std::env::temp_dir().join(format!("stackstead-config-{suffix}"));
-    fs::create_dir_all(&root).test()?;
+    let directory = tempfile::tempdir().test()?;
+    let root = directory.path();
     let config = StacksteadConfig::from_yaml(SAMPLE).test()?;
-    (config.validate_for_repo(&root)).test_err()?;
+    (config.validate_for_repo(root)).test_err()?;
     fs::write(root.join("docker-compose.yml"), "services: {}").test()?;
-    (config.validate_for_repo(&root)).test()?;
-    fs::remove_dir_all(root).test()?;
+    (config.validate_for_repo(root)).test()?;
     Ok(())
 }
 

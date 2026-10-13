@@ -249,22 +249,29 @@ mod tests {
 
     #[test]
     fn passive_health_never_executes_command_checks() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir().test()?;
+        let marker = directory.path().join("command-ran");
         let config = HealthConfig {
             checks: vec![HealthCheckConfig {
                 name: "worker".into(),
                 url: None,
                 expect_status: 200,
                 command: CommandConfig {
-                    command: "stackstead-command-that-must-not-run".into(),
-                    shell: false,
+                    command: "printf executed > \"$PROBE_MARKER\"".into(),
+                    shell: true,
                 },
             }],
             ..HealthConfig::default()
         };
         assert_eq!(
-            healthy_passive(&config, &manifest(1), &BTreeMap::new()),
+            healthy_passive(
+                &config,
+                &manifest(1),
+                &BTreeMap::from([("PROBE_MARKER".into(), marker.to_string_lossy().into_owned())]),
+            ),
             None
         );
+        assert!(!marker.exists());
         Ok(())
     }
 

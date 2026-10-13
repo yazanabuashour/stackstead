@@ -4,11 +4,19 @@ use super::*;
 fn compose_arguments_use_manifest_contract() -> anyhow::Result<()> {
     let manifest = manifest()?;
     let args = base_args(&manifest);
-    assert_eq!(args[0], "compose");
-    assert!(args.contains(&"demo-a-b123".to_string()));
-    assert!(args.contains(&"/state/demo/a-b123/source/compose.yml".to_string()));
-    assert!(
-        args.contains(&"/state/demo/a-b123/source/.stackstead/compose-ownership.yaml".to_string())
+    assert_eq!(
+        args,
+        [
+            "compose",
+            "-p",
+            "demo-a-b123",
+            "--env-file",
+            "/state/demo/a-b123/source/.stackstead/.env",
+            "-f",
+            "/state/demo/a-b123/source/compose.yml",
+            "-f",
+            "/state/demo/a-b123/source/.stackstead/compose-ownership.yaml",
+        ]
     );
     Ok(())
 }
