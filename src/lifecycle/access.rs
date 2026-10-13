@@ -122,7 +122,7 @@ impl HeldEnvironment {
     }
 }
 
-fn ensure_same_environment(
+pub(super) fn ensure_same_environment(
     held: &StacksteadManifest,
     resolved: &StacksteadManifest,
 ) -> anyhow::Result<()> {

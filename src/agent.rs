@@ -139,6 +139,7 @@ fn run_with_environment(
         None => HeldEnvironment::shared(resolved, "stackstead agent run")?,
     };
     validate_contract(&runtime, held.manifest())?;
+    lifecycle::validate_pointer_binding(held.manifest())?;
     lifecycle::verify_port_leases(held.manifest())?;
     let (resolved, run_lease) = held.into_run()?;
     let generated = resolved.validated_environment().map_err(|error| {

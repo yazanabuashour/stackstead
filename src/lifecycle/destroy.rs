@@ -10,6 +10,7 @@ use crate::{
 };
 
 use super::{
+    access::ensure_same_environment,
     contract::run_commands,
     lease::{release_port_leases_after_destroy, verify_port_leases},
     project::load_project,
@@ -30,7 +31,9 @@ pub fn destroy(cwd: &Path, name: &str) -> anyhow::Result<StacksteadManifest> {
         &manifest.state_dir.join("run.lock"),
         "active stackstead agent",
     )?;
-    manifest = StacksteadManifest::read(&manifest.manifest_path())?;
+    let latest = StacksteadManifest::read(&manifest.manifest_path())?;
+    ensure_same_environment(&manifest, &latest)?;
+    manifest = latest;
     validate_manifest_binding(&runtime, &manifest)?;
     if pending_create(&manifest) && !manifest.pointer_file.exists() {
         release_port_leases_after_destroy(&manifest)?;
