@@ -101,16 +101,40 @@ impl ReadinessFixture {
             .assert()
             .success();
         let list: Value = serde_json::from_slice(&list.get_output().stdout).test()?;
-        assert_eq!(inspect["kind"], "StacksteadInspection");
-        assert_eq!(inspect["version"], "4");
-        assert_eq!(list["kind"], "StacksteadList");
-        assert_eq!(list["version"], "2");
+        assert_eq!(
+            inspect["kind"], "StacksteadInspection",
+            "inspect transport envelope: {inspect}"
+        );
+        assert_eq!(
+            inspect["version"], "4",
+            "inspect transport schema changed: {inspect}"
+        );
+        assert_eq!(
+            list["kind"], "StacksteadList",
+            "ps transport envelope: {list}"
+        );
+        assert_eq!(list["version"], "2", "ps transport schema changed: {list}");
         let item = &list["stacksteads"][0];
-        assert_eq!(item["stackstead_id"], self.manifest.stackstead_id);
-        assert_eq!(item["runtime"], inspect["live"]["runtime"]["activity"]);
-        assert_eq!(item["readiness"], inspect["live"]["readiness"]);
-        assert_eq!(item["services"], inspect["live"]["services"]);
-        assert!(item["issues"].is_array());
+        assert_eq!(
+            item["stackstead_id"], self.manifest.stackstead_id,
+            "ps must identify the fixture environment: {list}"
+        );
+        assert_eq!(
+            item["runtime"], inspect["live"]["runtime"]["activity"],
+            "ps and inspect disagree on runtime activity: {item}"
+        );
+        assert_eq!(
+            item["readiness"], inspect["live"]["readiness"],
+            "ps and inspect disagree on readiness evidence: {item}"
+        );
+        assert_eq!(
+            item["services"], inspect["live"]["services"],
+            "ps and inspect disagree on container evidence: {item}"
+        );
+        assert!(
+            item["issues"].is_array(),
+            "ps issues must remain a collection even without failures: {item}"
+        );
         self.docker.assert_supported()?;
         Ok(inspect)
     }

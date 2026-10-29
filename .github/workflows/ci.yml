@@ -18,6 +18,23 @@ concurrency:
   cancel-in-progress: ${{ inputs.revision == '' }}
 
 jobs:
+  msrv:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.revision || github.sha }}
+          persist-credentials: false
+      - name: Resolve minimum supported Rust version
+        id: msrv
+        run: |
+          version="$(scripts/check-rust-toolchain.sh --print-msrv)"
+          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: ${{ steps.msrv.outputs.version }}
+      - run: cargo check --locked --all-targets --all-features
+
   rust:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
