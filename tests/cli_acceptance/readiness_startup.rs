@@ -47,11 +47,20 @@ fn assert_startup_refuses_unsatisfied_requirements(
         "{failed:?}"
     );
     let saved = StacksteadManifest::read(&fixture.manifest.manifest_path())?;
-    assert_eq!(saved.status.health, ComponentStatus::Unknown);
-    assert!(saved.readiness["resolved"].is_null());
+    assert_eq!(
+        saved.status.health,
+        ComponentStatus::Unknown,
+        "failed runtime requirements must not fabricate application health"
+    );
+    assert!(
+        saved.readiness["resolved"].is_null(),
+        "failed startup retained readiness expectations: {:?}",
+        saved.readiness
+    );
     assert_eq!(
         fixture.readings()?["live"]["readiness"]["status"],
-        "unknown"
+        "unknown",
+        "failed startup must invalidate the previous ready reading"
     );
     let mut config = load_config(&fixture.project.repo.join("stackstead.yaml"))?;
     // Reject model verification after a successful application check. Waiting for
@@ -77,8 +86,16 @@ fn assert_startup_refuses_unsatisfied_requirements(
         "{rejected:?}"
     );
     let failed = StacksteadManifest::read(&fixture.manifest.manifest_path())?;
-    assert_eq!(failed.status.health, ComponentStatus::Ready);
-    assert!(failed.readiness["resolved"].is_null());
+    assert_eq!(
+        failed.status.health,
+        ComponentStatus::Ready,
+        "Compose verification failure must preserve the successful application probe"
+    );
+    assert!(
+        failed.readiness["resolved"].is_null(),
+        "unverified Compose inputs must not retain readiness expectations: {:?}",
+        failed.readiness
+    );
     fixture.docker.assert_supported()
 }
 

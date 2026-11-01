@@ -11,7 +11,9 @@ fn git(repository: &Path, arguments: &[&str]) -> anyhow::Result<()> {
             .current_dir(repository)
             .status()
             .test()?
-            .success()
+            .success(),
+        "Git fixture setup failed in {}: git {arguments:?}",
+        repository.display()
     );
     Ok(())
 }
