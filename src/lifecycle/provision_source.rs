@@ -31,10 +31,6 @@ pub(super) fn create_source_and_contract(
         );
     }
     ensure_new_generated_outputs(config, &manifest.worktree)?;
-    git::ensure_generated_excluded(
-        &manifest.worktree,
-        [&config.env.file, &config.agent.context_file],
-    )?;
     if let Err(error) = super::generated::validate_output_aliases(manifest) {
         return match paths::remove_generated_dir(&manifest.worktree, Path::new(".stackstead")) {
             Ok(()) => Err(error),
@@ -43,6 +39,10 @@ pub(super) fn create_source_and_contract(
             )),
         };
     }
+    git::ensure_generated_excluded(
+        &manifest.worktree,
+        [&config.env.file, &config.agent.context_file],
+    )?;
     std::fs::create_dir_all(&generated_dir)?;
     let result = write_source_contract(config, manifest, template_context);
     if let Err(error) = result {
