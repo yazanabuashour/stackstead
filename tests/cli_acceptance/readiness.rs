@@ -64,34 +64,100 @@ fn ps_and_inspect_share_required_instance_evidence_without_inferring_jobs() -> a
 
 fn assert_shared_ready_reading(fixture: &ReadinessFixture) -> anyhow::Result<()> {
     let ready = fixture.readings()?;
-    assert_eq!(ready["live"]["readiness"]["status"], "ready");
-    assert_eq!(ready["live"]["runtime"]["activity"], "active");
-    assert_eq!(ready["live"]["runtime"]["running"], true);
+    assert_eq!(
+        ready["live"]["readiness"]["status"], "ready",
+        "declared workers and job are satisfied: {ready}"
+    );
+    assert_eq!(
+        ready["live"]["runtime"]["activity"], "active",
+        "running workers must count as runtime activity: {ready}"
+    );
+    assert_eq!(
+        ready["live"]["runtime"]["running"], true,
+        "running workers must keep the runtime running: {ready}"
+    );
     let required = ready["live"]["readiness"]["required"].as_array().test()?;
     let worker = required
         .iter()
         .find(|item| item["service"] == "worker")
         .test()?;
-    assert_eq!(worker["role"], "long-running");
-    assert_eq!(worker["expected_instances"], 2);
-    assert_eq!(worker["observed_containers"], 2);
-    assert_eq!(worker["satisfied_instances"], 2);
-    assert_eq!(worker["status"], "ready");
-    assert_eq!(worker["issues"], serde_json::json!([]));
-    let services = ready["live"]["services"].as_array().test()?;
+    assert_eq!(
+        worker["role"], "long-running",
+        "worker intent must come from the declared requirement: {worker}"
+    );
+    assert_eq!(
+        worker["expected_instances"], 2,
+        "worker scale must come from the resolved model: {worker}"
+    );
+    assert_eq!(
+        worker["observed_containers"], 2,
+        "both worker replicas must contribute evidence: {worker}"
+    );
+    assert_eq!(
+        worker["satisfied_instances"], 2,
+        "both running replicas must satisfy worker intent: {worker}"
+    );
+    assert_eq!(
+        worker["status"], "ready",
+        "all declared worker replicas are satisfied: {worker}"
+    );
+    assert_eq!(
+        worker["issues"],
+        serde_json::json!([]),
+        "satisfied workers must not report readiness issues: {worker}"
+    );
+    assert_ready_services(ready["live"]["services"].as_array().test()?)?;
+    let human = fixture
+        .docker
+        .command(&fixture.manifest)
+        .args(["inspect", &fixture.manifest.stackstead_id])
+        .assert()
+        .success();
+    let human = output_text(&human.get_output().stdout)?;
+    assert!(
+        human.contains("exited (0)"),
+        "inspect must show the successful job exit: {human}"
+    );
+    assert!(
+        human.contains("exited (7)"),
+        "inspect must show the optional failure: {human}"
+    );
+    assert!(
+        !human.contains("completed (0)"),
+        "inspect must not infer job completion from exit alone: {human}"
+    );
+    fixture.docker.assert_supported()
+}
+
+fn assert_ready_services(services: &[Value]) -> anyhow::Result<()> {
     let job = services
         .iter()
         .find(|item| item["service"] == "migrate")
         .test()?;
-    assert_eq!(job["status"], "exited (0)");
-    assert_eq!(job["state"], "exited");
-    assert_eq!(job["exit_code"], 0);
+    assert_eq!(
+        job["status"], "exited (0)",
+        "service evidence must report the job exit without inferring intent: {job}"
+    );
+    assert_eq!(
+        job["state"], "exited",
+        "completed job must retain its observed container state: {job}"
+    );
+    assert_eq!(
+        job["exit_code"], 0,
+        "successful job exit must survive inspection: {job}"
+    );
     let optional = services
         .iter()
         .find(|item| item["service"] == "optional")
         .test()?;
-    assert_eq!(optional["exit_code"], 7);
-    assert_eq!(optional["status"], "exited (7)");
+    assert_eq!(
+        optional["exit_code"], 7,
+        "optional failure must remain visible without blocking readiness: {optional}"
+    );
+    assert_eq!(
+        optional["status"], "exited (7)",
+        "optional service presentation must retain failure evidence: {optional}"
+    );
     let workers = services
         .iter()
         .filter(|item| item["service"] == "worker")
@@ -101,26 +167,32 @@ fn assert_shared_ready_reading(fixture: &ReadinessFixture) -> anyhow::Result<()>
             .iter()
             .map(|item| item["container_number"].as_u64().test())
             .collect::<anyhow::Result<Vec<_>>>()?,
-        vec![2, 3]
+        vec![2, 3],
+        "worker ordinals must preserve observed Compose numbering: {workers:?}"
     );
     for worker in workers {
-        assert_eq!(worker["config_hash"], HASH);
-        assert_eq!(worker["oneoff"], false);
-        assert_eq!(worker["healthcheck_enabled"], false);
-        assert!(worker["health"].is_null());
-        assert!(worker["id"].as_str().is_some_and(|id| id.len() == 64));
+        assert_eq!(
+            worker["config_hash"], HASH,
+            "worker evidence must retain Compose configuration identity: {worker}"
+        );
+        assert_eq!(
+            worker["oneoff"], false,
+            "required worker evidence must distinguish regular containers: {worker}"
+        );
+        assert_eq!(
+            worker["healthcheck_enabled"], false,
+            "fixture workers have no image healthcheck: {worker}"
+        );
+        assert!(
+            worker["health"].is_null(),
+            "workers without healthchecks must not fabricate health: {worker}"
+        );
+        assert!(
+            worker["id"].as_str().is_some_and(|id| id.len() == 64),
+            "inspection must retain full container identity: {worker}"
+        );
     }
-    let human = fixture
-        .docker
-        .command(&fixture.manifest)
-        .args(["inspect", &fixture.manifest.stackstead_id])
-        .assert()
-        .success();
-    let human = output_text(&human.get_output().stdout)?;
-    assert!(human.contains("exited (0)"));
-    assert!(human.contains("exited (7)"));
-    assert!(!human.contains("completed (0)"));
-    fixture.docker.assert_supported()
+    Ok(())
 }
 
 fn changed_rows(fixture: &ReadinessFixture, case: &str) -> anyhow::Result<Vec<Value>> {
