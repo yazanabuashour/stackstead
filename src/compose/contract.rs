@@ -86,7 +86,9 @@ pub fn validate_port_contract(
         }
         debug_assert_eq!(
             port_template_name(&generated_environment[variable]).as_deref(),
-            Some(name.as_str())
+            Some(name.as_str()),
+            "validated port `{name}` lost its env.generate.{variable} mapping in {}",
+            file.display()
         );
     }
     Ok(())

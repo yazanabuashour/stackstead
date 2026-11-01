@@ -223,10 +223,16 @@ pub(super) fn assert_generated_agent_contract(manifest: &StacksteadManifest) -> 
         !context.contains("postgres://app:app"),
         "generated agent files broke their contract"
     );
-    assert!(context.contains("Stackstead preserves externally owned worktrees"));
-    assert!(context.contains(
-        "External networks, external volumes, and shared host paths can still share state"
-    ));
+    assert!(
+        context.contains("Stackstead preserves externally owned worktrees"),
+        "agent context must explain teardown ownership"
+    );
+    assert!(
+        context.contains(
+            "External networks, external volumes, and shared host paths can still share state"
+        ),
+        "agent context must warn about isolation boundaries"
+    );
     Ok(())
 }
 
