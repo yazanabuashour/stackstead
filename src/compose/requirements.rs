@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, fmt::Write as _};
 
 use serde_json::Value;
 use sha2::{Digest as _, Sha256};
@@ -202,7 +202,11 @@ fn model_hash(mut model: Value) -> anyhow::Result<String> {
     model.sort_all_objects();
     let canonical = serde_json::to_vec(&model)
         .map_err(|_error| anyhow::anyhow!("cannot canonicalize normalized Compose model"))?;
-    Ok(format!("{:x}", Sha256::digest(canonical)))
+    let mut hash = String::new();
+    for byte in Sha256::digest(canonical) {
+        write!(hash, "{byte:02x}")?;
+    }
+    Ok(hash)
 }
 
 #[cfg(test)]
